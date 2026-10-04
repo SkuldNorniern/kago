@@ -2,6 +2,7 @@
 //! `HKCU\Environment`, Start Menu `.lnk`, uninstall entry in `HKCU`.
 
 mod environment;
+pub mod folder;
 mod registry;
 pub mod resource;
 mod shortcut;

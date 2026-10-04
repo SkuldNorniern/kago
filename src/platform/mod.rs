@@ -117,6 +117,21 @@ pub fn host() -> Result<Box<dyn Platform>, String> {
     }
 }
 
+/// the system's folder picker, over the window `owner` when given.
+/// `None` when cancelled or when this OS has none yet.
+#[must_use]
+pub fn pick_folder(owner: Option<isize>, title: &str, start: Option<&Path>) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        windows::folder::pick(owner, title, start)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (owner, title, start);
+        None
+    }
+}
+
 /// puts `icon` into the executable at `exe` as its main icon.
 ///
 /// # Errors
