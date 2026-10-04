@@ -74,6 +74,7 @@ pub struct Resolved {
 pub struct ResolvedPath {
     pub directory: SemanticPath,
     pub scope: ResourceScope,
+    pub component: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,6 +241,7 @@ impl Resolver<'_> {
                 out.push(ResolvedPath {
                     directory,
                     scope: p.scope,
+                    component: p.component.clone(),
                 });
             }
         }

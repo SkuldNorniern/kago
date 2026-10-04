@@ -28,7 +28,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
             "a {target} setup needs a kago built for {target} as its runtime; build on that machine for now"
         ));
     }
-    let Some((loaded, plan)) = plan::build(args, target)? else {
+    let Some((loaded, plan)) = plan::build(args, target, true)? else {
         return Ok(ExitCode::FAILURE);
     };
     let out_dir = PathBuf::from(args.value("--out").unwrap_or("dist"));

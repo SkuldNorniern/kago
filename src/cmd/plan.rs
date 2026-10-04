@@ -17,7 +17,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         [one] => *one,
         _ => return Err("`plan` takes one `--target`".to_owned()),
     };
-    let Some((_, plan)) = build(args, target)? else {
+    let Some((_, plan)) = build(args, target, false)? else {
         return Ok(ExitCode::FAILURE);
     };
     print!("{plan}");
@@ -26,9 +26,14 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
 }
 
 /// manifest argument, `--scope` and `--components` to the manifest, its
-/// directory and an install plan for `target`. `None` after diagnostics were
-/// printed.
-pub fn build(args: &Args, target: Target) -> Result<Option<(Loaded, InstallPlan)>, String> {
+/// directory and an install plan for `target`. without `--components`,
+/// `offer` takes every component, so a setup can let the person choose;
+/// otherwise the defaults. `None` after diagnostics were printed.
+pub fn build(
+    args: &Args,
+    target: Target,
+    offer: bool,
+) -> Result<Option<(Loaded, InstallPlan)>, String> {
     args.at_most_one()?;
     let path = manifest_path(args.first());
     let Some(manifest) = load(&path) else {
@@ -42,6 +47,9 @@ pub fn build(args: &Args, target: Target) -> Result<Option<(Loaded, InstallPlan)
                 return Err(format!("unknown component `{unknown}`"));
             }
             Selection::with(&manifest, picked)
+        }
+        None if offer => {
+            Selection::with(&manifest, manifest.components.iter().map(|c| c.id.as_str()))
         }
         None => Selection::defaults(&manifest),
     };

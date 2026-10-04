@@ -27,7 +27,7 @@ pub fn run_embedded() -> Option<ExitCode> {
         #[cfg(feature = "gui")]
         return Some(window(exe, embedded));
     }
-    Some(match install(&exe, embedded, &mut |_, _| {}) {
+    Some(match install(&exe, embedded, None, &mut |_, _| {}) {
         Ok(done) => {
             println!("installed {}", done.name);
             ExitCode::SUCCESS
@@ -87,7 +87,7 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             };
             reporter.report(fraction, step);
         };
-        install(&exe, embedded, &mut report).map(|done| Installed {
+        install(&exe, embedded, None, &mut report).map(|done| Installed {
             launch: done.launch,
         })
     };
@@ -115,12 +115,14 @@ enum Stage<'a> {
     Apply(&'a Operation),
 }
 
-/// installs the embedded package. `progress` hears each step with how far
+/// installs the embedded package with the `chosen` optional components,
+/// or the defaults when `None`. `progress` hears each step with how far
 /// along the whole install is, 0 to 1: unpacking each file, then each
 /// operation.
 fn install(
     exe: &Path,
     embedded: Embedded,
+    chosen: Option<&[String]>,
     progress: &mut dyn FnMut(f32, Stage<'_>),
 ) -> Result<Done, String> {
     let mut container = Container::open(exe, embedded.offset).map_err(|e| e.to_string())?;
@@ -139,6 +141,10 @@ fn install(
             })
             .map_err(|e| format!("cannot unpack: {e}"))?;
         let files = container.header.payload.len();
+        let plan = match chosen {
+            Some(chosen) => plan.select(chosen.iter().map(String::as_str)),
+            None => plan.with_defaults(),
+        };
         let runtime = staging.join(format!("kago{}", std::env::consts::EXE_SUFFIX));
         setup::extract_stub(exe, embedded, &runtime).map_err(|e| e.to_string())?;
         let receipt = transaction::install_observed(
