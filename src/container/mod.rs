@@ -5,8 +5,9 @@
 //! ```
 //!
 //! the header holds the plan with each file source replaced by its payload
-//! index, and the offset, size and sha-256 of every payload entry. nothing
-//! in it is an absolute install path; roots are resolved at install time.
+//! index, and the offset, packed size, size and sha-256 of every payload
+//! entry. each entry is one zstd frame. nothing in it is an absolute install
+//! path; roots are resolved at install time.
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -30,9 +31,15 @@ pub struct Header {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub offset: u64,
+    /// bytes in the container, zstd compressed.
+    pub packed: u64,
+    /// bytes once unpacked.
     pub size: u64,
     pub sha256: Digest,
 }
+
+/// zstd level for payload. high, since builds run once and installs many times.
+const LEVEL: i32 = 19;
 
 /// writes `plan` and its payload. returns the bytes written.
 ///
@@ -41,8 +48,8 @@ pub struct Entry {
 /// when a payload file cannot be read or `out` cannot be written.
 pub fn write(plan: &InstallPlan, out: &mut impl Write) -> io::Result<u64> {
     let mut plan = plan.clone();
+    let mut packed = Vec::new();
     let mut payload = Vec::new();
-    let mut sources = Vec::new();
     let mut offset = 0;
     for op in &mut plan.operations {
         if let Operation::InstallFile {
@@ -52,16 +59,17 @@ pub fn write(plan: &InstallPlan, out: &mut impl Write) -> io::Result<u64> {
             ..
         } = op
         {
-            sources.push(std::mem::replace(
-                source,
-                PathBuf::from(payload.len().to_string()),
-            ));
+            let index = PathBuf::from(payload.len().to_string());
+            let bytes = zstd::encode_all(fs::File::open(&*source)?, LEVEL)?;
+            *source = index;
             payload.push(Entry {
                 offset,
+                packed: bytes.len() as u64,
                 size: *size,
                 sha256: *sha256,
             });
-            offset += *size;
+            offset += bytes.len() as u64;
+            packed.push(bytes);
         }
     }
     let header = serde_json::to_vec(&Header {
@@ -73,11 +81,10 @@ pub fn write(plan: &InstallPlan, out: &mut impl Write) -> io::Result<u64> {
     out.write_all(MAGIC)?;
     out.write_all(&(header.len() as u64).to_le_bytes())?;
     out.write_all(&header)?;
-    let mut written = 16 + header.len() as u64;
-    for source in sources {
-        written += io::copy(&mut fs::File::open(&source)?, out)?;
+    for bytes in &packed {
+        out.write_all(bytes)?;
     }
-    Ok(written)
+    Ok(16 + header.len() as u64 + offset)
 }
 
 /// an opened container inside some file.
@@ -148,8 +155,9 @@ impl Container {
             let out = dir.join(index.to_string());
             self.file
                 .seek(SeekFrom::Start(self.payload_start + entry.offset))?;
-            let mut part = (&mut self.file).take(entry.size);
-            let copied = io::copy(&mut part, &mut fs::File::create(&out)?)?;
+            let part = (&mut self.file).take(entry.packed);
+            let mut unpacked = zstd::Decoder::new(part)?;
+            let copied = io::copy(&mut unpacked, &mut fs::File::create(&out)?)?;
             let (size, digest) = hash(&out)?;
             if copied != entry.size || size != entry.size || digest != entry.sha256 {
                 return Err(io::Error::new(
