@@ -6,26 +6,17 @@ version = 4
 name = "kago"
 version = "0.1.0"
 dependencies = [
- "kago-core",
+ "kago-install",
  "kago-manifest",
- "kago-plan",
 ]
 
 [[package]]
-name = "kago-core"
+name = "kago-install"
 version = "0.1.0"
+dependencies = [
+ "kago-manifest",
+]
 
 [[package]]
 name = "kago-manifest"
 version = "0.1.0"
-dependencies = [
- "kago-core",
-]
-
-[[package]]
-name = "kago-plan"
-version = "0.1.0"
-dependencies = [
- "kago-core",
- "kago-manifest",
-]
