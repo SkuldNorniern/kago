@@ -59,7 +59,9 @@ pub fn verify(receipt: &Receipt) -> Verified {
                     out.missing.push(path.display().to_string());
                 }
             }
-            Resource::PathEntry { .. } | Resource::Registration { .. } => out.unchecked += 1,
+            Resource::PathEntry { .. }
+            | Resource::SteamVrDriver { .. }
+            | Resource::Registration { .. } => out.unchecked += 1,
         }
     }
     out

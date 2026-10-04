@@ -207,7 +207,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
     let rank = |r: &Resource| match r {
         Resource::Registration { .. } => 0,
         Resource::Shortcut { .. } => 1,
-        Resource::PathEntry { .. } => 2,
+        Resource::PathEntry { .. } | Resource::SteamVrDriver { .. } => 2,
         Resource::File { .. } => 3,
         Resource::Directory { path } => 4 + usize::MAX / 2 - path.segments().count(),
     };
@@ -219,6 +219,9 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::Shortcut { path } => remove_file(path),
             Resource::PathEntry { entry, scope } => {
                 platform.remove_path_entry(*scope, Path::new(entry))
+            }
+            Resource::SteamVrDriver { directory } => {
+                platform.remove_steamvr_driver(Path::new(directory))
             }
             Resource::File {
                 path,

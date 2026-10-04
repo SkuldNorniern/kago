@@ -41,6 +41,7 @@ pub enum Line {
     Folder,
     File,
     Path,
+    SteamVr,
     Shortcut,
     Register,
     Service,
@@ -148,6 +149,10 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Folder => ["Create folder: {item}", "폴더 만들기: {item}"],
         Line::File => ["Install: {item}", "설치: {item}"],
         Line::Path => ["Add to PATH: {item}", "PATH에 추가: {item}"],
+        Line::SteamVr => [
+            "Register SteamVR driver: {item}",
+            "SteamVR 드라이버 등록: {item}",
+        ],
         Line::Shortcut => ["Create shortcut: {item}", "바로 가기 만들기: {item}"],
         Line::Register => ["Register {item}", "{item} 등록"],
         Line::Service => ["Install service: {item}", "서비스 설치: {item}"],

@@ -75,6 +75,9 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                     Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
                     Operation::InstallFile { target, .. } => Step::File(target.to_string()),
                     Operation::AddPathEntry { directory, .. } => Step::Path(directory.to_string()),
+                    Operation::RegisterSteamVrDriver { directory } => {
+                        Step::SteamVr(directory.to_string())
+                    }
                     Operation::CreateShortcut { name, .. } => Step::Shortcut(name.clone()),
                     Operation::RegisterApplication { display_name, .. } => {
                         Step::Register(display_name.clone())

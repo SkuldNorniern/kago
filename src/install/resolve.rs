@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::manifest::{
     Context, File, Hook, Manifest, PathKind, PathSource, ResourceScope, Selector, SemanticPath,
-    Service, Shortcut,
+    Service, Shortcut, SteamVrDriver,
 };
 
 /// components picked for one install. items without a component are
@@ -63,6 +63,7 @@ impl Selection {
 pub struct Resolved {
     pub files: Vec<File>,
     pub paths: Vec<ResolvedPath>,
+    pub steamvr_drivers: Vec<SteamVrDriver>,
     pub shortcuts: Vec<ResolvedShortcut>,
     pub services: Vec<ResolvedService>,
     pub hooks: Vec<ResolvedHook>,
@@ -121,6 +122,12 @@ pub fn resolve(
     r.check_variants();
     r.check_conflicts(&files);
     let paths = r.paths(manifest);
+    let steamvr_drivers = manifest
+        .steamvr_drivers
+        .iter()
+        .filter(|d| r.active(d.component.as_deref(), &d.when))
+        .cloned()
+        .collect();
     let shortcuts = r.shortcuts(manifest);
     let services = r.services(manifest);
     let hooks = r.hooks(manifest);
@@ -131,6 +138,7 @@ pub fn resolve(
     let resolved = Resolved {
         files,
         paths,
+        steamvr_drivers,
         shortcuts,
         services,
         hooks,

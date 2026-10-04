@@ -120,6 +120,9 @@ fn same_place(old: &Resource, new: &Receipt) -> bool {
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. }) => a == b,
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
+        (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
+            a == b
+        }
         _ => false,
     })
 }
@@ -239,6 +242,7 @@ impl Run<'_> {
                 }
                 Ok(())
             }
+            Operation::RegisterSteamVrDriver { directory } => self.steamvr_driver(directory),
             Operation::CreateShortcut {
                 name,
                 target,
@@ -276,6 +280,32 @@ impl Run<'_> {
     /// preserve-if-modified file stays when it differs from what the older
     /// version installed (or nothing recorded it). returns the hash to record,
     /// the older one, so uninstall still sees the change.
+    fn steamvr_driver(&mut self, directory: &SemanticPath) -> Result<(), Error> {
+        let dir = self.resolve(directory)?;
+        let entry = dir.display().to_string();
+        let owned_before = self.previous.is_some_and(|p| {
+            p.resources
+                .iter()
+                .any(|r| matches!(r, Resource::SteamVrDriver { directory } if *directory == entry))
+        });
+        if self
+            .platform
+            .add_steamvr_driver(&dir)
+            .map_err(Error::Other)?
+        {
+            self.step(Undo::RemoveSteamVrDriver {
+                directory: dir.clone(),
+            })?;
+            self.resources
+                .push(Resource::SteamVrDriver { directory: entry });
+        } else if owned_before {
+            // an upgrade: still ours, though this run did not add it.
+            self.resources
+                .push(Resource::SteamVrDriver { directory: entry });
+        }
+        Ok(())
+    }
+
     fn keep_user_file(
         &self,
         target: &SemanticPath,

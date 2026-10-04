@@ -32,6 +32,9 @@ pub enum Undo {
         key: String,
         scope: Scope,
     },
+    RemoveSteamVrDriver {
+        directory: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

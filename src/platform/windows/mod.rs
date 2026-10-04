@@ -25,6 +25,11 @@ fn env_dir(name: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("%{name}% is not set"))
 }
 
+/// SteamVR's per-user path file, read by every OpenVR runtime and app.
+fn openvr_paths() -> Result<PathBuf, String> {
+    Ok(env_dir("LOCALAPPDATA")?.join(r"openvr\openvrpaths.vrpath"))
+}
+
 fn machine_unsupported() -> String {
     "machine scope needs the elevation helper, which is not done yet; use `--scope user`".to_owned()
 }
@@ -74,6 +79,14 @@ impl Platform for Windows {
 
     fn remove_path_entry(&self, scope: Scope, entry: &Path) -> Result<(), String> {
         environment::remove(scope, entry)
+    }
+
+    fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {
+        super::openvr::add(&openvr_paths()?, directory)
+    }
+
+    fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
+        super::openvr::remove(&openvr_paths()?, directory)
     }
 
     fn create_shortcut(

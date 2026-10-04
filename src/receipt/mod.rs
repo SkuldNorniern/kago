@@ -50,6 +50,10 @@ pub enum Resource {
     Shortcut {
         path: PathBuf,
     },
+    /// a driver folder registered with SteamVR.
+    SteamVrDriver {
+        directory: String,
+    },
     /// uninstall entry, desktop file or similar platform registration.
     Registration {
         key: String,

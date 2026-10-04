@@ -14,6 +14,7 @@ struct Fake {
     base: PathBuf,
     path: RefCell<Vec<PathBuf>>,
     registered: RefCell<BTreeSet<String>>,
+    steamvr: RefCell<Vec<PathBuf>>,
     fail_register: bool,
 }
 
@@ -23,6 +24,7 @@ impl Fake {
             base,
             path: RefCell::new(vec![PathBuf::from("/already/there")]),
             registered: RefCell::new(BTreeSet::new()),
+            steamvr: RefCell::new(vec![PathBuf::from("/other/driver")]),
             fail_register: false,
         }
     }
@@ -56,6 +58,20 @@ impl Platform for Fake {
 
     fn remove_path_entry(&self, _: Scope, entry: &Path) -> Result<(), String> {
         self.path.borrow_mut().retain(|p| p != entry);
+        Ok(())
+    }
+
+    fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {
+        let mut drivers = self.steamvr.borrow_mut();
+        if drivers.iter().any(|d| d == directory) {
+            return Ok(false);
+        }
+        drivers.push(directory.to_path_buf());
+        Ok(true)
+    }
+
+    fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
+        self.steamvr.borrow_mut().retain(|d| d != directory);
         Ok(())
     }
 
@@ -361,4 +377,73 @@ fn every_operation_is_observed_in_order() {
         .map(|(i, op)| (i, plan.operations.len(), op.clone()))
         .collect();
     assert_eq!(seen, expected);
+}
+
+#[test]
+fn steamvr_driver_is_registered_kept_on_upgrade_and_removed() {
+    let mut w = World::new("steamvr");
+    fs::create_dir_all(w.dir.join("payload/driver/aira/bin/win64")).unwrap();
+    fs::write(
+        w.dir.join("payload/driver/aira/driver.vrdrivermanifest"),
+        b"{}",
+    )
+    .unwrap();
+    fs::write(
+        w.dir.join("payload/driver/aira/bin/win64/driver_aira.dll"),
+        b"dll",
+    )
+    .unwrap();
+    let manifest = format!("{MANIFEST}steamvr payload/driver/aira\n");
+    let driver = w.app().join("steamvr").join("aira");
+    let others = || vec![PathBuf::from("/other/driver")];
+
+    w.fake.fail_register = true;
+    w.install(&manifest).unwrap_err();
+    assert_eq!(*w.fake.steamvr.borrow(), others(), "rolled back");
+
+    w.fake.fail_register = false;
+    w.install(&manifest).unwrap();
+    assert!(driver.join("bin/win64/driver_aira.dll").is_file());
+    assert_eq!(
+        *w.fake.steamvr.borrow(),
+        [others(), vec![driver.clone()]].concat()
+    );
+
+    w.install(&manifest.replace("1.0.0", "1.1.0")).unwrap();
+    let receipt = w.store.read_receipt(&World::id()).unwrap().unwrap();
+    assert!(
+        receipt
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::SteamVrDriver { .. })),
+        "upgrade still owns the driver"
+    );
+    assert_eq!(w.fake.steamvr.borrow().len(), 2);
+
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(*w.fake.steamvr.borrow(), others());
+    assert!(!driver.exists());
+}
+
+#[test]
+fn steamvr_driver_without_manifest_is_refused_at_build() {
+    let w = World::new("steamvr-bad");
+    fs::create_dir_all(w.dir.join("payload/notadriver")).unwrap();
+    fs::write(w.dir.join("payload/notadriver/x.dll"), b"dll").unwrap();
+    let m = Manifest::parse(
+        "Kagofile",
+        &format!("{MANIFEST}steamvr payload/notadriver\n"),
+    )
+    .0
+    .unwrap();
+    let target = "windows-x86_64".parse().unwrap();
+    let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+        .0
+        .unwrap();
+    let (plan, d) = InstallPlan::build(&m, &r, target, Scope::User, w.dir.as_path());
+    assert!(plan.is_none());
+    assert_eq!(
+        d.iter().map(|d| d.code).collect::<Vec<_>>(),
+        [crate::diagnostic::INSTALL_SOURCE]
+    );
 }

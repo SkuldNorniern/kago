@@ -86,6 +86,27 @@ impl InstallPlan {
             directory: p.directory.clone(),
             scope: scope.of(p.scope),
         }));
+        for driver in &resolved.steamvr_drivers {
+            let manifest_file = driver.directory.join("driver.vrdrivermanifest");
+            let shipped = operations.iter().any(|op| {
+                matches!(op, Operation::InstallFile { target, .. } if *target == manifest_file)
+            });
+            if !shipped {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::INSTALL_SOURCE,
+                        format!(
+                            "SteamVR driver `{}` has no `driver.vrdrivermanifest`; point `steamvr` at the driver folder that holds it",
+                            driver.directory
+                        ),
+                    )
+                    .at(driver.at.clone()),
+                );
+            }
+            operations.push(Operation::RegisterSteamVrDriver {
+                directory: driver.directory.clone(),
+            });
+        }
         operations.extend(
             resolved
                 .shortcuts

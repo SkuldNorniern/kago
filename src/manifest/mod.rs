@@ -249,14 +249,18 @@ target linux setup appimage
         assert_eq!(copied.source, "driver/aira");
         assert_eq!(copied.target, driver.directory);
 
-        let (m, _) = check(&with("steamvr out/aira -> {data}/steamvr/aira
-"));
+        let (m, _) = check(&with(
+            "steamvr out/aira -> {data}/steamvr/aira
+",
+        ));
         assert_eq!(
             m.unwrap().steamvr_drivers[0].directory.to_string(),
             "{data}/steamvr/aira"
         );
-        let (_, codes) = check(&with("steamvr a b
-"));
+        let (_, codes) = check(&with(
+            "steamvr a b
+",
+        ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
     }
 
