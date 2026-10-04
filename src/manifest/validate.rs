@@ -8,7 +8,7 @@ use super::policy::{AppKind, InstallPolicy, LicenseFormat};
 use super::resource::{
     Component, File, Hook, HookPrivilege, Icon, Ownership, PathEntry, PathKind, PathSource,
     Requirement, RequirementPolicy, ResourceScope, Service, ServiceRestart, ServiceStart, Shortcut,
-    ShortcutLocation,
+    ShortcutLocation, SteamVrDriver,
 };
 use super::schema::{RawManifest, RawTarget};
 use super::selector::selector;
@@ -87,6 +87,7 @@ impl Validator<'_> {
         let components = self.components(&raw);
         let files = self.files(&raw);
         let paths = self.paths(&raw);
+        let steamvr_drivers = self.steamvr_drivers(&raw);
         let shortcuts = self.shortcuts(&raw);
         let services = self.services(&raw);
         let hooks = self.hooks(&raw);
@@ -105,6 +106,7 @@ impl Validator<'_> {
             components,
             files,
             paths,
+            steamvr_drivers,
             shortcuts,
             services,
             hooks,
@@ -318,6 +320,20 @@ impl Validator<'_> {
                     component: p.component.as_ref().map(|c| c.get_ref().clone()),
                     when: self.when(p.when.as_ref()),
                     at,
+                })
+            })
+            .collect()
+    }
+
+    fn steamvr_drivers(&mut self, raw: &RawManifest) -> Vec<SteamVrDriver> {
+        raw.steamvr_drivers
+            .iter()
+            .filter_map(|d| {
+                Some(SteamVrDriver {
+                    directory: self.path("steamvr", &d.directory)?,
+                    component: d.component.as_ref().map(|c| c.get_ref().clone()),
+                    when: self.when(d.when.as_ref()),
+                    at: self.at(&d.directory),
                 })
             })
             .collect()

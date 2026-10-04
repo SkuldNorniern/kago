@@ -12,7 +12,7 @@ use super::version;
 use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
     RawApplication, RawComponent, RawFile, RawIcon, RawInstall, RawLicense, RawManifest,
-    RawPackage, RawPath, RawShortcut, RawTarget, RawTargets, RawWhen,
+    RawPackage, RawPath, RawShortcut, RawSteamVrDriver, RawTarget, RawTargets, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::package::{Arch, Artifact, Libc, Os};
@@ -53,6 +53,7 @@ pub fn lower(
         components: Vec::new(),
         files: Vec::new(),
         paths: Vec::new(),
+        steamvr_drivers: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
         pending: Vec::new(),
@@ -107,6 +108,7 @@ struct Lower<'a> {
     components: Vec<RawComponent>,
     files: Vec<RawFile>,
     paths: Vec<Spanned<RawPath>>,
+    steamvr_drivers: Vec<RawSteamVrDriver>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
     pending: Vec<Pending>,
@@ -166,6 +168,7 @@ impl Lower<'_> {
             "copy" => self.copy(node, scope),
             "shortcut" => self.shortcut(node, scope),
             "path" => self.path(node, scope),
+            "steamvr" => self.steamvr(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
                 let mut inner = scope.clone();
@@ -185,7 +188,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, component, when, target or license"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, component, when, target or license"
                 ),
             ),
         }
@@ -474,6 +477,45 @@ impl Lower<'_> {
         });
     }
 
+    /// `steamvr <dir> [-> <path>]`: copies a SteamVR driver folder and
+    /// registers it with SteamVR, by default as `{app}/steamvr/<dir name>`.
+    fn steamvr(&mut self, node: &Node, scope: &Scope) {
+        self.no_children(node);
+        let usage = "expected `steamvr <driver dir> [-> <path>]`";
+        let args = node.args();
+        let (from, target) = match args {
+            [from] => (from, None),
+            [from, arrow, to] if arrow.text == "->" && !arrow.quoted => (from, Some(to)),
+            _ => {
+                self.syntax(node.at(), usage);
+                return;
+            }
+        };
+        let target = match target {
+            Some(t) => spanned(t),
+            None => Spanned::new(
+                from.at..from.at + from.text.len(),
+                format!("{{app}}/steamvr/{}", basename(&from.text)),
+            ),
+        };
+        let source = self.reference(from);
+        let when = self.when(scope, &[]);
+        self.files.push(RawFile {
+            logical_id: None,
+            component: scope.component.clone(),
+            source,
+            target: target.clone(),
+            ownership: None,
+            when,
+        });
+        let when = self.when(scope, &[]);
+        self.steamvr_drivers.push(RawSteamVrDriver {
+            directory: target,
+            component: scope.component.clone(),
+            when,
+        });
+    }
+
     fn shortcut(&mut self, node: &Node, scope: &Scope) {
         self.no_children(node);
         let mut name = None;
@@ -756,6 +798,7 @@ impl Lower<'_> {
             components: self.components,
             files: self.files,
             paths: self.paths,
+            steamvr_drivers: self.steamvr_drivers,
             shortcuts: self.shortcuts,
             services: Vec::new(),
             hooks: Vec::new(),

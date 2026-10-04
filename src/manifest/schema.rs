@@ -14,6 +14,7 @@ pub struct RawManifest {
     pub components: Vec<RawComponent>,
     pub files: Vec<RawFile>,
     pub paths: Vec<Spanned<RawPath>>,
+    pub steamvr_drivers: Vec<RawSteamVrDriver>,
     pub shortcuts: Vec<RawShortcut>,
     pub services: Vec<RawService>,
     pub hooks: Vec<RawHook>,
@@ -94,6 +95,14 @@ pub struct RawPath {
     pub directory: Option<Spanned<String>>,
     pub kind: Option<Spanned<String>>,
     pub scope: Option<Spanned<String>>,
+    pub component: Option<Spanned<String>>,
+    pub when: Option<RawWhen>,
+}
+
+#[derive(Debug)]
+pub struct RawSteamVrDriver {
+    /// installed folder holding `driver.vrdrivermanifest`.
+    pub directory: Spanned<String>,
     pub component: Option<Spanned<String>>,
     pub when: Option<RawWhen>,
 }

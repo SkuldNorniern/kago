@@ -106,6 +106,15 @@ pub struct PathEntry {
     pub at: Location,
 }
 
+/// a SteamVR driver folder to register with SteamVR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteamVrDriver {
+    pub directory: SemanticPath,
+    pub component: Option<String>,
+    pub when: Selector,
+    pub at: Location,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shortcut {
     pub name: String,

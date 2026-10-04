@@ -21,7 +21,7 @@ pub use policy::{
 pub use resource::{
     Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
     PathSource, Requirement, RequirementKind, RequirementPolicy, ResourceScope, Service,
-    ServiceRestart, ServiceStart, Shortcut, ShortcutLocation,
+    ServiceRestart, ServiceStart, Shortcut, ShortcutLocation, SteamVrDriver,
 };
 pub use selector::{Context, Selector};
 pub use source::{Source, SourceKind, Unpack};
@@ -44,6 +44,7 @@ pub struct Manifest {
     pub components: Vec<Component>,
     pub files: Vec<File>,
     pub paths: Vec<PathEntry>,
+    pub steamvr_drivers: Vec<SteamVrDriver>,
     pub shortcuts: Vec<Shortcut>,
     pub services: Vec<Service>,
     pub hooks: Vec<Hook>,
@@ -232,15 +233,49 @@ target linux setup appimage
     }
 
     #[test]
+    fn steamvr_driver_copies_and_registers() {
+        let (m, codes) = check(&with(
+            "component steamvr \"SteamVR driver\" on
+  when windows
+    steamvr driver/aira
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        let driver = &m.steamvr_drivers[0];
+        assert_eq!(driver.directory.to_string(), "{app}/steamvr/aira");
+        assert_eq!(driver.component.as_deref(), Some("steamvr"));
+        let copied = m.files.last().unwrap();
+        assert_eq!(copied.source, "driver/aira");
+        assert_eq!(copied.target, driver.directory);
+
+        let (m, _) = check(&with("steamvr out/aira -> {data}/steamvr/aira
+"));
+        assert_eq!(
+            m.unwrap().steamvr_drivers[0].directory.to_string(),
+            "{data}/steamvr/aira"
+        );
+        let (_, codes) = check(&with("steamvr a b
+"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
     fn setup_look_defaults_to_modern() {
         let (m, _) = check(AUREA);
         assert_eq!(m.unwrap().install.look, SetupLook::Modern);
-        let (m, codes) = check(&AUREA.replace("scope choose", "scope choose
-  setup native"));
+        let (m, codes) = check(&AUREA.replace(
+            "scope choose",
+            "scope choose
+  setup native",
+        ));
         assert!(codes.is_empty(), "{codes:?}");
         assert_eq!(m.unwrap().install.look, SetupLook::Native);
-        let (_, codes) = check(&AUREA.replace("scope choose", "scope choose
-  setup fancy"));
+        let (_, codes) = check(&AUREA.replace(
+            "scope choose",
+            "scope choose
+  setup fancy",
+        ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
     }
 
