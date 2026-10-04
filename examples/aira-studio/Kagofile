@@ -1,0 +1,11 @@
+# goes at the aira-studio repo root. build first: cargo build --release
+package dev.eira.aira-studio
+  name Aira Studio
+  version from cargo
+  publisher Eira
+  description Set up and watch Aira trackers
+
+app aira-studio
+  windows target/release/aira-studio.exe
+
+shortcut

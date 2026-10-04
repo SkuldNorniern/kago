@@ -1,0 +1,11 @@
+# goes at the lykil-studio repo root. build first: cargo build --release
+package dev.eira.lykil-studio
+  name Lykil Studio
+  version from cargo
+  publisher Eira
+  description Manage Lykil keyboards
+
+app lykil-studio
+  windows target/release/lykil-studio.exe
+
+shortcut
