@@ -1,7 +1,7 @@
 //! diagnostics with stable `KAGO<nnn>` codes, source spans and help text.
 //!
 //! codes never change meaning. 1xx manifest, 2xx target and capability,
-//! 3xx resolve.
+//! 3xx resolve, 4xx install.
 
 use std::fmt;
 
@@ -43,6 +43,11 @@ pub const RESOLVE_MISSING: Code = Code(301);
 pub const RESOLVE_AMBIGUOUS: Code = Code(302);
 /// two resources install to the same path.
 pub const RESOLVE_CONFLICT: Code = Code(303);
+
+/// a payload file or directory cannot be read.
+pub const INSTALL_SOURCE: Code = Code(401);
+/// requested scope contradicts the manifest.
+pub const INSTALL_SCOPE: Code = Code(402);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {

@@ -11,6 +11,7 @@ mod validate;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
     AppKind, Downgrade, Elevation, InstallPolicy, LicenseFormat, ScopeChoice, ScopeConflict,
