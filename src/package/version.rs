@@ -212,6 +212,8 @@ impl fmt::Display for Version {
     }
 }
 
+crate::string_serde!(Version);
+
 #[cfg(test)]
 mod tests {
     use super::*;

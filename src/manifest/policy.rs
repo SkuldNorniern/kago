@@ -38,6 +38,8 @@ macro_rules! keywords {
                 f.write_str(self.as_str())
             }
         }
+
+        crate::string_serde!($ty);
     };
 }
 

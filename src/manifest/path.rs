@@ -163,6 +163,31 @@ impl FromStr for SemanticPath {
     }
 }
 
+impl FromStr for Root {
+    type Err = PathError;
+
+    /// bare name like `app`, as used in receipts.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|r| r.as_str() == s)
+            .ok_or_else(|| PathError::UnknownRoot(s.to_owned()))
+    }
+}
+
+impl serde::Serialize for Root {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Root {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize>::deserialize(d)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Display for Root {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{{}}}", self.as_str())
@@ -178,6 +203,8 @@ impl fmt::Display for SemanticPath {
         }
     }
 }
+
+crate::string_serde!(SemanticPath);
 
 #[cfg(test)]
 mod tests {

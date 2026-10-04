@@ -99,3 +99,21 @@ impl fmt::Debug for Digest {
         write!(f, "sha256:{self}")
     }
 }
+
+impl std::str::FromStr for Digest {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bad = || format!("`{s}` is not a sha-256 hex digest");
+        if s.len() != 64 || !s.is_ascii() {
+            return Err(bad());
+        }
+        let mut out = [0; 32];
+        for (i, byte) in out.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|_| bad())?;
+        }
+        Ok(Self(out))
+    }
+}
+
+crate::string_serde!(Digest);

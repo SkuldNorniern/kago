@@ -93,6 +93,8 @@ fn needs_machine(resolved: &Resolved) -> bool {
             .any(|s| s.service.scope == ResourceScope::Machine)
 }
 
+crate::string_serde!(Scope);
+
 #[cfg(test)]
 mod tests {
     use super::*;

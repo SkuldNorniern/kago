@@ -94,6 +94,8 @@ impl fmt::Display for PackageId {
     }
 }
 
+crate::string_serde!(PackageId);
+
 #[cfg(test)]
 mod tests {
     use super::*;

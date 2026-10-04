@@ -176,6 +176,8 @@ names!(Os, UnknownOs, Windows => "windows", Macos => "macos", Linux => "linux");
 names!(Arch, UnknownArch, X86_64 => "x86_64", Aarch64 => "aarch64");
 names!(Libc, UnknownLibc, Gnu => "gnu", Musl => "musl");
 
+crate::string_serde!(Target);
+
 #[cfg(test)]
 mod tests {
     use super::*;
