@@ -99,3 +99,29 @@ pub fn status(args: &Args) -> Result<ExitCode, String> {
     }
     Ok(ExitCode::SUCCESS)
 }
+
+pub fn verify(args: &Args) -> Result<ExitCode, String> {
+    let [id] = args.positional.as_slice() else {
+        return Err("usage: kago verify <package-id> [--scope user|machine]".to_owned());
+    };
+    let package = PackageId::new(id).map_err(|e| e.to_string())?;
+    let (_, store) = open(scope(args)?)?;
+    let receipt = store
+        .read_receipt(&package)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("{package} is not installed in this scope"))?;
+    let v = transaction::verify(&receipt);
+    for m in &v.modified {
+        println!("modified {m}");
+    }
+    for m in &v.missing {
+        println!("missing  {m}");
+    }
+    println!("healthy  {} resources", v.healthy);
+    if v.is_healthy() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        println!("run the {} setup again to repair", receipt.name);
+        Ok(ExitCode::FAILURE)
+    }
+}

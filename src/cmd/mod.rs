@@ -29,6 +29,8 @@ commands:
                 install the manifest on this machine
   uninstall <package-id> [--scope user|machine]
                 remove everything the install owns
+  verify <package-id> [--scope user|machine]
+                check installed files against the receipt
   status [--scope user|machine]
                 list installed packages
   recover [--scope user|machine]
@@ -57,6 +59,7 @@ pub fn run() -> ExitCode {
             Args::parse(rest, &["--scope", "--components"]).and_then(|a| lifecycle::install(&a))
         }
         "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
+        "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
         "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),
         "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
         "help" | "--help" | "-h" => {

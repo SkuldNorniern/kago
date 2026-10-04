@@ -8,6 +8,7 @@ mod apply;
 mod journal;
 mod recovery;
 mod store;
+mod verify;
 
 use std::fmt;
 use std::fs;
@@ -17,6 +18,7 @@ use std::path::Path;
 pub use journal::{Entry, Undo};
 pub use recovery::Recovered;
 pub use store::Store;
+pub use verify::{Verified, verify};
 
 use crate::install::{InstallPlan, Scope, hash};
 use crate::manifest::Ownership;

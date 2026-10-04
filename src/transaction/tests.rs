@@ -302,3 +302,48 @@ downgrade = \"allow\"
     );
     assert_eq!(w.install(&allowed).unwrap().version.to_string(), "0.9.0");
 }
+
+#[test]
+fn verify_finds_missing_and_modified() {
+    let w = World::new("verify");
+    let receipt = w.install(MANIFEST).unwrap();
+    assert!(verify(&receipt).is_healthy());
+    fs::write(w.app().join("app.exe"), b"tampered").unwrap();
+    fs::remove_file(w.app().join("themes/dark.toml")).unwrap();
+    fs::write(w.dir.join("machine/config/App/config.toml"), b"mine").unwrap();
+    let v = verify(&receipt);
+    assert_eq!(v.modified.len(), 1, "{v:?}");
+    assert!(v.modified[0].ends_with("app.exe"));
+    assert_eq!(v.missing.len(), 1, "{v:?}");
+    assert!(v.missing[0].ends_with("dark.toml"));
+    // repair is the same version again.
+    let again = w.install(MANIFEST).unwrap();
+    assert!(verify(&again).modified.is_empty());
+    assert!(verify(&again).missing.is_empty());
+}
+
+#[test]
+fn modified_config_survives_upgrade() {
+    let w = World::new("keep-config");
+    w.install(MANIFEST).unwrap();
+    let config = w.dir.join("machine/config/App/config.toml");
+    fs::write(&config, b"mine").unwrap();
+    fs::write(w.dir.join("payload/config.toml"), b"cfg v2").unwrap();
+    w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
+    assert_eq!(fs::read(&config).unwrap(), b"mine");
+    // still kept by uninstall after the upgrade.
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(fs::read(&config).unwrap(), b"mine");
+}
+
+#[test]
+fn unmodified_config_is_upgraded() {
+    let w = World::new("upgrade-config");
+    w.install(MANIFEST).unwrap();
+    fs::write(w.dir.join("payload/config.toml"), b"cfg v2").unwrap();
+    w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
+    assert_eq!(
+        fs::read(w.dir.join("machine/config/App/config.toml")).unwrap(),
+        b"cfg v2"
+    );
+}

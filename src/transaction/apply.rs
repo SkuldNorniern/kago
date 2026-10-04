@@ -6,7 +6,7 @@ use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Operation, Roots, Scope, hash};
-use crate::manifest::{Downgrade, Root, SemanticPath, ShortcutLocation};
+use crate::manifest::{Downgrade, Ownership, Root, SemanticPath, ShortcutLocation};
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
 
@@ -51,6 +51,7 @@ pub(super) fn install(
                 .iter()
                 .any(|r| matches!(r, Resource::Registration { .. }))
         }),
+        previous: previous.as_ref(),
     };
     if let Err(e) = run.all() {
         let failures = roll_back(&run.undos, platform);
@@ -127,6 +128,8 @@ struct Run<'a> {
     backups: usize,
     /// an older version is registered; overwrite without owning a delete.
     reregister: bool,
+    /// the older version's receipt, to tell user changes from its files.
+    previous: Option<&'a Receipt>,
 }
 
 impl Run<'_> {
@@ -173,6 +176,15 @@ impl Run<'_> {
                 ownership,
             } => {
                 let dest = self.resolve(target)?;
+                if let Some(kept) = self.keep_user_file(target, &dest, *ownership) {
+                    self.resources.push(Resource::File {
+                        path: target.clone(),
+                        size: *size,
+                        sha256: kept,
+                        ownership: *ownership,
+                    });
+                    return Ok(());
+                }
                 self.place(&dest, |dest| {
                     fs::copy(source, dest).map_err(|e| Error::io(dest, &e))?;
                     let (got_size, got) = hash(dest).map_err(|e| Error::io(dest, &e))?;
@@ -242,6 +254,37 @@ impl Run<'_> {
             Operation::InstallService { id, .. } => Err(Error::Other(format!(
                 "service `{id}`: installing services is not supported yet"
             ))),
+        }
+    }
+
+    /// an existing file the user may own: user data always stays, a
+    /// preserve-if-modified file stays when it differs from what the older
+    /// version installed (or nothing recorded it). returns the hash to record,
+    /// the older one, so uninstall still sees the change.
+    fn keep_user_file(
+        &self,
+        target: &SemanticPath,
+        dest: &Path,
+        ownership: Ownership,
+    ) -> Option<crate::install::Digest> {
+        if !dest.is_file() {
+            return None;
+        }
+        let recorded = self.previous.and_then(|p| {
+            p.resources.iter().find_map(|r| match r {
+                Resource::File { path, sha256, .. } if path == target => Some(*sha256),
+                _ => None,
+            })
+        });
+        let (_, now) = hash(dest).ok()?;
+        match ownership {
+            Ownership::UserData => Some(recorded.unwrap_or(now)),
+            Ownership::PreserveIfModified if recorded != Some(now) => {
+                // recorded hash, or a never-matching one for a file kago did
+                // not put there, so uninstall keeps it.
+                Some(recorded.unwrap_or(crate::install::Digest([0; 32])))
+            }
+            _ => None,
         }
     }
 
