@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use kago::container::Container;
 use kago::format::setup::{self, Embedded};
 use kago::install::Operation;
+use kago::manifest::SemanticPath;
 use kago::platform;
 use kago::transaction;
 
@@ -26,7 +27,7 @@ pub fn run_embedded() -> Option<ExitCode> {
         #[cfg(feature = "gui")]
         return Some(window(exe, embedded));
     }
-    Some(match install(&exe, embedded) {
+    Some(match install(&exe, embedded, &mut |_, _| {}) {
         Ok(done) => {
             println!("installed {}", done.name);
             ExitCode::SUCCESS
@@ -40,13 +41,13 @@ pub fn run_embedded() -> Option<ExitCode> {
 
 #[cfg(feature = "gui")]
 fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
-    use kago::gui::setup::{Info, Installed, run};
+    use kago::gui::setup::{Info, Installed, License, Step, run};
     use kago::manifest::Root;
 
-    let info = match Container::open(&exe, embedded.offset) {
+    let (info, look) = match Container::open(&exe, embedded.offset) {
         Ok(c) => {
             let plan = &c.header.plan;
-            Info {
+            let info = Info {
                 name: plan.name.clone(),
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
@@ -54,19 +55,42 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                     .ok()
                     .and_then(|p| p.roots(plan.scope, &plan.name).ok())
                     .and_then(|r| r.0.get(&Root::App).cloned()),
-            }
+                license: c.header.setup.license.as_ref().map(|l| License {
+                    text: l.text.clone(),
+                    accept: l.accept,
+                }),
+            };
+            (info, c.header.setup.look)
         }
         Err(e) => {
             eprintln!("setup failed: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let work = move || {
-        install(&exe, embedded).map(|done| Installed {
+    let work = move |reporter: &kago::gui::setup::Reporter| {
+        let mut report = |fraction, stage: Stage<'_>| {
+            let step = match stage {
+                Stage::Unpack(path) => Step::Unpack(path.to_string()),
+                Stage::Apply(op) => match op {
+                    Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
+                    Operation::InstallFile { target, .. } => Step::File(target.to_string()),
+                    Operation::AddPathEntry { directory, .. } => {
+                        Step::Path(directory.to_string())
+                    }
+                    Operation::CreateShortcut { name, .. } => Step::Shortcut(name.clone()),
+                    Operation::RegisterApplication { display_name, .. } => {
+                        Step::Register(display_name.clone())
+                    }
+                    Operation::InstallService { id, .. } => Step::Service(id.clone()),
+                },
+            };
+            reporter.report(fraction, step);
+        };
+        install(&exe, embedded, &mut report).map(|done| Installed {
             launch: done.launch,
         })
     };
-    match run(&info, work) {
+    match run(look, &info, work) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -83,7 +107,21 @@ struct Done {
     launch: Option<PathBuf>,
 }
 
-fn install(exe: &Path, embedded: Embedded) -> Result<Done, String> {
+/// what the install is at, for a progress display.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+enum Stage<'a> {
+    Unpack(&'a SemanticPath),
+    Apply(&'a Operation),
+}
+
+/// installs the embedded package. `progress` hears each step with how far
+/// along the whole install is, 0 to 1: unpacking each file, then each
+/// operation.
+fn install(
+    exe: &Path,
+    embedded: Embedded,
+    progress: &mut dyn FnMut(f32, Stage<'_>),
+) -> Result<Done, String> {
     let mut container = Container::open(exe, embedded.offset).map_err(|e| e.to_string())?;
     let header = &container.header.plan;
     let platform = platform::host()?;
@@ -91,13 +129,25 @@ fn install(exe: &Path, embedded: Embedded) -> Result<Done, String> {
     let staging = store.root().join("staging").join(header.package.as_str());
     let _ = fs::remove_dir_all(&staging);
     let result = (|| {
+        let operations = container.header.plan.operations.len();
+        #[allow(clippy::cast_precision_loss)]
+        let share = |done: usize, total: usize| done as f32 / total.max(1) as f32;
         let plan = container
-            .extract(&staging.join("payload"))
+            .extract_observed(&staging.join("payload"), &mut |i, n, target| {
+                progress(share(i, n + operations), Stage::Unpack(target));
+            })
             .map_err(|e| format!("cannot unpack: {e}"))?;
+        let files = container.header.payload.len();
         let runtime = staging.join(format!("kago{}", std::env::consts::EXE_SUFFIX));
         setup::extract_stub(exe, embedded, &runtime).map_err(|e| e.to_string())?;
-        let receipt = transaction::install(&plan, platform.as_ref(), &store, &runtime)
-            .map_err(|e| e.to_string())?;
+        let receipt = transaction::install_observed(
+            &plan,
+            platform.as_ref(),
+            &store,
+            &runtime,
+            &mut |i, n, op| progress(share(files + i, files + n), Stage::Apply(op)),
+        )
+        .map_err(|e| e.to_string())?;
         let launch = plan.operations.iter().find_map(|op| match op {
             Operation::RegisterApplication {
                 entrypoint: Some(e),
