@@ -123,10 +123,7 @@ const fn table(line: Line) -> [&'static str; 2] {
             "If you accept the terms of the agreement, click I Agree to continue.",
             "계약 조건에 동의하면 동의함을 눌러 계속하세요.",
         ],
-        Line::LicenseAccept => [
-            "I accept the license agreement",
-            "사용권 계약에 동의합니다",
-        ],
+        Line::LicenseAccept => ["I accept the license agreement", "사용권 계약에 동의합니다"],
         Line::LicenseRead => ["Read license", "사용권 계약 보기"],
         Line::InstallingTitle => ["Installing", "설치 중"],
         Line::InstallingBody => [
@@ -164,7 +161,10 @@ mod tests {
     #[test]
     fn fill_replaces_every_key() {
         assert_eq!(
-            Lang::En.fill(Line::WelcomeBody, &[("name", "Ozone"), ("version", "0.1.0")]),
+            Lang::En.fill(
+                Line::WelcomeBody,
+                &[("name", "Ozone"), ("version", "0.1.0")]
+            ),
             "Setup will guide you through the installation of Ozone 0.1.0."
         );
         assert_eq!(

@@ -118,7 +118,9 @@ impl State {
                 self.mouse = (-1.0, -1.0);
                 true
             }
-            WindowEvent::MouseWheel { delta_y, .. } if self.session.wizard.page == Page::License => {
+            WindowEvent::MouseWheel { delta_y, .. }
+                if self.session.wizard.page == Page::License =>
+            {
                 #[allow(clippy::cast_possible_truncation)]
                 let step = delta_y as f32 * 48.0;
                 self.scroll = (self.scroll - step).clamp(0.0, self.scroll_max);
@@ -231,7 +233,12 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         w - 2.0 * MARGIN,
         h - 112.0 - MARGIN - BUTTON_H - 20.0,
     );
-    let footer = Area::new(MARGIN, h - MARGIN - BUTTON_H + rise, w - 2.0 * MARGIN, BUTTON_H);
+    let footer = Area::new(
+        MARGIN,
+        h - MARGIN - BUTTON_H + rise,
+        w - 2.0 * MARGIN,
+        BUTTON_H,
+    );
     match page {
         Page::Welcome => welcome(&mut pen, &mut frame, s, body, footer)?,
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
@@ -316,7 +323,11 @@ fn pill(
     hit: Hit,
     tone: Tone,
 ) -> AureaResult<()> {
-    let t = if tone == Tone::Off { 0.0 } else { frame.hover(hit) };
+    let t = if tone == Tone::Off {
+        0.0
+    } else {
+        frame.hover(hit)
+    };
     let (bg, fg) = match tone {
         Tone::Main => (
             color::mix(color::ACCENT, color::TEXT, t * 0.18),
@@ -391,7 +402,11 @@ fn tick(
     pen.round(
         boxed,
         6.0,
-        color::mix(color::mix(color::RAISED, color::HOVER, t), color::ACCENT, on),
+        color::mix(
+            color::mix(color::RAISED, color::HOVER, t),
+            color::ACCENT,
+            on,
+        ),
     )?;
     pen.outline(
         boxed,
@@ -401,8 +416,18 @@ fn tick(
     )?;
     if on > 0.05 {
         let c = color::mix(color::RAISED, color::ACCENT_TEXT, on);
-        pen.line((boxed.x + 5.0, boxed.y + 10.5), (boxed.x + 8.5, boxed.y + 14.0), 2.0, c)?;
-        pen.line((boxed.x + 8.5, boxed.y + 14.0), (boxed.x + 15.0, boxed.y + 6.5), 2.0, c)?;
+        pen.line(
+            (boxed.x + 5.0, boxed.y + 10.5),
+            (boxed.x + 8.5, boxed.y + 14.0),
+            2.0,
+            c,
+        )?;
+        pen.line(
+            (boxed.x + 8.5, boxed.y + 14.0),
+            (boxed.x + 15.0, boxed.y + 6.5),
+            2.0,
+            c,
+        )?;
     }
     pen.clipped(
         text,
@@ -422,7 +447,12 @@ fn welcome(
     footer: Area,
 ) -> AureaResult<()> {
     let lang = s.lang;
-    let fill = |line| lang.fill(line, &[("name", &s.info.name), ("version", &s.info.version)]);
+    let fill = |line| {
+        lang.fill(
+            line,
+            &[("name", &s.info.name), ("version", &s.info.version)],
+        )
+    };
     let font = pen.font(14.0);
     let used = pen.wrapped(
         &fill(Line::WelcomeBody),
@@ -434,7 +464,12 @@ fn welcome(
     if let Some(location) = &s.info.location {
         let card = Area::new(body.x, y, body.w, 64.0);
         panel(pen, card)?;
-        caption(pen, lang.line(Line::InstallInto), card.x + 16.0, card.y + 12.0)?;
+        caption(
+            pen,
+            lang.line(Line::InstallInto),
+            card.x + 16.0,
+            card.y + 12.0,
+        )?;
         pen.clipped(
             &location.display().to_string(),
             Area::new(card.x + 16.0, card.y + 32.0, card.w - 32.0, 20.0),
@@ -505,7 +540,11 @@ fn license(
         let track = Area::new(card.right() - 8.0, inner.y, 3.0, inner.h);
         let thumb_h = (inner.h * inner.h / total).max(24.0);
         let thumb_y = track.y + (track.h - thumb_h) * (scroll / s.scroll_max);
-        pen.round(Area::new(track.x, thumb_y, track.w, thumb_h), 1.5, color::BORDER)?;
+        pen.round(
+            Area::new(track.x, thumb_y, track.w, thumb_h),
+            1.5,
+            color::BORDER,
+        )?;
     }
     if wizard.must_accept {
         let on = frame.anim.to(key::ACCEPT, f32::from(wizard.accepted), 16.0);
@@ -530,7 +569,13 @@ fn installing(pen: &mut Pen<'_>, frame: &mut Frame<'_>, s: &State, body: Area) -
     let lang = s.lang;
     let wizard = &s.session.wizard;
     let title = pen.bold(18.0);
-    pen.text(lang.line(Line::InstallingTitle), body.x, body.y + 8.0, &title, color::TEXT)?;
+    pen.text(
+        lang.line(Line::InstallingTitle),
+        body.x,
+        body.y + 8.0,
+        &title,
+        color::TEXT,
+    )?;
     let shown = frame.anim.to(key::PROGRESS, wizard.fraction, 8.0);
     let track = Area::new(body.x, body.y + 52.0, body.w, 8.0);
     pen.round(track, 4.0, color::RAISED)?;
@@ -545,7 +590,13 @@ fn installing(pen: &mut Pen<'_>, frame: &mut Frame<'_>, s: &State, body: Area) -
     let percent = format!("{}%", (shown * 100.0).round() as u32);
     let small = pen.font(13.0);
     let pw = pen.width(&percent, &small);
-    pen.text(&percent, track.right() - pw, track.bottom() + 12.0, &small, color::DIM)?;
+    pen.text(
+        &percent,
+        track.right() - pw,
+        track.bottom() + 12.0,
+        &small,
+        color::DIM,
+    )?;
     if let Some(step) = wizard.log.last() {
         pen.clipped(
             &step.text(lang),
@@ -576,11 +627,31 @@ fn badge(pen: &mut Pen<'_>, x: f32, y: f32, good: bool) -> AureaResult<()> {
     pen.circle(x, y, 22.0, color::mix(color::BACKGROUND, c, 0.22))?;
     pen.circle(x, y, 16.0, c)?;
     if good {
-        pen.line((x - 7.0, y + 0.5), (x - 2.0, y + 5.5), 2.5, color::ACCENT_TEXT)?;
-        pen.line((x - 2.0, y + 5.5), (x + 7.5, y - 5.0), 2.5, color::ACCENT_TEXT)
+        pen.line(
+            (x - 7.0, y + 0.5),
+            (x - 2.0, y + 5.5),
+            2.5,
+            color::ACCENT_TEXT,
+        )?;
+        pen.line(
+            (x - 2.0, y + 5.5),
+            (x + 7.5, y - 5.0),
+            2.5,
+            color::ACCENT_TEXT,
+        )
     } else {
-        pen.line((x - 5.5, y - 5.5), (x + 5.5, y + 5.5), 2.5, color::ACCENT_TEXT)?;
-        pen.line((x + 5.5, y - 5.5), (x - 5.5, y + 5.5), 2.5, color::ACCENT_TEXT)
+        pen.line(
+            (x - 5.5, y - 5.5),
+            (x + 5.5, y + 5.5),
+            2.5,
+            color::ACCENT_TEXT,
+        )?;
+        pen.line(
+            (x + 5.5, y - 5.5),
+            (x - 5.5, y + 5.5),
+            2.5,
+            color::ACCENT_TEXT,
+        )
     }
 }
 
@@ -630,8 +701,20 @@ fn failed(
     let lang = s.lang;
     badge(pen, body.x + 22.0, body.y + 22.0, false)?;
     let x = body.x + 60.0;
-    pen.text(lang.line(Line::FailedTitle), x, body.y, &pen.bold(18.0), color::TEXT)?;
-    pen.text(lang.line(Line::FailedBody), x, body.y + 28.0, &pen.font(14.0), color::DIM)?;
+    pen.text(
+        lang.line(Line::FailedTitle),
+        x,
+        body.y,
+        &pen.bold(18.0),
+        color::TEXT,
+    )?;
+    pen.text(
+        lang.line(Line::FailedBody),
+        x,
+        body.y + 28.0,
+        &pen.font(14.0),
+        color::DIM,
+    )?;
     let well = Area::new(body.x, body.y + 60.0, body.w, body.h - 60.0);
     pen.round(well, 10.0, color::SURFACE)?;
     pen.outline(well, 10.0, 1.0, color::RAISED)?;

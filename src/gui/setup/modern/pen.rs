@@ -160,7 +160,8 @@ impl Pen<'_> {
     }
 
     pub fn line(&mut self, from: (f32, f32), to: (f32, f32), w: f32, c: Color) -> AureaResult<()> {
-        self.ctx.draw_line(from.0, from.1, to.0, to.1, &stroke(c, w))
+        self.ctx
+            .draw_line(from.0, from.1, to.0, to.1, &stroke(c, w))
     }
 
     pub fn circle(&mut self, x: f32, y: f32, r: f32, c: Color) -> AureaResult<()> {
@@ -226,9 +227,9 @@ impl Pen<'_> {
                             space = Some(i);
                         }
                     }
-                    end = space.filter(|s| *s > 0).unwrap_or(fits.max(
-                        rest.chars().next().map_or(1, char::len_utf8),
-                    ));
+                    end = space
+                        .filter(|s| *s > 0)
+                        .unwrap_or(fits.max(rest.chars().next().map_or(1, char::len_utf8)));
                 }
                 out.push(rest[..end].trim_end().to_owned());
                 rest = rest[end..].trim_start();

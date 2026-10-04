@@ -10,8 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aurea::elements::{
-    Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack,
-    TextView,
+    Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack, TextView,
 };
 use aurea::render::Rect;
 use aurea::{AureaResult, Window, WindowEvent};

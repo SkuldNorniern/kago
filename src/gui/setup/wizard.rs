@@ -35,7 +35,9 @@ pub enum Outcome {
     /// the install should start now.
     Start,
     /// close the window, then run `launch` if there is one.
-    Exit { launch: Option<PathBuf> },
+    Exit {
+        launch: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug)]
@@ -157,7 +159,11 @@ mod tests {
         let mut w = Wizard::new(None);
         assert_eq!(w.act(Action::Next), Outcome::Start);
         assert_eq!(w.page, Page::Installing);
-        assert_eq!(w.act(Action::Cancel), Outcome::Stay, "no cancel mid-install");
+        assert_eq!(
+            w.act(Action::Cancel),
+            Outcome::Stay,
+            "no cancel mid-install"
+        );
     }
 
     #[test]
