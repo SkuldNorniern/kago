@@ -1,0 +1,27 @@
+[workspace]
+members = ["kago-core", "kago-manifest", "kago-plan"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/SkuldNorniern/kago"
+
+[workspace.dependencies]
+kago-core = { path = "kago-core" }
+kago-manifest = { path = "kago-manifest" }
+kago-plan = { path = "kago-plan" }
+
+[package]
+name = "kago"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+kago-core.workspace = true
+kago-manifest.workspace = true
+kago-plan.workspace = true
