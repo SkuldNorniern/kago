@@ -5,6 +5,7 @@
 //! run. the receipt is written only once everything applied.
 
 mod apply;
+mod hook;
 mod journal;
 mod recovery;
 mod store;
@@ -214,11 +215,13 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         failed: Vec::new(),
     };
     let rank = |r: &Resource| match r {
-        Resource::Registration { .. } => 0,
-        Resource::Shortcut { .. } => 1,
-        Resource::PathEntry { .. } | Resource::SteamVrDriver { .. } => 2,
-        Resource::File { .. } => 3,
-        Resource::Directory { path } => 4 + usize::MAX / 2 - path.segments().count(),
+        // the package's own cleanup runs while its files are still there.
+        Resource::UninstallHook { .. } => 0,
+        Resource::Registration { .. } => 1,
+        Resource::Shortcut { .. } => 2,
+        Resource::PathEntry { .. } | Resource::SteamVrDriver { .. } => 3,
+        Resource::File { .. } => 4,
+        Resource::Directory { path } => 5 + usize::MAX / 2 - path.segments().count(),
     };
     let mut ordered: Vec<&Resource> = resources.iter().collect();
     ordered.sort_by_key(|r| rank(r));
@@ -228,6 +231,12 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::Shortcut { path } => remove_file(path),
             Resource::PathEntry { entry, scope } => {
                 platform.remove_path_entry(*scope, Path::new(entry))
+            }
+            Resource::UninstallHook { command, arguments } => {
+                // best effort: a broken hook must not keep the package from
+                // being removed.
+                let _ = hook::run(Path::new(command), arguments);
+                Ok(())
             }
             Resource::SteamVrDriver { directory } => {
                 platform.remove_steamvr_driver(Path::new(directory))

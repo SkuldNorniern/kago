@@ -6,7 +6,7 @@ use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
-use crate::manifest::{Downgrade, Ownership, Root, SemanticPath, ShortcutLocation};
+use crate::manifest::{Downgrade, HookPhase, Ownership, Root, SemanticPath, ShortcutLocation};
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
 
@@ -112,16 +112,23 @@ pub(super) fn install(
     let _ = cleanup(store, &plan.package);
 
     if let Some(previous) = previous {
-        let stale: Vec<Resource> = previous
-            .resources
-            .iter()
-            .filter(|r| !same_place(r, &previous, &receipt))
-            .cloned()
-            .collect();
-        // best effort: the new version is committed either way.
-        let _ = remove_resources(&previous, &stale, platform);
+        drop_stale(&previous, &receipt, platform);
     }
     Ok(receipt)
+}
+
+/// removes what the old version owned and the new one does not. best
+/// effort: the new version is committed either way. its uninstall hooks do
+/// not run: an upgrade replaces the package, it does not uninstall it.
+fn drop_stale(previous: &Receipt, receipt: &Receipt, platform: &dyn Platform) {
+    let stale: Vec<Resource> = previous
+        .resources
+        .iter()
+        .filter(|r| !same_place(r, previous, receipt))
+        .filter(|r| !matches!(r, Resource::UninstallHook { .. }))
+        .cloned()
+        .collect();
+    let _ = remove_resources(previous, &stale, platform);
 }
 
 /// the needs of `plan` this machine does not meet, as sentences.
@@ -156,6 +163,16 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. }) => a == b,
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
+        (
+            Resource::UninstallHook {
+                command: a,
+                arguments: x,
+            },
+            Resource::UninstallHook {
+                command: b,
+                arguments: y,
+            },
+        ) => a == b && x == y,
         (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
             a == b
         }
@@ -258,37 +275,13 @@ impl Run<'_> {
                 });
                 Ok(())
             }
-            Operation::AddPathEntry { directory, scope } => {
-                let entry = self.resolve(directory)?;
-                let text = entry.display().to_string();
-                let owned_before = self.previous.is_some_and(|p| {
-                    p.resources
-                        .iter()
-                        .any(|r| matches!(r, Resource::PathEntry { entry, .. } if *entry == text))
-                });
-                // tiny window: a crash between add and the journal write
-                // leaves the entry; it is never someone else's entry.
-                let added = self
-                    .platform
-                    .add_path_entry(*scope, &entry)
-                    .map_err(Error::Other)?;
-                if added {
-                    self.step(Undo::RemovePathEntry {
-                        entry: entry.clone(),
-                        scope: *scope,
-                    })?;
-                }
-                // a reinstall finds its own entry there; it stays ours, or
-                // the cleanup of the old receipt would take it off PATH.
-                if added || owned_before {
-                    self.resources.push(Resource::PathEntry {
-                        entry: text,
-                        scope: *scope,
-                    });
-                }
-                Ok(())
-            }
+            Operation::AddPathEntry { directory, scope } => self.path_entry(directory, *scope),
             Operation::RegisterSteamVrDriver { directory } => self.steamvr_driver(directory),
+            Operation::RunHook {
+                phase,
+                command,
+                arguments,
+            } => self.hook(*phase, command, arguments),
             Operation::CreateShortcut {
                 name,
                 target,
@@ -326,6 +319,55 @@ impl Run<'_> {
     /// preserve-if-modified file stays when it differs from what the older
     /// version installed (or nothing recorded it). returns the hash to record,
     /// the older one, so uninstall still sees the change.
+    fn path_entry(&mut self, directory: &SemanticPath, scope: Scope) -> Result<(), Error> {
+        let entry = self.resolve(directory)?;
+        let text = entry.display().to_string();
+        let owned_before = self.previous.is_some_and(|p| {
+            p.resources
+                .iter()
+                .any(|r| matches!(r, Resource::PathEntry { entry, .. } if *entry == text))
+        });
+        // tiny window: a crash between add and the journal write
+        // leaves the entry; it is never someone else's entry.
+        let added = self
+            .platform
+            .add_path_entry(scope, &entry)
+            .map_err(Error::Other)?;
+        if added {
+            self.step(Undo::RemovePathEntry {
+                entry: entry.clone(),
+                scope,
+            })?;
+        }
+        // a reinstall finds its own entry there; it stays ours, or
+        // the cleanup of the old receipt would take it off PATH.
+        if added || owned_before {
+            self.resources
+                .push(Resource::PathEntry { entry: text, scope });
+        }
+        Ok(())
+    }
+
+    /// a post-install hook runs now; what it did cannot be taken back, but
+    /// a failing one still rolls the install itself back. a pre-uninstall
+    /// hook is kept for uninstall.
+    fn hook(
+        &mut self,
+        phase: HookPhase,
+        command: &SemanticPath,
+        arguments: &[String],
+    ) -> Result<(), Error> {
+        let exe = self.resolve(command)?;
+        if phase == HookPhase::PreUninstall {
+            self.resources.push(Resource::UninstallHook {
+                command: exe.display().to_string(),
+                arguments: arguments.to_vec(),
+            });
+            return Ok(());
+        }
+        super::hook::run(&exe, arguments).map_err(Error::Other)
+    }
+
     fn steamvr_driver(&mut self, directory: &SemanticPath) -> Result<(), Error> {
         let dir = self.resolve(directory)?;
         let entry = dir.display().to_string();

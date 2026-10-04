@@ -58,6 +58,7 @@ pub enum Line {
     SteamVr,
     Shortcut,
     Register,
+    Hook,
     Service,
 }
 
@@ -235,6 +236,7 @@ const fn table(line: Line) -> [&'static str; 2] {
             "SteamVR 드라이버 등록: {item}",
         ],
         Line::Shortcut => ["Create shortcut: {item}", "바로 가기 만들기: {item}"],
+        Line::Hook => ["Run: {item}", "실행: {item}"],
         Line::Register => ["Register {item}", "{item} 등록"],
         Line::Service => ["Install service: {item}", "서비스 설치: {item}"],
     }

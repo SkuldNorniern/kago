@@ -121,6 +121,7 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                     Operation::RegisterApplication { display_name, .. } => {
                         Step::Register(display_name.clone())
                     }
+                    Operation::RunHook { command, .. } => Step::Hook(command.to_string()),
                     Operation::InstallService { id, .. } => Step::Service(id.clone()),
                 },
             };

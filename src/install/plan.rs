@@ -10,7 +10,7 @@ use super::need::Need;
 use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
-use crate::manifest::{Detect, Downgrade, File, Manifest, SemanticPath};
+use crate::manifest::{Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, SemanticPath};
 use crate::package::{PackageId, Target, Version};
 
 /// where a file source like `build:app.exe` or `themes` is on disk.
@@ -102,56 +102,21 @@ impl InstallPlan {
             }
         }
 
-        // the component each operation comes from, in step with `operations`.
-        let mut owners: Vec<Option<String>> = vec![None; directories.len()];
-        let mut operations: Vec<Operation> = directories
-            .into_iter()
-            .map(|path| Operation::CreateDirectory { path })
-            .collect();
+        let mut steps = Steps::default();
+        for path in directories {
+            steps.push(Operation::CreateDirectory { path }, None);
+        }
         for f in files {
-            owners.push(f.component);
-            operations.push(Operation::InstallFile {
+            let op = Operation::InstallFile {
                 source: f.source,
                 target: f.target,
                 size: f.size,
                 sha256: f.sha256,
                 ownership: f.ownership,
-            });
+            };
+            steps.push(op, f.component);
         }
-        for p in &resolved.paths {
-            owners.push(p.component.clone());
-            operations.push(Operation::AddPathEntry {
-                directory: p.directory.clone(),
-                scope: scope.of(p.scope),
-            });
-        }
-        for driver in &resolved.steamvr_drivers {
-            if let Err(d) = driver_shipped(driver, &operations) {
-                diagnostics.push(d);
-            }
-            owners.push(driver.component.clone());
-            operations.push(Operation::RegisterSteamVrDriver {
-                directory: driver.directory.clone(),
-            });
-        }
-        for s in &resolved.shortcuts {
-            owners.push(s.shortcut.component.clone());
-            operations.push(Operation::CreateShortcut {
-                name: s.shortcut.name.clone(),
-                target: s.target.clone(),
-                location: s.shortcut.location,
-                arguments: s.shortcut.arguments.clone(),
-            });
-        }
-        for s in &resolved.services {
-            owners.push(s.service.component.clone());
-            operations.push(Operation::InstallService {
-                id: s.service.id.clone(),
-                command: s.command.clone(),
-                arguments: s.service.arguments.clone(),
-                scope: scope.of(s.service.scope),
-            });
-        }
+        steps.resources(resolved, scope, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
                 .files
@@ -159,19 +124,20 @@ impl InstallPlan {
                 .find(|f| f.logical_id.as_ref() == Some(id))
                 .map(|f| f.target.clone())
         });
-        operations.push(Operation::RegisterApplication {
+        let register = Operation::RegisterApplication {
             display_name: manifest.application.display_name.clone(),
             entrypoint,
-        });
-
-        if diagnostics.has_errors() {
-            return (None, diagnostics);
+        };
+        steps.push(register, None);
+        for op in hooks(resolved, &mut diagnostics) {
+            steps.push(op, None);
         }
-        let choices = choices(manifest, resolved, &owners, &operations);
         let needs = needs(resolved, &mut diagnostics);
         if diagnostics.has_errors() {
             return (None, diagnostics);
         }
+        let choices = choices(manifest, resolved, &steps.owners, &steps.operations);
+        let operations = steps.operations;
         let plan = Self {
             package: manifest.package.id.clone(),
             name: manifest.package.name.clone(),
@@ -297,6 +263,96 @@ impl fmt::Display for InstallPlan {
         }
         Ok(())
     }
+}
+
+/// operations in order, each with the component that brings it.
+#[derive(Default)]
+struct Steps {
+    operations: Vec<Operation>,
+    /// in step with `operations`.
+    owners: Vec<Option<String>>,
+}
+
+impl Steps {
+    fn push(&mut self, op: Operation, owner: Option<String>) {
+        self.operations.push(op);
+        self.owners.push(owner);
+    }
+
+    /// PATH entries, SteamVR drivers, shortcuts and services.
+    fn resources(&mut self, resolved: &Resolved, scope: Scope, diagnostics: &mut Diagnostics) {
+        for p in &resolved.paths {
+            let op = Operation::AddPathEntry {
+                directory: p.directory.clone(),
+                scope: scope.of(p.scope),
+            };
+            self.push(op, p.component.clone());
+        }
+        for driver in &resolved.steamvr_drivers {
+            if let Err(d) = driver_shipped(driver, &self.operations) {
+                diagnostics.push(d);
+            }
+            let op = Operation::RegisterSteamVrDriver {
+                directory: driver.directory.clone(),
+            };
+            self.push(op, driver.component.clone());
+        }
+        for s in &resolved.shortcuts {
+            let op = Operation::CreateShortcut {
+                name: s.shortcut.name.clone(),
+                target: s.target.clone(),
+                location: s.shortcut.location,
+                arguments: s.shortcut.arguments.clone(),
+            };
+            self.push(op, s.shortcut.component.clone());
+        }
+        for s in &resolved.services {
+            let op = Operation::InstallService {
+                id: s.service.id.clone(),
+                command: s.command.clone(),
+                arguments: s.service.arguments.clone(),
+                scope: scope.of(s.service.scope),
+            };
+            self.push(op, s.service.component.clone());
+        }
+    }
+}
+
+/// the resolved hooks kago can run, with a diagnostic for each it cannot.
+fn hooks(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Operation> {
+    let mut out = Vec::new();
+    for h in &resolved.hooks {
+        match hook(h) {
+            Ok(op) => out.push(op),
+            Err(d) => diagnostics.push(d),
+        }
+    }
+    out
+}
+
+/// a hook as an operation, when kago can run it at that phase yet.
+fn hook(h: &super::ResolvedHook) -> Result<Operation, Diagnostic> {
+    let unsupported =
+        |what: String| Diagnostic::error(diagnostic::TARGET_CAPABILITY, what).at(h.hook.at.clone());
+    if h.hook.privilege == HookPrivilege::Elevated {
+        return Err(unsupported(
+            "elevated hooks need the elevation helper, which is not done yet".to_owned(),
+        ));
+    }
+    if !matches!(
+        h.hook.phase,
+        HookPhase::PostInstall | HookPhase::PreUninstall
+    ) {
+        return Err(unsupported(format!(
+            "`{}` hooks are not supported yet; use post-install or pre-uninstall",
+            h.hook.phase
+        )));
+    }
+    Ok(Operation::RunHook {
+        phase: h.hook.phase,
+        command: h.command.clone(),
+        arguments: h.hook.arguments.clone(),
+    })
 }
 
 /// what the resolved requirements need, with a diagnostic for each kago
@@ -575,6 +631,43 @@ component docs Documentation off
                 .contains("file      {app}/docs/guide/intro.md")
         );
         assert!(!everything.to_string().contains("path      "));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_post_install_and_pre_uninstall_hooks_run_for_now() {
+        let dir = payload_dir("hooks");
+        let build = |extra: &str| {
+            let src = format!(
+                "{AUREA}
+{extra}"
+            );
+            let m = Manifest::parse("Kagofile", &src).0.unwrap();
+            let target: Target = "windows-x86_64".parse().unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+        };
+        let (p, d) = build(
+            "hook post-install main-executable --setup
+",
+        );
+        assert!(d.is_empty(), "{d:?}");
+        assert!(
+            p.unwrap()
+                .to_string()
+                .contains("hook      post-install {app}/bin/aurea.exe")
+        );
+        let (p, d) = build(
+            "hook pre-install main-executable
+",
+        );
+        assert!(p.is_none());
+        assert_eq!(
+            d.iter().map(|d| d.code).collect::<Vec<_>>(),
+            [diagnostic::TARGET_CAPABILITY]
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

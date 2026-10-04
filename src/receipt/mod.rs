@@ -50,6 +50,11 @@ pub enum Resource {
     Shortcut {
         path: PathBuf,
     },
+    /// the package's own program to run first at uninstall.
+    UninstallHook {
+        command: String,
+        arguments: Vec<String>,
+    },
     /// a driver folder registered with SteamVR.
     SteamVrDriver {
         directory: String,

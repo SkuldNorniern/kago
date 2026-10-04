@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use super::Scope;
-use crate::manifest::{Ownership, SemanticPath, ShortcutLocation};
+use crate::manifest::{HookPhase, Ownership, SemanticPath, ShortcutLocation};
 
 /// one step of an install. platforms carry these out; nothing here
 /// touches the machine.
@@ -39,6 +39,13 @@ pub enum Operation {
         display_name: String,
         entrypoint: Option<SemanticPath>,
     },
+    /// runs the package's own `command`: now for `post-install`, at
+    /// uninstall for `pre-uninstall`.
+    RunHook {
+        phase: HookPhase,
+        command: SemanticPath,
+        arguments: Vec<String>,
+    },
     InstallService {
         id: String,
         command: SemanticPath,
@@ -58,6 +65,7 @@ impl Operation {
             Self::RegisterSteamVrDriver { .. } => "register-steamvr-driver",
             Self::CreateShortcut { .. } => "create-shortcut",
             Self::RegisterApplication { .. } => "register-application",
+            Self::RunHook { .. } => "run-hook",
             Self::InstallService { .. } => "install-service",
         }
     }
@@ -79,6 +87,7 @@ impl fmt::Display for Operation {
                 ..
             } => write!(f, "shortcut  {name} -> {target} ({location})"),
             Self::RegisterApplication { display_name, .. } => write!(f, "register  {display_name}"),
+            Self::RunHook { phase, command, .. } => write!(f, "hook      {phase} {command}"),
             Self::InstallService {
                 id, command, scope, ..
             } => {

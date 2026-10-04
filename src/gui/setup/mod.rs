@@ -115,6 +115,7 @@ pub enum Step {
     SteamVr(String),
     Shortcut(String),
     Register(String),
+    Hook(String),
     Service(String),
 }
 
@@ -128,6 +129,7 @@ impl Step {
             Self::SteamVr(s) => (Line::SteamVr, s),
             Self::Shortcut(s) => (Line::Shortcut, s),
             Self::Register(s) => (Line::Register, s),
+            Self::Hook(s) => (Line::Hook, s),
             Self::Service(s) => (Line::Service, s),
         };
         lang.fill(line, &[("item", item)])
