@@ -318,10 +318,17 @@ impl Lower<'_> {
             return;
         };
         if matches!(kind, SourceKind::Fetch(_)) && sha256.is_empty() {
-            self.error(
-                diagnostic::MANIFEST_VALUE,
-                node.at(),
-                "a fetched source needs `sha256 <hex>` so a changed download is caught",
+            // not an error yet: the first build downloads it once and names
+            // the hash to pin, then refuses until it is pinned.
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    diagnostic::MANIFEST_VALUE,
+                    format!(
+                        "source `{}` has no `sha256`; builds will refuse it until it is pinned",
+                        name.text
+                    ),
+                )
+                .at(Location::at(self.file, self.source, node.at())),
             );
         }
         self.sources.push(Source {

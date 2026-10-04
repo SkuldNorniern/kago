@@ -62,7 +62,10 @@ impl fmt::Display for Unpack {
 
 impl Unpack {
     /// `Auto` decided by the file name of `url`.
-    #[allow(clippy::case_sensitive_file_extension_comparisons, reason = "lowercased first")]
+    #[allow(
+        clippy::case_sensitive_file_extension_comparisons,
+        reason = "lowercased first"
+    )]
     #[must_use]
     pub fn for_url(self, url: &str) -> Self {
         if self != Self::Auto {
