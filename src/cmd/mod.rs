@@ -1,3 +1,5 @@
-pub fn run() -> i32 {
-    0
+use std::process::ExitCode;
+
+pub fn run() -> ExitCode {
+    ExitCode::SUCCESS
 }

@@ -5,18 +5,3 @@ version = 4
 [[package]]
 name = "kago"
 version = "0.1.0"
-dependencies = [
- "kago-install",
- "kago-manifest",
-]
-
-[[package]]
-name = "kago-install"
-version = "0.1.0"
-dependencies = [
- "kago-manifest",
-]
-
-[[package]]
-name = "kago-manifest"
-version = "0.1.0"

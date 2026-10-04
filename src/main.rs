@@ -1,5 +1,7 @@
 mod cmd;
 
-fn main() {
-    std::process::exit(cmd::run());
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    cmd::run()
 }

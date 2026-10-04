@@ -1,9 +1,0 @@
-[package]
-name = "kago-install"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
-kago-manifest.workspace = true
