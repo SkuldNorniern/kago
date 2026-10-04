@@ -63,6 +63,8 @@ pub(super) fn recover_one(
 ) -> Result<Option<Recovered>, Error> {
     let path = store.journal_path(package);
     if !path.exists() {
+        // backups a finished run could not delete, like a running exe.
+        let _ = fs::remove_dir_all(store.backup_dir(package));
         return Ok(None);
     }
     let entries = journal::read(&path)?;

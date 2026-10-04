@@ -301,6 +301,16 @@ impl Run<'_> {
     fn directory(&mut self, path: &SemanticPath) -> Result<(), Error> {
         let dir = self.resolve(path)?;
         if dir.is_dir() {
+            // an upgrade keeps owning what the older version created.
+            let owned = self.previous.is_some_and(|p| {
+                p.resources
+                    .iter()
+                    .any(|r| matches!(r, Resource::Directory { path: owned } if owned == path))
+            });
+            if owned {
+                self.resources
+                    .push(Resource::Directory { path: path.clone() });
+            }
             return Ok(());
         }
         if let Some(parent) = dir.parent()

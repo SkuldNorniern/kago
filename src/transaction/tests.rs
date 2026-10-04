@@ -347,3 +347,16 @@ fn unmodified_config_is_upgraded() {
         b"cfg v2"
     );
 }
+
+#[test]
+fn upgrade_then_uninstall_leaves_nothing() {
+    let w = World::new("upgrade-uninstall");
+    w.install(MANIFEST).unwrap();
+    fs::write(w.dir.join("payload/app.exe"), b"v2").unwrap();
+    w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(done.failed.is_empty() && done.kept.is_empty(), "{done:?}");
+    assert!(!w.app().exists());
+    assert!(!w.dir.join("machine/config/App").exists());
+    assert!(!w.store.backup_dir(&World::id()).exists());
+}
