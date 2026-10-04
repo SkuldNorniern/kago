@@ -1,11 +1,13 @@
 //! install model. resolves variants for a target into the typed install plan.
 
+mod need;
 mod operation;
 mod plan;
 mod resolve;
 mod roots;
 mod scope;
 
+pub use need::{Need, at_least};
 pub use operation::{Digest, Operation};
 pub use plan::{Choice, InstallPlan, Sources, hash};
 pub use resolve::{

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest as _, Sha256};
 
+use super::need::Need;
 use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
@@ -49,6 +50,9 @@ pub struct InstallPlan {
     /// install. upgrades keep the folder of the install they replace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<PathBuf>,
+    /// what the machine must have before anything changes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<Need>,
 }
 
 /// an optional component the setup can offer as a tick box.
@@ -164,6 +168,10 @@ impl InstallPlan {
             return (None, diagnostics);
         }
         let choices = choices(manifest, resolved, &owners, &operations);
+        let needs = needs(resolved, &mut diagnostics);
+        if diagnostics.has_errors() {
+            return (None, diagnostics);
+        }
         let plan = Self {
             package: manifest.package.id.clone(),
             name: manifest.package.name.clone(),
@@ -176,6 +184,7 @@ impl InstallPlan {
             operations,
             choices,
             location: None,
+            needs,
         };
         (Some(plan), diagnostics)
     }
@@ -288,6 +297,19 @@ impl fmt::Display for InstallPlan {
         }
         Ok(())
     }
+}
+
+/// what the resolved requirements need, with a diagnostic for each kago
+/// cannot check yet.
+fn needs(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Need> {
+    let mut out = Vec::new();
+    for requirement in &resolved.requirements {
+        match Need::from_requirement(requirement) {
+            Ok(need) => out.push(need),
+            Err(d) => diagnostics.push(d),
+        }
+    }
+    out
 }
 
 /// a SteamVR driver folder must ship its `driver.vrdrivermanifest`, or

@@ -265,6 +265,26 @@ target linux setup appimage
     }
 
     #[test]
+    fn require_reads_os_minimums_and_software() {
+        let (m, codes) = check(&with(
+            "require windows 10.0.19041
+require steamvr
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        assert_eq!(m.requirements.len(), 2);
+        assert_eq!(m.requirements[0].kind, RequirementKind::Os);
+        assert_eq!(m.requirements[0].minimum.as_deref(), Some("10.0.19041"));
+        assert_eq!(m.requirements[1].kind, RequirementKind::Runtime);
+        let (_, codes) = check(&with(
+            "require windows
+",
+        ));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
     fn components_take_about_and_detect() {
         let (m, codes) = check(&with(
             "component steamvr \"SteamVR driver\" on

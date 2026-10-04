@@ -81,6 +81,42 @@ impl Key {
         Ok(Some(Self(key)))
     }
 
+    /// opened for reading only, which works without admin rights on
+    /// `HKLM`. `None` when the key does not exist.
+    pub fn open_read(hive: HKEY, path: &str) -> Result<Option<Self>, String> {
+        let mut key = HKEY::default();
+        // SAFETY: as in create.
+        let e = unsafe { RegOpenKeyExW(hive, &HSTRING::from(path), None, KEY_READ, &raw mut key) };
+        if e == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        check(e, "cannot open registry key", path)?;
+        Ok(Some(Self(key)))
+    }
+
+    /// `None` when the value does not exist or is not a `REG_DWORD`.
+    pub fn dword(&self, name: &str) -> Result<Option<u32>, String> {
+        let mut kind = REG_VALUE_TYPE::default();
+        let mut value = 0u32;
+        let mut size = 4u32;
+        // SAFETY: value holds the 4 bytes `size` says.
+        let e = unsafe {
+            RegQueryValueExW(
+                self.0,
+                &HSTRING::from(name),
+                None,
+                Some(&raw mut kind),
+                Some((&raw mut value).cast()),
+                Some(&raw mut size),
+            )
+        };
+        if e == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        check(e, "cannot read registry value", name)?;
+        Ok((kind == REG_DWORD).then_some(value))
+    }
+
     /// `None` when the value does not exist or is not a string.
     pub fn text(&self, name: &str) -> Result<Option<Text>, String> {
         let name_w = HSTRING::from(name);

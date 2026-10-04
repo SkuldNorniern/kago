@@ -97,6 +97,22 @@ impl Platform for Windows {
         super::openvr::remove(&openvr_paths()?, directory)
     }
 
+    fn os_version(&self) -> Option<String> {
+        let key = Key::open_read(
+            windows::Win32::System::Registry::HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+        )
+        .ok()??;
+        let major = key.dword("CurrentMajorVersionNumber").ok()??;
+        let minor = key.dword("CurrentMinorVersionNumber").ok()??;
+        let build = key.text("CurrentBuildNumber").ok()??.value;
+        Some(format!("{major}.{minor}.{build}"))
+    }
+
+    fn has(&self, what: Detect) -> bool {
+        detect(what)
+    }
+
     fn create_shortcut(
         &self,
         link: &Path,
@@ -140,5 +156,18 @@ impl Platform for Windows {
             ));
         }
         registry::delete_tree(registry::hive(scope), key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// reads only: the version of the machine running the tests.
+    #[test]
+    fn os_version_reads_this_machine() {
+        let version = Windows.os_version().expect("a windows version");
+        assert!(version.split('.').count() == 3, "{version}");
+        assert!(crate::install::at_least(&version, "10.0"), "{version}");
     }
 }

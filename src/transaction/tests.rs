@@ -16,6 +16,7 @@ struct Fake {
     registered: RefCell<BTreeSet<String>>,
     steamvr: RefCell<Vec<PathBuf>>,
     fail_register: bool,
+    has_steamvr: bool,
 }
 
 impl Fake {
@@ -26,6 +27,7 @@ impl Fake {
             registered: RefCell::new(BTreeSet::new()),
             steamvr: RefCell::new(vec![PathBuf::from("/other/driver")]),
             fail_register: false,
+            has_steamvr: false,
         }
     }
 }
@@ -59,6 +61,14 @@ impl Platform for Fake {
     fn remove_path_entry(&self, _: Scope, entry: &Path) -> Result<(), String> {
         self.path.borrow_mut().retain(|p| p != entry);
         Ok(())
+    }
+
+    fn os_version(&self) -> Option<String> {
+        Some("10.0.19045".into())
+    }
+
+    fn has(&self, detect: crate::manifest::Detect) -> bool {
+        detect == crate::manifest::Detect::SteamVr && self.has_steamvr
     }
 
     fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {
@@ -508,4 +518,27 @@ fn chosen_folder_is_kept_on_upgrade_and_cleaned_on_uninstall() {
 
     uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert!(!moved.exists());
+}
+
+#[test]
+fn unmet_needs_stop_before_anything_changes() {
+    let mut w = World::new("needs");
+    let err = w
+        .install(&format!(
+            "{MANIFEST}require steamvr\nrequire windows 99.0\n"
+        ))
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Unmet(needs) if needs == &["SteamVR", "Windows 99.0 or newer"]),
+        "{err}"
+    );
+    assert!(!w.app().exists());
+    assert!(w.store.journals().unwrap().is_empty());
+
+    w.fake.has_steamvr = true;
+    w.install(&format!(
+        "{MANIFEST}require steamvr\nrequire windows 10.0.19041\n"
+    ))
+    .unwrap();
+    assert!(w.app().join("app.exe").is_file());
 }

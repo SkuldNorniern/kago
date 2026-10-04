@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
-use crate::install::{InstallPlan, Operation, Roots, Scope, hash};
+use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
 use crate::manifest::{Downgrade, Ownership, Root, SemanticPath, ShortcutLocation};
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
@@ -19,6 +19,10 @@ pub(super) fn install(
     runtime: &Path,
     observe: &mut dyn FnMut(usize, usize, &Operation),
 ) -> Result<Receipt, Error> {
+    let unmet = unmet(plan, platform);
+    if !unmet.is_empty() {
+        return Err(Error::Unmet(unmet));
+    }
     let previous = store.read_receipt(&plan.package)?;
     if let Some(installed) = &previous
         && plan.downgrade == Downgrade::Deny
@@ -118,6 +122,25 @@ pub(super) fn install(
         let _ = remove_resources(&previous, &stale, platform);
     }
     Ok(receipt)
+}
+
+/// the needs of `plan` this machine does not meet, as sentences.
+fn unmet(plan: &InstallPlan, platform: &dyn Platform) -> Vec<String> {
+    plan.needs
+        .iter()
+        .filter_map(|need| {
+            let met = match need {
+                Need::Os { os, minimum } => {
+                    *os != plan.target.os()
+                        || platform
+                            .os_version()
+                            .is_some_and(|have| at_least(&have, minimum))
+                }
+                Need::Software { detect } => platform.has(*detect),
+            };
+            (!met).then(|| need.to_string())
+        })
+        .collect()
 }
 
 /// whether the new receipt still owns what `old` names, maybe under

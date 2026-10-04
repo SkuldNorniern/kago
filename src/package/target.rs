@@ -263,3 +263,4 @@ mod tests {
         assert!(Target::host().is_some());
     }
 }
+crate::string_serde!(Os);

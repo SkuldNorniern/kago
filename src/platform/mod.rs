@@ -76,6 +76,12 @@ pub trait Platform {
     /// when SteamVR's path file cannot be read or written.
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
 
+    /// this OS's version as dotted numbers, like `10.0.22631`.
+    fn os_version(&self) -> Option<String>;
+
+    /// whether what `detect` names is on this machine.
+    fn has(&self, detect: crate::manifest::Detect) -> bool;
+
     /// # Errors
     ///
     /// when the shortcut cannot be written.

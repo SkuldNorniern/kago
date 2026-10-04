@@ -12,7 +12,8 @@ use super::version;
 use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
     RawApplication, RawComponent, RawFile, RawIcon, RawInstall, RawLicense, RawManifest,
-    RawPackage, RawPath, RawShortcut, RawSteamVrDriver, RawTarget, RawTargets, RawWhen,
+    RawPackage, RawPath, RawRequirement, RawShortcut, RawSteamVrDriver, RawTarget, RawTargets,
+    RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::package::{Arch, Artifact, Libc, Os};
@@ -55,6 +56,7 @@ pub fn lower(
         files: Vec::new(),
         paths: Vec::new(),
         steamvr_drivers: Vec::new(),
+        requirements: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
         pending: Vec::new(),
@@ -110,6 +112,7 @@ struct Lower<'a> {
     files: Vec<RawFile>,
     paths: Vec<Spanned<RawPath>>,
     steamvr_drivers: Vec<RawSteamVrDriver>,
+    requirements: Vec<RawRequirement>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
     pending: Vec<Pending>,
@@ -170,6 +173,7 @@ impl Lower<'_> {
             "shortcut" => self.shortcut(node, scope),
             "path" => self.path(node, scope),
             "steamvr" => self.steamvr(node, scope),
+            "require" => self.require(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
                 let mut inner = scope.clone();
@@ -181,7 +185,7 @@ impl Lower<'_> {
                     self.item(child, &inner);
                 }
             }
-            "service" | "hook" | "require" => self.error(
+            "service" | "hook" => self.error(
                 diagnostic::MANIFEST_VALUE,
                 node.at(),
                 format!("`{}` is not supported yet", node.keyword()),
@@ -189,7 +193,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, component, when, target or license"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, require, component, when, target or license"
                 ),
             ),
         }
@@ -475,6 +479,46 @@ impl Lower<'_> {
             source,
             target,
             ownership,
+            when,
+        });
+    }
+
+    /// `require <os> <minimum>` or `require <software>`, with
+    /// `install-if-missing` to ask for more than a check.
+    fn require(&mut self, node: &Node, scope: &Scope) {
+        self.no_children(node);
+        let usage = "expected `require windows 10.0.19041` or `require steamvr`";
+        let mut words: Vec<&Word> = node.args().iter().collect();
+        let policy = match words.last() {
+            Some(w) if w.text == "install-if-missing" && !w.quoted => words.pop().map(spanned),
+            _ => None,
+        };
+        let Some((what, rest)) = words.split_first() else {
+            self.syntax(node.at(), usage);
+            return;
+        };
+        let is_os = what.text.parse::<Os>().is_ok();
+        let minimum = match (is_os, rest) {
+            (true, [minimum]) => Some(minimum.text.clone()),
+            (false, []) => None,
+            _ => {
+                self.syntax(node.at(), usage);
+                return;
+            }
+        };
+        let os_word = (*what).clone();
+        let when = if is_os {
+            self.when(scope, std::slice::from_ref(&os_word))
+        } else {
+            self.when(scope, &[])
+        };
+        let kind = if is_os { "os" } else { "runtime" };
+        self.requirements.push(RawRequirement {
+            id: spanned(what),
+            kind: spanned_text(what, kind.to_owned()),
+            policy,
+            version: None,
+            minimum,
             when,
         });
     }
@@ -818,7 +862,7 @@ impl Lower<'_> {
             shortcuts: self.shortcuts,
             services: Vec::new(),
             hooks: Vec::new(),
-            requirements: Vec::new(),
+            requirements: self.requirements,
             update: None,
             targets: Some(RawTargets {
                 windows: target(self.targets.remove(&Os::Windows)),

@@ -36,6 +36,8 @@ pub enum Error {
         installed: String,
         offered: String,
     },
+    /// the machine lacks what the package needs; nothing was changed.
+    Unmet(Vec<String>),
     /// the install failed and everything it did was taken back.
     RolledBack(String),
     Other(String),
@@ -56,6 +58,13 @@ impl fmt::Display for Error {
                 f,
                 "{installed} is installed, which is newer than {offered}; downgrades are not allowed for this package"
             ),
+            Self::Unmet(needs) => {
+                write!(
+                    f,
+                    "this package needs {}; nothing was changed",
+                    needs.join(", ")
+                )
+            }
             Self::RolledBack(e) => {
                 write!(f, "{e}\nnothing was changed, the install was rolled back")
             }
