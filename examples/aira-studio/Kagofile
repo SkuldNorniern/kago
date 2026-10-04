@@ -1,11 +1,19 @@
-# goes at the aira-studio repo root. build first: cargo build --release
+# goes at the aira-studio repo root. build first: cargo build --release,
+# and the SteamVR driver in ../aira-motion/aira-openvr/driver with CMake.
 package dev.eira.aira-studio
   name Aira Studio
   version from cargo
   publisher Eira
   description Set up and watch Aira trackers
 
+source motion
+  dir ../aira-motion
+
 app aira-studio
   windows target/release/aira-studio.exe
 
 shortcut
+
+component steamvr "SteamVR driver" on
+  when windows
+    steamvr motion:aira-openvr/driver/build/aira
