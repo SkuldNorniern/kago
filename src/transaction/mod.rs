@@ -31,8 +31,8 @@ pub enum Error {
     NotInstalled(PackageId),
     /// a newer version is installed and the package denies downgrades.
     Downgrade {
-        installed: Version,
-        offered: Version,
+        installed: String,
+        offered: String,
     },
     /// the install failed and everything it did was taken back.
     RolledBack(String),
