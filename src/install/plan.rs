@@ -9,7 +9,7 @@ use sha2::{Digest as _, Sha256};
 use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
-use crate::manifest::{File, Manifest, SemanticPath};
+use crate::manifest::{Downgrade, File, Manifest, SemanticPath};
 use crate::package::{PackageId, Target, Version};
 
 /// everything one install does, in order. same manifest, target, scope,
@@ -23,6 +23,8 @@ pub struct InstallPlan {
     pub target: Target,
     pub scope: Scope,
     pub components: Vec<String>,
+    /// whether this may replace a newer installed version.
+    pub downgrade: Downgrade,
     pub operations: Vec<Operation>,
 }
 
@@ -109,6 +111,7 @@ impl InstallPlan {
             target,
             scope,
             components: resolved.components.iter().map(str::to_owned).collect(),
+            downgrade: manifest.install.downgrade,
             operations,
         };
         (Some(plan), diagnostics)

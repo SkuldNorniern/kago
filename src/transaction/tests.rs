@@ -274,3 +274,31 @@ fn second_process_is_locked_out() {
     let _held = lock(&w.store, &World::id()).unwrap();
     assert!(matches!(w.install(MANIFEST), Err(Error::Locked(_))));
 }
+
+#[test]
+fn downgrade_is_refused_unless_allowed() {
+    let w = World::new("downgrade");
+    w.install(MANIFEST).unwrap();
+    let older = MANIFEST.replace("1.0.0", "0.9.0");
+    let err = w.install(&older).unwrap_err();
+    assert!(matches!(err, Error::Downgrade { .. }), "{err}");
+    assert_eq!(
+        w.store
+            .read_receipt(&World::id())
+            .unwrap()
+            .unwrap()
+            .version
+            .to_string(),
+        "1.0.0"
+    );
+    // same version again is a reinstall, not a downgrade.
+    w.install(MANIFEST).unwrap();
+    let allowed = older.replace(
+        "[application]",
+        "[install]
+downgrade = \"allow\"
+
+[application]",
+    );
+    assert_eq!(w.install(&allowed).unwrap().version.to_string(), "0.9.0");
+}

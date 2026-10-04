@@ -29,6 +29,11 @@ pub enum Error {
     /// another kago is working on this package.
     Locked(PackageId),
     NotInstalled(PackageId),
+    /// a newer version is installed and the package denies downgrades.
+    Downgrade {
+        installed: Version,
+        offered: Version,
+    },
     /// the install failed and everything it did was taken back.
     RolledBack(String),
     Other(String),
@@ -45,6 +50,10 @@ impl fmt::Display for Error {
         match self {
             Self::Locked(p) => write!(f, "{p} is being changed by another kago process"),
             Self::NotInstalled(p) => write!(f, "{p} is not installed in this scope"),
+            Self::Downgrade { installed, offered } => write!(
+                f,
+                "{installed} is installed, which is newer than {offered}; downgrades are not allowed for this package"
+            ),
             Self::RolledBack(e) => {
                 write!(f, "{e}\nnothing was changed, the install was rolled back")
             }

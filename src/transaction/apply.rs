@@ -6,7 +6,7 @@ use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Operation, Roots, Scope, hash};
-use crate::manifest::{Root, SemanticPath, ShortcutLocation};
+use crate::manifest::{Downgrade, Root, SemanticPath, ShortcutLocation};
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
 
@@ -19,6 +19,15 @@ pub(super) fn install(
     runtime: &Path,
 ) -> Result<Receipt, Error> {
     let previous = store.read_receipt(&plan.package)?;
+    if let Some(installed) = &previous
+        && plan.downgrade == Downgrade::Deny
+        && plan.version.cmp_precedence(&installed.version) == std::cmp::Ordering::Less
+    {
+        return Err(Error::Downgrade {
+            installed: installed.version.to_string(),
+            offered: plan.version.to_string(),
+        });
+    }
     let roots = platform
         .roots(plan.scope, &plan.name)
         .map_err(Error::Other)?;
