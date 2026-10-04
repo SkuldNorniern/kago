@@ -1,5 +1,6 @@
 //! `kago.toml` parsing, `when` selectors, normalize, validate and schema migration.
 
+mod kagofile;
 mod parse;
 mod path;
 mod policy;
