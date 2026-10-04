@@ -1,5 +1,6 @@
 mod args;
 mod check;
+mod lifecycle;
 mod plan;
 
 use std::path::{Path, PathBuf};
@@ -19,6 +20,14 @@ commands:
   plan [manifest] [--target <target>] [--scope user|machine]
        [--components <a,b>]
                 print what an install would do, without doing it
+  install [manifest] [--scope user|machine] [--components <a,b>]
+                install the manifest on this machine
+  uninstall <package-id> [--scope user|machine]
+                remove everything the install owns
+  status [--scope user|machine]
+                list installed packages
+  recover [--scope user|machine]
+                finish or roll back installs a crash left behind
 
 manifest is a kago.toml or the directory holding one (default: .)
 targets look like windows-x86_64, macos-aarch64, linux-x86_64-musl
@@ -37,6 +46,12 @@ pub fn run() -> ExitCode {
         "plan" => {
             Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
         }
+        "install" => {
+            Args::parse(rest, &["--scope", "--components"]).and_then(|a| lifecycle::install(&a))
+        }
+        "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
+        "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),
+        "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
