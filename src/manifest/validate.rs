@@ -213,6 +213,7 @@ impl Validator<'_> {
             downgrade: self.keyword("install.downgrade", i.downgrade.as_ref(), d.downgrade),
             repair: i.repair.unwrap_or(d.repair),
             rollback: i.rollback.unwrap_or(d.rollback),
+            look: self.keyword("install.look", i.look.as_ref(), d.look),
         }
     }
 

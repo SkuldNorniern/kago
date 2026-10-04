@@ -58,6 +58,7 @@ pub struct RawInstall {
     pub downgrade: Option<Spanned<String>>,
     pub repair: Option<bool>,
     pub rollback: Option<bool>,
+    pub look: Option<Spanned<String>>,
 }
 
 #[derive(Debug)]

@@ -16,7 +16,7 @@ pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
     AppKind, Downgrade, Elevation, InstallPolicy, LicenseFormat, ScopeChoice, ScopeConflict,
-    Upgrade,
+    SetupLook, Upgrade,
 };
 pub use resource::{
     Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
@@ -229,6 +229,19 @@ target linux setup appimage
         assert_eq!(m.package.name, "tool");
         assert_eq!(m.shortcuts[0].name, "tool");
         assert_eq!(m.artifacts[&Os::Windows], vec![Artifact::Setup]);
+    }
+
+    #[test]
+    fn setup_look_defaults_to_modern() {
+        let (m, _) = check(AUREA);
+        assert_eq!(m.unwrap().install.look, SetupLook::Modern);
+        let (m, codes) = check(&AUREA.replace("scope choose", "scope choose
+  setup native"));
+        assert!(codes.is_empty(), "{codes:?}");
+        assert_eq!(m.unwrap().install.look, SetupLook::Native);
+        let (_, codes) = check(&AUREA.replace("scope choose", "scope choose
+  setup fancy"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
     }
 
     #[test]

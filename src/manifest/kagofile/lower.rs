@@ -47,6 +47,7 @@ pub fn lower(
             downgrade: None,
             repair: None,
             rollback: None,
+            look: None,
         },
         license: None,
         components: Vec::new(),
@@ -229,10 +230,11 @@ impl Lower<'_> {
                 "conflict" => self.install.scope_conflict = self.one(child),
                 "elevation" => self.install.elevation = self.one(child),
                 "downgrade" => self.install.downgrade = self.one(child),
+                "setup" => self.install.look = self.one(child),
                 other => self.syntax(
                     child.at(),
                     format!(
-                        "unknown package field `{other}`; expected name, version, publisher, description, homepage, scope, conflict, elevation or downgrade"
+                        "unknown package field `{other}`; expected name, version, publisher, description, homepage, scope, conflict, elevation, downgrade or setup"
                     ),
                 ),
             }

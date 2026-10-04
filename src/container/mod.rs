@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::install::{Digest, InstallPlan, Operation, hash};
-use crate::manifest::SemanticPath;
+use crate::manifest::{SemanticPath, SetupLook};
 
 pub const MAGIC: &[u8; 8] = b"KAGOPKG1";
 pub const FORMAT: u32 = 1;
@@ -26,6 +26,32 @@ pub struct Header {
     pub format: u32,
     pub plan: InstallPlan,
     pub payload: Vec<Entry>,
+    #[serde(default)]
+    pub setup: Setup,
+}
+
+/// what the setup window shows besides the plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Setup {
+    pub look: SetupLook,
+    pub license: Option<LicenseText>,
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            look: SetupLook::Modern,
+            license: None,
+        }
+    }
+}
+
+/// the license to show before installing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseText {
+    pub text: String,
+    /// whether installing needs the user to accept it.
+    pub accept: bool,
 }
 
 /// one payload file, relative to the end of the header.
@@ -47,7 +73,7 @@ const LEVEL: i32 = 19;
 /// # Errors
 ///
 /// when a payload file cannot be read or `out` cannot be written.
-pub fn write(plan: &InstallPlan, out: &mut impl Write) -> io::Result<u64> {
+pub fn write(plan: &InstallPlan, setup: &Setup, out: &mut impl Write) -> io::Result<u64> {
     let mut plan = plan.clone();
     let mut packed = Vec::new();
     let mut payload = Vec::new();
@@ -77,6 +103,7 @@ pub fn write(plan: &InstallPlan, out: &mut impl Write) -> io::Result<u64> {
         format: FORMAT,
         plan,
         payload,
+        setup: setup.clone(),
     })
     .map_err(io::Error::other)?;
     out.write_all(MAGIC)?;
@@ -216,7 +243,7 @@ mod tests {
         let path = dir.join("out.bin");
         let mut out = fs::File::create(&path).unwrap();
         out.write_all(b"stub").unwrap();
-        write(&plan, &mut out).unwrap();
+        write(&plan, &Setup::default(), &mut out).unwrap();
         drop(out);
 
         let mut c = Container::open(&path, 4).unwrap();

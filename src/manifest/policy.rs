@@ -81,6 +81,12 @@ keywords! {
     LicenseFormat { Text => "text", Markdown => "markdown", Rtf => "rtf", Html => "html" }
 }
 
+keywords! {
+    /// `setup` in the package block: how the setup window looks. `modern`
+    /// is drawn on a canvas, `native` is a classic wizard of system widgets.
+    SetupLook { Modern => "modern", Native => "native" }
+}
+
 /// `[install]` after defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPolicy {
@@ -91,6 +97,7 @@ pub struct InstallPolicy {
     pub downgrade: Downgrade,
     pub repair: bool,
     pub rollback: bool,
+    pub look: SetupLook,
 }
 
 impl Default for InstallPolicy {
@@ -103,6 +110,7 @@ impl Default for InstallPolicy {
             downgrade: Downgrade::Deny,
             repair: true,
             rollback: true,
+            look: SetupLook::Modern,
         }
     }
 }

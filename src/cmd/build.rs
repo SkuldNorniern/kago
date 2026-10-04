@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use kago::container::{LicenseText, Setup};
 use kago::format::ico::{self, IconGroup};
 use kago::format::setup;
 use kago::install::{Sources, folder_name, hash};
@@ -47,7 +48,11 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         None => &me,
     };
     let icon = icon(&loaded, target)?;
-    let size = setup::build(stub, &plan, icon.as_ref(), &out)
+    let presentation = Setup {
+        look: loaded.manifest.install.look,
+        license: license(&loaded, target)?,
+    };
+    let size = setup::build(stub, &plan, &presentation, icon.as_ref(), &out)
         .map_err(|e| format!("{}: {e}", out.display()))?;
     if stub != me {
         let _ = fs::remove_file(stub);
@@ -58,6 +63,19 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     println!("  sha256 {digest}");
     println!("  unsigned");
     Ok(ExitCode::SUCCESS)
+}
+
+/// the license text to show, read from the manifest's `license` file.
+fn license(loaded: &Loaded, target: Target) -> Result<Option<LicenseText>, String> {
+    let Some(license) = &loaded.manifest.license else {
+        return Ok(None);
+    };
+    let path = Payload::new(&loaded.manifest, &loaded.base, target).locate(&license.file)?;
+    let text = fs::read_to_string(&path).map_err(|e| format!("license {}: {e}", path.display()))?;
+    Ok(Some(LicenseText {
+        text,
+        accept: license.require_acceptance,
+    }))
 }
 
 /// the first `.ico` among `[[application.icons]]` that matches `target`.
