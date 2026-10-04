@@ -66,7 +66,7 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
         for failed in &done.failed {
             eprintln!("could not remove {failed}");
         }
-        eprintln!("run `kago uninstall {package}` again once those are free");
+        eprintln!("close the app if it is running, then run `kago uninstall {package}` again");
         Ok(ExitCode::FAILURE)
     }
 }

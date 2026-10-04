@@ -88,7 +88,9 @@ pub(super) fn install(
     store.write_receipt(&receipt)?;
     journal.write(&Entry::Commit)?;
     drop(journal);
-    cleanup(store, &plan.package)?;
+    // committed. a backup still held open (the old exe of a running app)
+    // keeps the journal around; the next kago run finishes the cleanup.
+    let _ = cleanup(store, &plan.package);
 
     if let Some(previous) = previous {
         let stale: Vec<Resource> = previous
