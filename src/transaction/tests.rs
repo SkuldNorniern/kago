@@ -187,6 +187,7 @@ fn install_then_uninstall_leaves_nothing() {
     assert_eq!(*w.fake.path.borrow(), [PathBuf::from("/already/there")]);
     assert!(w.fake.registered.borrow().is_empty());
     assert_eq!(w.store.read_receipt(&World::id()).unwrap(), None);
+    assert!(!w.store.lock_path(&World::id()).exists());
 }
 
 #[test]

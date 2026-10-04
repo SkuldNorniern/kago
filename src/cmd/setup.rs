@@ -60,5 +60,9 @@ fn install(exe: &Path, embedded: Embedded) -> Result<(), String> {
         Ok(())
     })();
     let _ = fs::remove_dir_all(&staging);
+    if let Some(parent) = staging.parent() {
+        // only when no other setup is staging.
+        let _ = fs::remove_dir(parent);
+    }
     result
 }

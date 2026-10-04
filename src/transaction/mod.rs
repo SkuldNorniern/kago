@@ -125,7 +125,7 @@ pub fn uninstall(
     platform: &dyn Platform,
     store: &Store,
 ) -> Result<Uninstalled, Error> {
-    let _lock = lock(store, package)?;
+    let held = lock(store, package)?;
     recovery::recover_one(store, package, platform)?;
     let receipt = store
         .read_receipt(package)?
@@ -133,6 +133,9 @@ pub fn uninstall(
     let outcome = remove_resources(&receipt, &receipt.resources, platform);
     if outcome.left.is_empty() {
         store.remove_receipt(package)?;
+        drop(held);
+        // nothing of this package is left; the lock file can go too.
+        let _ = fs::remove_file(store.lock_path(package));
     } else {
         let mut rest = receipt.clone();
         rest.resources = outcome.left;
