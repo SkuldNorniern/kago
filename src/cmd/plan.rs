@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use kago::install::{InstallPlan, Scope, Selection, choose, resolve};
 use kago::manifest::{Context, Manifest};
 use kago::package::Target;
+use kago::payload::Payload;
 
 use super::args::Args;
 use super::check::targets;
@@ -58,7 +59,9 @@ pub fn build(args: &Args, target: Target) -> Result<Option<(Loaded, InstallPlan)
         }
     };
     let base = path.parent().unwrap_or(Path::new("."));
-    let (plan, diagnostics) = InstallPlan::build(&manifest, &resolved, target, scope, base);
+    let payload = Payload::new(&manifest, base, target);
+    let (plan, diagnostics) = InstallPlan::build(&manifest, &resolved, target, scope, &payload);
+    drop(payload);
     report(&diagnostics);
     Ok(plan.map(|plan| {
         (

@@ -96,6 +96,30 @@ impl Target {
         Self::new(os, arch, libc).ok()
     }
 
+    /// the Rust target triple, like `x86_64-pc-windows-msvc`.
+    #[must_use]
+    pub const fn triple(&self) -> &'static str {
+        match (self.os, self.arch, self.libc) {
+            (Os::Windows, Arch::X86_64, _) => "x86_64-pc-windows-msvc",
+            (Os::Windows, Arch::Aarch64, _) => "aarch64-pc-windows-msvc",
+            (Os::Macos, Arch::X86_64, _) => "x86_64-apple-darwin",
+            (Os::Macos, Arch::Aarch64, _) => "aarch64-apple-darwin",
+            (Os::Linux, Arch::X86_64, Some(Libc::Musl)) => "x86_64-unknown-linux-musl",
+            (Os::Linux, Arch::X86_64, _) => "x86_64-unknown-linux-gnu",
+            (Os::Linux, Arch::Aarch64, Some(Libc::Musl)) => "aarch64-unknown-linux-musl",
+            (Os::Linux, Arch::Aarch64, _) => "aarch64-unknown-linux-gnu",
+        }
+    }
+
+    /// executable suffix: `.exe` on Windows, empty elsewhere.
+    #[must_use]
+    pub const fn exe_suffix(&self) -> &'static str {
+        match self.os {
+            Os::Windows => ".exe",
+            _ => "",
+        }
+    }
+
     #[must_use]
     pub const fn os(&self) -> Os {
         self.os

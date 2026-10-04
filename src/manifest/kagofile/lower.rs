@@ -242,7 +242,11 @@ impl Lower<'_> {
         }
         if package.name.is_empty() {
             // a later default: the last id segment.
-            id.text.rsplit('.').next().unwrap_or(&id.text).clone_into(&mut package.name);
+            id.text
+                .rsplit('.')
+                .next()
+                .unwrap_or(&id.text)
+                .clone_into(&mut package.name);
         }
         if !has_version {
             self.error(

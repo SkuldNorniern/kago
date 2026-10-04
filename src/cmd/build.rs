@@ -4,9 +4,10 @@ use std::process::ExitCode;
 
 use kago::format::ico::{self, IconGroup};
 use kago::format::setup;
-use kago::install::{folder_name, hash};
+use kago::install::{Sources, folder_name, hash};
 use kago::manifest::Context;
 use kago::package::{Artifact, Os, Target};
+use kago::payload::Payload;
 
 use super::args::Args;
 use super::check::targets;
@@ -71,7 +72,7 @@ fn icon(loaded: &Loaded, target: Target) -> Result<Option<IconGroup>, String> {
     else {
         return Ok(None);
     };
-    let path = loaded.base.join(&icon.source);
+    let path = Payload::new(&loaded.manifest, &loaded.base, target).locate(&icon.source)?;
     let bytes = fs::read(&path).map_err(|e| format!("icon {}: {e}", path.display()))?;
     ico::parse(&bytes)
         .map(Some)

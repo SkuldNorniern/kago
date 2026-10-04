@@ -190,7 +190,7 @@ mod tests {
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0
             .unwrap();
-        let plan = InstallPlan::build(&m, &r, target, Scope::User, &dir)
+        let plan = InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
             .0
             .unwrap();
 

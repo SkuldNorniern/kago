@@ -25,3 +25,6 @@ rustc-ice-*.txt
 
 # kago build output
 /dist
+
+# kagofile fetch cache and unpacked sources
+.kago/

@@ -31,6 +31,7 @@ pub mod gui;
 pub mod install;
 pub mod manifest;
 pub mod package;
+pub mod payload;
 pub mod platform;
 pub mod receipt;
 pub mod transaction;

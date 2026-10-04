@@ -7,7 +7,7 @@ mod roots;
 mod scope;
 
 pub use operation::{Digest, Operation};
-pub use plan::{InstallPlan, hash};
+pub use plan::{InstallPlan, Sources, hash};
 pub use resolve::{
     Resolved, ResolvedHook, ResolvedPath, ResolvedService, ResolvedShortcut, Selection, resolve,
 };

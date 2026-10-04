@@ -118,7 +118,7 @@ impl World {
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0
             .unwrap();
-        InstallPlan::build(&m, &r, target, Scope::User, &self.dir)
+        InstallPlan::build(&m, &r, target, Scope::User, self.dir.as_path())
             .0
             .unwrap()
     }

@@ -12,6 +12,21 @@ use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{Downgrade, File, Manifest, SemanticPath};
 use crate::package::{PackageId, Target, Version};
 
+/// where a file source like `build:app.exe` or `themes` is on disk.
+pub trait Sources {
+    /// # Errors
+    ///
+    /// when the source cannot be found or prepared, like a failed fetch.
+    fn locate(&self, reference: &str) -> Result<PathBuf, String>;
+}
+
+/// plain paths relative to a directory.
+impl Sources for Path {
+    fn locate(&self, reference: &str) -> Result<PathBuf, String> {
+        Ok(self.join(reference))
+    }
+}
+
 /// everything one install does, in order. same manifest, target, scope,
 /// components and payload give the same plan.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -30,19 +45,19 @@ pub struct InstallPlan {
 
 impl InstallPlan {
     /// turns a resolution into concrete steps. reads the payload under
-    /// `base` (the manifest directory) to expand directories and hash files.
+    /// the payload through `sources` to expand directories and hash files.
     #[must_use]
-    pub fn build(
+    pub fn build<S: Sources + ?Sized>(
         manifest: &Manifest,
         resolved: &Resolved,
         target: Target,
         scope: Scope,
-        base: &Path,
+        sources: &S,
     ) -> (Option<Self>, Diagnostics) {
         let mut diagnostics = Diagnostics::default();
         let mut files = Vec::new();
         for f in &resolved.files {
-            if let Err(d) = payload(f, base, &mut files) {
+            if let Err(d) = payload(f, sources, &mut files) {
                 diagnostics.push(d);
             }
         }
@@ -157,11 +172,15 @@ struct Payload {
 
 /// `file` as payload entries. a directory source becomes every file under
 /// it, sorted, mapped below `file.target`.
-fn payload(file: &File, base: &Path, out: &mut Vec<Payload>) -> Result<(), Diagnostic> {
-    let source = base.join(&file.source);
+fn payload<S: Sources + ?Sized>(
+    file: &File,
+    sources: &S,
+    out: &mut Vec<Payload>,
+) -> Result<(), Diagnostic> {
     let error = |message: String| {
         Diagnostic::error(diagnostic::INSTALL_SOURCE, message).at(file.at.clone())
     };
+    let source = sources.locate(&file.source).map_err(error)?;
     let meta = fs::metadata(&source)
         .map_err(|e| error(format!("cannot read payload `{}`: {e}", file.source)))?;
     if meta.is_file() {
