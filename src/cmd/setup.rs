@@ -41,7 +41,7 @@ pub fn run_embedded() -> Option<ExitCode> {
 
 #[cfg(feature = "gui")]
 fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
-    use kago::gui::setup::{Info, Installed, License, Step, run};
+    use kago::gui::setup::{Component, Info, Installed, License, Step, run};
     use kago::manifest::Root;
 
     let (info, look) = match Container::open(&exe, embedded.offset) {
@@ -59,6 +59,17 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                     text: l.text.clone(),
                     accept: l.accept,
                 }),
+                components: plan
+                    .choices
+                    .iter()
+                    .map(|choice| Component {
+                        id: choice.id.clone(),
+                        name: choice.name.clone(),
+                        description: choice.description.clone(),
+                        default: choice.default,
+                        depends: choice.depends.clone(),
+                    })
+                    .collect(),
             };
             (info, c.header.setup.look)
         }
@@ -67,7 +78,7 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let work = move |reporter: &kago::gui::setup::Reporter| {
+    let work = move |reporter: &kago::gui::setup::Reporter, chosen: Vec<String>| {
         let mut report = |fraction, stage: Stage<'_>| {
             let step = match stage {
                 Stage::Unpack(path) => Step::Unpack(path.to_string()),
@@ -87,7 +98,7 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             };
             reporter.report(fraction, step);
         };
-        install(&exe, embedded, None, &mut report).map(|done| Installed {
+        install(&exe, embedded, Some(&chosen), &mut report).map(|done| Installed {
             launch: done.launch,
         })
     };

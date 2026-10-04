@@ -27,6 +27,20 @@ pub struct Info {
     /// where it will be installed, when known.
     pub location: Option<PathBuf>,
     pub license: Option<License>,
+    /// optional parts the person can tick or untick.
+    pub components: Vec<Component>,
+}
+
+/// an optional part of the package.
+#[derive(Debug, Clone)]
+pub struct Component {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// ticked to begin with.
+    pub default: bool,
+    /// other components it needs.
+    pub depends: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,15 +103,15 @@ enum Event {
 }
 
 /// shows the setup until the user closes it. `install` runs once, on a
-/// worker thread, when the wizard gets to installing. returns whether an
-/// install finished.
+/// worker thread, when the wizard gets to installing, with the ids of the
+/// ticked components. returns whether an install finished.
 ///
 /// # Errors
 ///
 /// when the window cannot be created.
 pub fn run<F>(look: SetupLook, info: &Info, install: F) -> AureaResult<bool>
 where
-    F: FnOnce(&Reporter) -> Result<Installed, String> + Send + 'static,
+    F: FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send + 'static,
 {
     let lang = Lang::detect();
     let session = Session::new(info, install);
@@ -107,7 +121,7 @@ where
     }
 }
 
-type Work = Box<dyn FnOnce(&Reporter) -> Result<Installed, String> + Send>;
+type Work = Box<dyn FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send>;
 
 /// the wizard and the install it starts. both looks feed it actions and
 /// pump it once per frame.
@@ -121,11 +135,11 @@ struct Session {
 impl Session {
     fn new<F>(info: &Info, install: F) -> Self
     where
-        F: FnOnce(&Reporter) -> Result<Installed, String> + Send + 'static,
+        F: FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         Self {
-            wizard: Wizard::new(info.license.as_ref().map(|l| l.accept)),
+            wizard: Wizard::new(info.license.as_ref().map(|l| l.accept), &info.components),
             install: Some(Box::new(install)),
             tx,
             rx,
@@ -139,8 +153,9 @@ impl Session {
             Outcome::Start => {
                 if let Some(work) = self.install.take() {
                     let reporter = Reporter(self.tx.clone());
+                    let chosen = self.wizard.chosen_ids();
                     thread::spawn(move || {
-                        let result = work(&reporter);
+                        let result = work(&reporter, chosen);
                         let _ = reporter.0.send(Event::Finished(result));
                     });
                 }

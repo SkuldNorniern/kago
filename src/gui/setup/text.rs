@@ -27,6 +27,9 @@ pub enum Line {
     LicenseAgreeHint,
     LicenseAccept,
     LicenseRead,
+    ComponentsTitle,
+    ComponentsBody,
+    Components,
     InstallingTitle,
     InstallingBody,
     DoneTitle,
@@ -126,6 +129,12 @@ const fn table(line: Line) -> [&'static str; 2] {
         ],
         Line::LicenseAccept => ["I accept the license agreement", "사용권 계약에 동의합니다"],
         Line::LicenseRead => ["Read license", "사용권 계약 보기"],
+        Line::ComponentsTitle => ["Choose Components", "구성 요소 선택"],
+        Line::ComponentsBody => [
+            "Choose which features of {name} you want to install.",
+            "설치할 {name} 기능을 선택하세요.",
+        ],
+        Line::Components => ["Components", "구성 요소"],
         Line::InstallingTitle => ["Installing", "설치 중"],
         Line::InstallingBody => [
             "Please wait while {name} is being installed.",

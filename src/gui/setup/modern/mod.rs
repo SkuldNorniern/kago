@@ -20,6 +20,9 @@ use pen::{Anim, Area, Pen, color, smooth};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 420;
+/// a components caption and one row per component.
+const COMPONENTS_CAPTION: f32 = 24.0;
+const COMPONENT_ROW: f32 = 30.0;
 const MARGIN: f32 = 32.0;
 const BUTTON_H: f32 = 40.0;
 
@@ -31,7 +34,17 @@ mod key {
     pub const SCROLL: u32 = 4;
 
     pub const fn hover(hit: super::Hit) -> u32 {
-        100 + hit as u32
+        match hit {
+            super::Hit::Primary => 100,
+            super::Hit::Secondary => 101,
+            super::Hit::Accept => 102,
+            super::Hit::License => 103,
+            super::Hit::Component(i) => 200 + i,
+        }
+    }
+
+    pub const fn ticked(component: u32) -> u32 {
+        400 + component
     }
 }
 
@@ -41,6 +54,8 @@ enum Hit {
     Secondary,
     Accept,
     License,
+    /// the optional component at this index.
+    Component(u32),
 }
 
 struct State {
@@ -76,6 +91,11 @@ impl State {
             (Page::Welcome, Hit::License) | (Page::Done, Hit::Primary) => Action::Next,
             (Page::License, Hit::Secondary) => Action::Back,
             (_, Hit::Accept) => Action::ToggleAccept,
+            (_, Hit::Component(i)) => {
+                let i = i as usize;
+                let on = wizard.chosen.get(i).is_some_and(|on| *on);
+                Action::SetComponent(i, !on)
+            }
             (Page::Done, Hit::Secondary) => {
                 self.session.act(Action::SetOpen(false));
                 Action::Next
@@ -147,12 +167,23 @@ impl State {
 }
 
 pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool> {
+    // the welcome page grows by the component rows it lists.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let height = if info.components.is_empty() {
+        HEIGHT
+    } else {
+        HEIGHT + (COMPONENTS_CAPTION + COMPONENT_ROW * info.components.len() as f32).ceil() as u32
+    };
     let mut window = Window::new(
         &lang.fill(Line::WindowTitle, &[("name", &info.name)]),
         WIDTH.cast_signed(),
-        HEIGHT.cast_signed(),
+        height.cast_signed(),
     )?;
-    let canvas = Canvas::new(WIDTH, HEIGHT, RendererBackend::Cpu)?;
+    let canvas = Canvas::new(WIDTH, height, RendererBackend::Cpu)?;
     canvas.set_background_color(color::BACKGROUND);
     let state = Rc::new(RefCell::new(State {
         info: info.clone(),
@@ -240,7 +271,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         BUTTON_H,
     );
     match page {
-        Page::Welcome => welcome(&mut pen, &mut frame, s, body, footer)?,
+        Page::Welcome | Page::Components => welcome(&mut pen, &mut frame, s, body, footer)?,
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
         Page::Installing => installing(&mut pen, &mut frame, s, body)?,
         Page::Done => done(&mut pen, &mut frame, s, body, footer)?,
@@ -391,13 +422,13 @@ fn tick(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
     at: (f32, f32),
-    text: &str,
+    (text, hit): (&str, Hit),
     on: f32,
 ) -> AureaResult<Area> {
     let font = pen.font(14.0);
     let w = 22.0 + 10.0 + pen.width(text, &font);
     let a = Area::new(at.0, at.1, w, 24.0);
-    let t = frame.hover(Hit::Accept);
+    let t = frame.hover(hit);
     let boxed = Area::new(a.x, a.y + 2.0, 20.0, 20.0);
     pen.round(
         boxed,
@@ -435,7 +466,7 @@ fn tick(
         &font,
         color::mix(color::DIM, color::TEXT, t.max(on)),
     )?;
-    frame.hits.push((a, Hit::Accept));
+    frame.hits.push((a, hit));
     Ok(a)
 }
 
@@ -479,11 +510,45 @@ fn welcome(
         y = card.bottom() + 16.0;
     }
     let wizard = &s.session.wizard;
+    if !s.info.components.is_empty() {
+        caption(pen, lang.line(Line::Components), body.x, y)?;
+        y += COMPONENTS_CAPTION;
+        for (i, component) in s.info.components.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
+            let index = i as u32;
+            let picked = wizard.chosen.get(i).is_some_and(|on| *on);
+            let on = frame.anim.to(key::ticked(index), f32::from(picked), 16.0);
+            let row = tick(
+                pen,
+                frame,
+                (body.x, y),
+                (&component.name, Hit::Component(index)),
+                on,
+            )?;
+            if let Some(about) = &component.description {
+                let left = row.right() + 12.0;
+                pen.clipped(
+                    about,
+                    Area::new(left, y, (body.right() - left).max(0.0), 24.0),
+                    &pen.font(13.0),
+                    color::FAINT,
+                )?;
+            }
+            y += COMPONENT_ROW;
+        }
+        y += 6.0;
+    }
     if wizard.has_license {
         let mut left = body.x;
         if wizard.must_accept {
             let on = frame.anim.to(key::ACCEPT, f32::from(wizard.accepted), 16.0);
-            let ticked = tick(pen, frame, (left, y), lang.line(Line::LicenseAccept), on)?;
+            let ticked = tick(
+                pen,
+                frame,
+                (left, y),
+                (lang.line(Line::LicenseAccept), Hit::Accept),
+                on,
+            )?;
             left = ticked.right() + 16.0;
         }
         let link = lang.line(Line::LicenseRead);
@@ -552,7 +617,7 @@ fn license(
             pen,
             frame,
             (body.x, card.bottom() + 12.0),
-            lang.line(Line::LicenseAccept),
+            (lang.line(Line::LicenseAccept), Hit::Accept),
             on,
         )?;
     }

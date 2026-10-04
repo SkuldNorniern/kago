@@ -52,6 +52,12 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
             {
                 session.act(Action::SetOpen(open.0.borrow().get_checked()));
             }
+            if page == Page::Components {
+                // the boxes are read when leaving the page, either way.
+                for (i, tick) in live.components.iter().enumerate() {
+                    session.act(Action::SetComponent(i, tick.0.borrow().get_checked()));
+                }
+            }
             if session.act(action) {
                 return Ok(session.installed());
             }
@@ -94,6 +100,7 @@ struct Live {
     bar: Option<Kept<ProgressBar>>,
     log: Option<Kept<TextView>>,
     open: Option<Kept<Checkbox>>,
+    components: Vec<Kept<Checkbox>>,
 }
 
 /// a widget still reachable after a container took it.
@@ -170,7 +177,7 @@ fn render(
             }
             body.add_spacer(1.0)?;
             body.add(Label::new(lang.line(Line::ClickNext))?)?;
-            let next = if wizard.has_license {
+            let next = if wizard.has_license || !info.components.is_empty() {
                 Line::Next
             } else {
                 Line::Install
@@ -190,8 +197,30 @@ fn render(
             if wizard.must_accept {
                 buttons.add(button(lang.line(Line::Agree), tx, Action::Agree)?)?;
             } else {
-                buttons.add(button(lang.line(Line::Install), tx, Action::Next)?)?;
+                let next = if info.components.is_empty() {
+                    Line::Install
+                } else {
+                    Line::Next
+                };
+                buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             }
+            buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
+        }
+        Page::Components => {
+            window.add(header(Line::ComponentsTitle, Line::ComponentsBody)?)?;
+            window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
+            for (component, on) in info.components.iter().zip(&wizard.chosen) {
+                let label = match &component.description {
+                    Some(about) => format!("{}  ({about})", component.name),
+                    None => component.name.clone(),
+                };
+                let tick = Kept::new(Checkbox::with_checked(&label, *on)?);
+                body.add(tick.share())?;
+                live.components.push(tick);
+            }
+            body.add_spacer(1.0)?;
+            buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
+            buttons.add(button(lang.line(Line::Install), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
         Page::Installing => {
