@@ -72,13 +72,14 @@ impl<'a> Payload<'a> {
                     let _ = fs::remove_dir_all(&dir);
                     let named = file.with_file_name(url.rsplit('/').next().unwrap_or("download"));
                     // keep the URL's file name for `unpack none`.
-                    let from = if source.unpack == crate::manifest::Unpack::None {
+                    let unpack_as = source.unpack.for_url(&url);
+                    let from = if unpack_as == crate::manifest::Unpack::None {
                         fs::copy(&file, &named).map_err(|e| e.to_string())?;
                         named
                     } else {
                         file.clone()
                     };
-                    unpack::unpack(&from, source.unpack, &dir)
+                    unpack::unpack(&from, unpack_as, &dir)
                         .map_err(|e| format!("unpacking source `{name}`: {e}"))?;
                     fs::write(&marker, &digest).map_err(|e| e.to_string())?;
                 }

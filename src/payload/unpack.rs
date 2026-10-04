@@ -15,7 +15,7 @@ use crate::manifest::Unpack;
 pub fn unpack(archive: &Path, format: Unpack, dir: &Path) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     match format {
-        Unpack::None => {
+        Unpack::Auto | Unpack::None => {
             let name = archive
                 .file_name()
                 .ok_or_else(|| io::Error::other("download has no file name"))?;

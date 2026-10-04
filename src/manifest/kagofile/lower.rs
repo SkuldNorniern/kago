@@ -292,7 +292,7 @@ impl Lower<'_> {
         }
         let mut kind = None;
         let mut sha256 = BTreeMap::new();
-        let mut unpack = Unpack::None;
+        let mut unpack = Unpack::Auto;
         for child in &node.children {
             match (child.keyword(), child.args()) {
                 ("dir", [path]) => kind = Some(SourceKind::Dir(path.text.clone())),
@@ -309,7 +309,7 @@ impl Lower<'_> {
                 },
                 _ => self.syntax(
                     child.at(),
-                    "expected `dir <path>`, `fetch <url>`, `sha256 [target] <hex>` or `unpack zip|tar.gz|none`",
+                    "expected `dir <path>`, `fetch <url>`, `sha256 [target] <hex>` or `unpack auto|zip|tar.gz|none`",
                 ),
             }
         }
