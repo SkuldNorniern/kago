@@ -17,6 +17,7 @@ pub(super) fn install(
     platform: &dyn Platform,
     store: &Store,
     runtime: &Path,
+    observe: &mut dyn FnMut(usize, usize, &Operation),
 ) -> Result<Receipt, Error> {
     let previous = store.read_receipt(&plan.package)?;
     if let Some(installed) = &previous
@@ -42,6 +43,7 @@ pub(super) fn install(
         store,
         roots: &roots,
         runtime,
+        observe,
         journal: &mut journal,
         undos: Vec::new(),
         resources: Vec::new(),
@@ -128,6 +130,8 @@ struct Run<'a> {
     store: &'a Store,
     roots: &'a Roots,
     runtime: &'a Path,
+    /// told before each operation: its index, the count and the operation.
+    observe: &'a mut dyn FnMut(usize, usize, &Operation),
     journal: &'a mut Journal,
     undos: Vec<Undo>,
     resources: Vec<Resource>,
@@ -158,7 +162,9 @@ impl Run<'_> {
         for root in used_roots {
             self.directory(&SemanticPath::from(root))?;
         }
-        for op in &self.plan.operations {
+        let total = self.plan.operations.len();
+        for (i, op) in self.plan.operations.iter().enumerate() {
+            (self.observe)(i, total, op);
             self.op(op)?;
         }
         Ok(())

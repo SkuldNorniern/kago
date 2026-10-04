@@ -340,3 +340,25 @@ fn upgrade_then_uninstall_leaves_nothing() {
     assert!(!w.dir.join("machine/config/App").exists());
     assert!(!w.store.backup_dir(&World::id()).exists());
 }
+
+#[test]
+fn every_operation_is_observed_in_order() {
+    let w = World::new("observed");
+    let plan = w.plan(MANIFEST);
+    let mut seen = Vec::new();
+    super::install_observed(
+        &plan,
+        &w.fake,
+        &w.store,
+        &w.dir.join("kago.exe"),
+        &mut |i, n, op| seen.push((i, n, op.clone())),
+    )
+    .unwrap();
+    let expected: Vec<_> = plan
+        .operations
+        .iter()
+        .enumerate()
+        .map(|(i, op)| (i, plan.operations.len(), op.clone()))
+        .collect();
+    assert_eq!(seen, expected);
+}

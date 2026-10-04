@@ -20,7 +20,7 @@ pub use recovery::Recovered;
 pub use store::Store;
 pub use verify::{Verified, verify};
 
-use crate::install::{InstallPlan, Scope, hash};
+use crate::install::{InstallPlan, Operation, Scope, hash};
 use crate::manifest::Ownership;
 use crate::package::PackageId;
 use crate::platform::Platform;
@@ -111,9 +111,24 @@ pub fn install(
     store: &Store,
     runtime: &Path,
 ) -> Result<Receipt, Error> {
+    install_observed(plan, platform, store, runtime, &mut |_, _, _| {})
+}
+
+/// [`install`], telling `observe` about each operation before it runs.
+///
+/// # Errors
+///
+/// as [`install`].
+pub fn install_observed(
+    plan: &InstallPlan,
+    platform: &dyn Platform,
+    store: &Store,
+    runtime: &Path,
+    observe: &mut dyn FnMut(usize, usize, &Operation),
+) -> Result<Receipt, Error> {
     let _lock = lock(store, &plan.package)?;
     recovery::recover_one(store, &plan.package, platform)?;
-    apply::install(plan, platform, store, runtime)
+    apply::install(plan, platform, store, runtime, observe)
 }
 
 /// what uninstall left behind on purpose or could not remove.

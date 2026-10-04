@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::install::{Digest, InstallPlan, Operation, hash};
+use crate::manifest::SemanticPath;
 
 pub const MAGIC: &[u8; 8] = b"KAGOPKG1";
 pub const FORMAT: u32 = 1;
@@ -134,12 +135,30 @@ impl Container {
     ///
     /// when a payload entry is short, corrupt or cannot be written.
     pub fn extract(&mut self, dir: &Path) -> io::Result<InstallPlan> {
+        self.extract_observed(dir, &mut |_, _, _| {})
+    }
+
+    /// [`Self::extract`], telling `observe` about each file before it is
+    /// unpacked: its index, the file count and where it will be installed.
+    ///
+    /// # Errors
+    ///
+    /// as [`Self::extract`].
+    pub fn extract_observed(
+        &mut self,
+        dir: &Path,
+        observe: &mut dyn FnMut(usize, usize, &SemanticPath),
+    ) -> io::Result<InstallPlan> {
         fs::create_dir_all(dir)?;
         let mut plan = self.header.plan.clone();
+        let total = self.header.payload.len();
+        let mut done = 0;
         for op in &mut plan.operations {
-            let Operation::InstallFile { source, .. } = op else {
+            let Operation::InstallFile { source, target, .. } = op else {
                 continue;
             };
+            observe(done, total, target);
+            done += 1;
             let index: usize = source
                 .to_str()
                 .and_then(|s| s.parse().ok())
@@ -202,7 +221,19 @@ mod tests {
 
         let mut c = Container::open(&path, 4).unwrap();
         assert_eq!(c.header.payload.len(), 2);
-        let extracted = c.extract(&dir.join("staging")).unwrap();
+        let mut seen = Vec::new();
+        let extracted = c
+            .extract_observed(&dir.join("staging"), &mut |i, n, target| {
+                seen.push((i, n, target.to_string()));
+            })
+            .unwrap();
+        assert_eq!(
+            seen,
+            [
+                (0, 2, "{app}/bin/aurea.exe".to_owned()),
+                (1, 2, "{app}/themes/a.toml".to_owned())
+            ]
+        );
         let sources: Vec<Vec<u8>> = extracted
             .operations
             .iter()
