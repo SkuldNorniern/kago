@@ -6,7 +6,8 @@ use crate::manifest::{Ownership, SemanticPath, ShortcutLocation};
 
 /// one step of an install. platforms carry these out; nothing here
 /// touches the machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Operation {
     CreateDirectory {
         path: SemanticPath,

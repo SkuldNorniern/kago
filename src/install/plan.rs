@@ -14,7 +14,7 @@ use crate::package::{PackageId, Target, Version};
 
 /// everything one install does, in order. same manifest, target, scope,
 /// components and payload give the same plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InstallPlan {
     pub package: PackageId,
     pub name: String,

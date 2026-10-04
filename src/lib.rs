@@ -23,7 +23,9 @@ macro_rules! string_serde {
 
 pub(crate) use string_serde;
 
+pub mod container;
 pub mod diagnostic;
+pub mod format;
 pub mod install;
 pub mod manifest;
 pub mod package;
