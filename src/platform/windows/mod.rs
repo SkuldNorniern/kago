@@ -3,6 +3,7 @@
 
 mod environment;
 mod registry;
+pub mod resource;
 mod shortcut;
 
 use std::collections::BTreeMap;

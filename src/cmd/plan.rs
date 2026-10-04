@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use kago::install::{InstallPlan, Scope, Selection, choose, resolve};
-use kago::manifest::Context;
+use kago::manifest::{Context, Manifest};
 use kago::package::Target;
 
 use super::args::Args;
@@ -16,7 +16,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         [one] => *one,
         _ => return Err("`plan` takes one `--target`".to_owned()),
     };
-    let Some(plan) = build(args, target)? else {
+    let Some((_, plan)) = build(args, target)? else {
         return Ok(ExitCode::FAILURE);
     };
     print!("{plan}");
@@ -24,9 +24,10 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// manifest argument, `--scope` and `--components` to an install plan for
-/// `target`. `None` after diagnostics were printed.
-pub fn build(args: &Args, target: Target) -> Result<Option<InstallPlan>, String> {
+/// manifest argument, `--scope` and `--components` to the manifest, its
+/// directory and an install plan for `target`. `None` after diagnostics were
+/// printed.
+pub fn build(args: &Args, target: Target) -> Result<Option<(Loaded, InstallPlan)>, String> {
     args.at_most_one()?;
     let path = manifest_path(args.first());
     let Some(manifest) = load(&path) else {
@@ -59,5 +60,19 @@ pub fn build(args: &Args, target: Target) -> Result<Option<InstallPlan>, String>
     let base = path.parent().unwrap_or(Path::new("."));
     let (plan, diagnostics) = InstallPlan::build(&manifest, &resolved, target, scope, base);
     report(&diagnostics);
-    Ok(plan)
+    Ok(plan.map(|plan| {
+        (
+            Loaded {
+                manifest,
+                base: base.to_path_buf(),
+            },
+            plan,
+        )
+    }))
+}
+
+/// a checked manifest and the directory its paths are relative to.
+pub struct Loaded {
+    pub manifest: Manifest,
+    pub base: PathBuf,
 }

@@ -99,3 +99,20 @@ pub fn host() -> Result<Box<dyn Platform>, String> {
         Err("installing on this OS is not supported yet".to_owned())
     }
 }
+
+/// puts `icon` into the executable at `exe` as its main icon.
+///
+/// # Errors
+///
+/// when the file cannot be updated, or off Windows.
+pub fn set_exe_icon(exe: &Path, icon: &crate::format::ico::IconGroup) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        windows::resource::set_icon(exe, icon)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, icon);
+        Err("setting an executable icon needs Windows".to_owned())
+    }
+}

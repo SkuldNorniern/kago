@@ -2,13 +2,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use kago::format::ico::{self, IconGroup};
 use kago::format::setup;
 use kago::install::{folder_name, hash};
+use kago::manifest::Context;
 use kago::package::{Artifact, Os, Target};
 
 use super::args::Args;
 use super::check::targets;
-use super::plan;
+use super::plan::{self, Loaded};
 
 /// builds the setup executable for one target.
 pub fn run(args: &Args) -> Result<ExitCode, String> {
@@ -24,7 +26,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
             "a {target} setup needs a kago built for {target} as its runtime; build on that machine for now"
         ));
     }
-    let Some(plan) = plan::build(args, target)? else {
+    let Some((loaded, plan)) = plan::build(args, target)? else {
         return Ok(ExitCode::FAILURE);
     };
     let out_dir = PathBuf::from(args.value("--out").unwrap_or("dist"));
@@ -43,7 +45,9 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         }
         None => &me,
     };
-    let size = setup::build(stub, &plan, &out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let icon = icon(&loaded, target)?;
+    let size = setup::build(stub, &plan, icon.as_ref(), &out)
+        .map_err(|e| format!("{}: {e}", out.display()))?;
     if stub != me {
         let _ = fs::remove_file(stub);
     }
@@ -53,4 +57,23 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     println!("  sha256 {digest}");
     println!("  unsigned");
     Ok(ExitCode::SUCCESS)
+}
+
+/// the first `.ico` among `[[application.icons]]` that matches `target`.
+fn icon(loaded: &Loaded, target: Target) -> Result<Option<IconGroup>, String> {
+    let cx = Context::target(target);
+    let Some(icon) = loaded
+        .manifest
+        .application
+        .icons
+        .iter()
+        .find(|i| i.when.matches(&cx) && i.source.to_lowercase().ends_with(".ico"))
+    else {
+        return Ok(None);
+    };
+    let path = loaded.base.join(&icon.source);
+    let bytes = fs::read(&path).map_err(|e| format!("icon {}: {e}", path.display()))?;
+    ico::parse(&bytes)
+        .map(Some)
+        .map_err(|e| format!("icon {}: {e}", path.display()))
 }

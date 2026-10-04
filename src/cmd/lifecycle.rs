@@ -24,7 +24,7 @@ fn open(scope: Scope) -> Result<(Box<dyn Platform>, Store), String> {
 /// installs the manifest for this machine.
 pub fn install(args: &Args) -> Result<ExitCode, String> {
     let target = Target::host().ok_or("this machine is not a kago target")?;
-    let Some(plan) = plan::build(args, target)? else {
+    let Some((_, plan)) = plan::build(args, target)? else {
         return Ok(ExitCode::FAILURE);
     };
     let (platform, store) = open(plan.scope)?;
