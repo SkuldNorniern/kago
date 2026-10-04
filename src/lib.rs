@@ -26,6 +26,8 @@ pub(crate) use string_serde;
 pub mod container;
 pub mod diagnostic;
 pub mod format;
+#[cfg(feature = "gui")]
+pub mod gui;
 pub mod install;
 pub mod manifest;
 pub mod package;
