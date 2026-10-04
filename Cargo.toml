@@ -14,7 +14,7 @@ default = ["gui"]
 gui = ["dep:aurea", "dep:sys-locale"]
 
 [dependencies]
-aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "a312f32", optional = true }
+aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "26162cf", optional = true }
 sys-locale = { version = "0.3", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
