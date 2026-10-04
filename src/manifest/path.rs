@@ -151,10 +151,10 @@ impl FromStr for SemanticPath {
             "" | "/" => "",
             _ => rest.strip_prefix('/').ok_or(PathError::NoSeparator)?,
         };
-        if !relative.is_empty() {
-            if let Some(bad) = relative.split('/').find(|s| !valid_segment(s)) {
-                return Err(PathError::BadSegment(bad.to_owned()));
-            }
+        if !relative.is_empty()
+            && let Some(bad) = relative.split('/').find(|s| !valid_segment(s))
+        {
+            return Err(PathError::BadSegment(bad.to_owned()));
         }
         Ok(Self {
             root,
