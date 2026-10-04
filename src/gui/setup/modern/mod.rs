@@ -39,6 +39,7 @@ mod key {
             super::Hit::Secondary => 101,
             super::Hit::Accept => 102,
             super::Hit::License => 103,
+            super::Hit::Browse => 104,
             super::Hit::Component(i) => 200 + i,
         }
     }
@@ -56,6 +57,8 @@ enum Hit {
     License,
     /// the optional component at this index.
     Component(u32),
+    /// change the install folder.
+    Browse,
 }
 
 struct State {
@@ -71,6 +74,8 @@ struct State {
     scroll: f32,
     scroll_max: f32,
     close: bool,
+    /// the folder dialog was asked for; the loop opens it.
+    want_browse: bool,
 }
 
 impl State {
@@ -91,6 +96,10 @@ impl State {
             (Page::Welcome, Hit::License) | (Page::Done, Hit::Primary) => Action::Next,
             (Page::License, Hit::Secondary) => Action::Back,
             (_, Hit::Accept) => Action::ToggleAccept,
+            (_, Hit::Browse) => {
+                self.want_browse = true;
+                return;
+            }
             (_, Hit::Component(i)) => {
                 let i = i as usize;
                 let on = wizard.chosen.get(i).is_some_and(|on| *on);
@@ -197,6 +206,7 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
         scroll: 0.0,
         scroll_max: 0.0,
         close: false,
+        want_browse: false,
     }));
     let drawn = Rc::clone(&state);
     canvas.set_draw_callback(move |ctx| draw(ctx, &mut drawn.borrow_mut()))?;
@@ -215,13 +225,28 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
             }
             redraw |= s.event(&event) || matches!(event, WindowEvent::Resized { .. });
         }
-        {
+        let ask = {
             let mut s = state.borrow_mut();
             redraw |= s.session.pump();
             if s.close {
                 return Ok(s.session.installed());
             }
             redraw |= s.anim.busy();
+            if std::mem::take(&mut s.want_browse) {
+                s.session.browser()
+            } else {
+                None
+            }
+        };
+        // the dialog runs its own message loop, which repaints this
+        // window, so the state must not be borrowed while it is open.
+        if let Some((browse, start)) = ask {
+            let title = lang.line(Line::DirectoryTitle);
+            let owner = window.handle() as isize;
+            if let Some(dir) = browse(Some(owner), title, start.as_deref()) {
+                state.borrow_mut().session.set_location(&dir);
+            }
+            redraw = true;
         }
         if redraw {
             request_canvas_redraw(id);
@@ -271,7 +296,9 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         BUTTON_H,
     );
     match page {
-        Page::Welcome | Page::Components => welcome(&mut pen, &mut frame, s, body, footer)?,
+        Page::Welcome | Page::Components | Page::Directory => {
+            welcome(&mut pen, &mut frame, s, body, footer)?;
+        }
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
         Page::Installing => installing(&mut pen, &mut frame, s, body)?,
         Page::Done => done(&mut pen, &mut frame, s, body, footer)?,
@@ -470,6 +497,61 @@ fn tick(
     Ok(a)
 }
 
+/// where the install goes, with Change when the folder is open and a
+/// note when it is an update or cannot be used. returns its bottom edge.
+fn location_card(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    s: &State,
+    location: &std::path::Path,
+    at: Area,
+) -> AureaResult<f32> {
+    let lang = s.lang;
+    let wizard = &s.session.wizard;
+    let font = pen.font(14.0);
+    let body = at;
+    let y = at.y;
+    let note = if let Some(error) = wizard.folder_error {
+        Some((lang.folder_error(error), color::BAD))
+    } else if s.info.upgrade {
+        Some((lang.line(Line::UpdateHere), color::FAINT))
+    } else {
+        None
+    };
+    let card_h = if note.is_some() { 84.0 } else { 64.0 };
+    let card = Area::new(body.x, y, body.w, card_h);
+    panel(pen, card)?;
+    caption(
+        pen,
+        lang.line(Line::InstallInto),
+        card.x + 16.0,
+        card.y + 12.0,
+    )?;
+    let mut text_w = card.w - 32.0;
+    if wizard.folder_open {
+        let label = lang.line(Line::Change);
+        let w = (pen.width(label, &pen.bold(13.0)) + 28.0).max(80.0);
+        let change = Area::new(card.right() - 16.0 - w, card.y + 16.0, w, 32.0);
+        pill(pen, frame, change, label, Hit::Browse, Tone::Quiet)?;
+        text_w -= w + 12.0;
+    }
+    pen.clipped(
+        &location.display().to_string(),
+        Area::new(card.x + 16.0, card.y + 32.0, text_w, 20.0),
+        &font,
+        color::TEXT,
+    )?;
+    if let Some((text, tone)) = note {
+        pen.clipped(
+            text,
+            Area::new(card.x + 16.0, card.y + 56.0, card.w - 32.0, 18.0),
+            &pen.font(12.0),
+            tone,
+        )?;
+    }
+    Ok(card.bottom())
+}
+
 fn welcome(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
@@ -492,24 +574,10 @@ fn welcome(
         color::TEXT,
     )?;
     let mut y = body.y + used + 12.0;
-    if let Some(location) = &s.info.location {
-        let card = Area::new(body.x, y, body.w, 64.0);
-        panel(pen, card)?;
-        caption(
-            pen,
-            lang.line(Line::InstallInto),
-            card.x + 16.0,
-            card.y + 12.0,
-        )?;
-        pen.clipped(
-            &location.display().to_string(),
-            Area::new(card.x + 16.0, card.y + 32.0, card.w - 32.0, 20.0),
-            &font,
-            color::TEXT,
-        )?;
-        y = card.bottom() + 16.0;
-    }
     let wizard = &s.session.wizard;
+    if let Some(location) = &wizard.location {
+        y = location_card(pen, frame, s, location, Area::new(body.x, y, body.w, 0.0))? + 16.0;
+    }
     if !s.info.components.is_empty() {
         caption(pen, lang.line(Line::Components), body.x, y)?;
         y += COMPONENTS_CAPTION;
@@ -565,7 +633,7 @@ fn welcome(
         pen,
         frame,
         footer,
-        (lang.line(Line::Install), true),
+        (lang.line(Line::Install), wizard.folder_error.is_none()),
         Some(lang.line(Line::Cancel)),
     )
 }

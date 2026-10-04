@@ -8,12 +8,13 @@ mod native;
 mod text;
 mod wizard;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use aurea::AureaResult;
 
+use crate::install::LocationError;
 use crate::manifest::SetupLook;
 use text::{Lang, Line};
 use wizard::{Action, Outcome, Wizard};
@@ -26,6 +27,9 @@ pub struct Info {
     pub publisher: Option<String>,
     /// where it will be installed, when known.
     pub location: Option<PathBuf>,
+    /// `location` is where the installed version already is; an update
+    /// stays there.
+    pub upgrade: bool,
     pub license: Option<License>,
     /// optional parts the person can tick or untick.
     pub components: Vec<Component>,
@@ -48,6 +52,30 @@ pub struct License {
     pub text: String,
     /// installing needs the user to accept it.
     pub accept: bool,
+}
+
+/// how the window lets the person pick a folder. the window itself never
+/// touches the disk: picking and checking come from here.
+pub struct Folder {
+    /// the system's folder dialog over the window with this handle,
+    /// titled and starting where given.
+    pub browse: FolderDialog,
+    /// whether a folder can take the install.
+    pub check: FolderCheck,
+}
+
+/// whether a folder can take the install.
+pub type FolderCheck = Box<dyn Fn(&Path) -> Result<(), LocationError>>;
+
+/// the system's folder dialog: owner window, title, starting folder.
+pub type FolderDialog = fn(Option<isize>, &str, Option<&Path>) -> Option<PathBuf>;
+
+/// what the person chose, for the install.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picked {
+    pub components: Vec<String>,
+    /// `None` keeps the default, or the folder an update replaces.
+    pub location: Option<PathBuf>,
 }
 
 /// what a finished install reports.
@@ -103,43 +131,51 @@ enum Event {
 }
 
 /// shows the setup until the user closes it. `install` runs once, on a
-/// worker thread, when the wizard gets to installing, with the ids of the
-/// ticked components. returns whether an install finished.
+/// worker thread, when the wizard gets to installing, with what the person
+/// picked. `folder` lets them choose where; without it the folder is fixed.
+/// returns whether an install finished.
 ///
 /// # Errors
 ///
 /// when the window cannot be created.
-pub fn run<F>(look: SetupLook, info: &Info, install: F) -> AureaResult<bool>
+pub fn run<F>(look: SetupLook, info: &Info, folder: Option<Folder>, install: F) -> AureaResult<bool>
 where
-    F: FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send + 'static,
+    F: FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send + 'static,
 {
     let lang = Lang::detect();
-    let session = Session::new(info, install);
+    let session = Session::new(info, folder, install);
     match look {
         SetupLook::Modern => modern::run(info, lang, session),
         SetupLook::Native => native::run(info, lang, session),
     }
 }
 
-type Work = Box<dyn FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send>;
+type Work = Box<dyn FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send>;
 
 /// the wizard and the install it starts. both looks feed it actions and
 /// pump it once per frame.
 struct Session {
     wizard: Wizard,
+    folder: Option<Folder>,
     install: Option<Work>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
 }
 
 impl Session {
-    fn new<F>(info: &Info, install: F) -> Self
+    fn new<F>(info: &Info, folder: Option<Folder>, install: F) -> Self
     where
-        F: FnOnce(&Reporter, Vec<String>) -> Result<Installed, String> + Send + 'static,
+        F: FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         Self {
-            wizard: Wizard::new(info.license.as_ref().map(|l| l.accept), &info.components),
+            wizard: Wizard::new(
+                info.license.as_ref().map(|l| l.accept),
+                &info.components,
+                info.location.clone(),
+                folder.is_some() && !info.upgrade,
+            ),
+            folder,
             install: Some(Box::new(install)),
             tx,
             rx,
@@ -153,9 +189,12 @@ impl Session {
             Outcome::Start => {
                 if let Some(work) = self.install.take() {
                     let reporter = Reporter(self.tx.clone());
-                    let chosen = self.wizard.chosen_ids();
+                    let picked = Picked {
+                        components: self.wizard.chosen_ids(),
+                        location: self.wizard.chosen_location(),
+                    };
                     thread::spawn(move || {
-                        let result = work(&reporter, chosen);
+                        let result = work(&reporter, picked);
                         let _ = reporter.0.send(Event::Finished(result));
                     });
                 }
@@ -171,6 +210,36 @@ impl Session {
                 }
                 true
             }
+        }
+    }
+
+    /// takes a typed or picked folder and checks it.
+    fn set_location(&mut self, dir: &Path) {
+        let check = self.folder.as_ref().map_or(Ok(()), |f| (f.check)(dir));
+        self.wizard.set_location(dir, check);
+    }
+
+    /// the folder dialog and where it should start, for a caller that has
+    /// to open it outside its own borrow of the session.
+    fn browser(&self) -> Option<(FolderDialog, Option<PathBuf>)> {
+        let folder = self.folder.as_ref()?;
+        self.wizard
+            .folder_open
+            .then(|| (folder.browse, self.wizard.location.clone()))
+    }
+
+    /// opens the folder dialog over `owner`. true when a folder was picked.
+    fn browse(&mut self, owner: Option<isize>, title: &str) -> bool {
+        let Some(folder) = &self.folder else {
+            return false;
+        };
+        let start = self.wizard.location.clone();
+        match (folder.browse)(owner, title, start.as_deref()) {
+            Some(dir) => {
+                self.set_location(&dir);
+                true
+            }
+            None => false,
         }
     }
 

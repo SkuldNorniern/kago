@@ -30,6 +30,16 @@ pub enum Line {
     ComponentsTitle,
     ComponentsBody,
     Components,
+    DirectoryTitle,
+    DirectoryBody,
+    DirectoryHint,
+    Browse,
+    Change,
+    UpdateHere,
+    FolderNotAbsolute,
+    FolderRoot,
+    FolderUnclear,
+    FolderNotEmpty,
     InstallingTitle,
     InstallingBody,
     DoneTitle,
@@ -77,6 +87,18 @@ impl Lang {
             text = text.replace(&format!("{{{key}}}"), value);
         }
         text
+    }
+
+    /// why a folder cannot be used, in this language.
+    #[must_use]
+    pub const fn folder_error(self, error: crate::install::LocationError) -> &'static str {
+        use crate::install::LocationError;
+        self.line(match error {
+            LocationError::NotAbsolute => Line::FolderNotAbsolute,
+            LocationError::Root => Line::FolderRoot,
+            LocationError::Unclear => Line::FolderUnclear,
+            LocationError::NotEmpty => Line::FolderNotEmpty,
+        })
     }
 
     /// family that has this language's glyphs, for canvas text.
@@ -135,6 +157,34 @@ const fn table(line: Line) -> [&'static str; 2] {
             "설치할 {name} 기능을 선택하세요.",
         ],
         Line::Components => ["Components", "구성 요소"],
+        Line::DirectoryTitle => ["Choose Install Location", "설치 위치 선택"],
+        Line::DirectoryBody => [
+            "Choose the folder in which to install {name}.",
+            "{name}을(를) 설치할 폴더를 선택하세요.",
+        ],
+        Line::DirectoryHint => [
+            "Setup will install {name} in the following folder. To install in a different folder, click Browse and select another folder.",
+            "{name}을(를) 다음 폴더에 설치합니다. 다른 폴더에 설치하려면 찾아보기를 눌러 다른 폴더를 선택하세요.",
+        ],
+        Line::Browse => ["Browse...", "찾아보기..."],
+        Line::Change => ["Change", "변경"],
+        Line::UpdateHere => [
+            "Installed here now; the update stays in this folder.",
+            "지금 설치된 위치입니다. 업데이트도 이 폴더에 설치됩니다.",
+        ],
+        Line::FolderNotAbsolute => ["Enter a full folder path.", "전체 폴더 경로를 입력하세요."],
+        Line::FolderRoot => [
+            "A drive root cannot hold an install. Pick a folder.",
+            "드라이브 루트에는 설치할 수 없습니다. 폴더를 선택하세요.",
+        ],
+        Line::FolderUnclear => [
+            "The folder path must not contain . or ..",
+            "폴더 경로에 . 또는 .. 이 들어갈 수 없습니다.",
+        ],
+        Line::FolderNotEmpty => [
+            "This folder already has files. Pick an empty or new folder.",
+            "이 폴더에 이미 파일이 있습니다. 비어 있거나 새 폴더를 선택하세요.",
+        ],
         Line::InstallingTitle => ["Installing", "설치 중"],
         Line::InstallingBody => [
             "Please wait while {name} is being installed.",

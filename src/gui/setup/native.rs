@@ -10,7 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aurea::elements::{
-    Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack, TextView,
+    Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack,
+    TextField, TextView,
 };
 use aurea::render::Rect;
 use aurea::{AureaResult, Window, WindowEvent};
@@ -44,6 +45,7 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         }
         window.process_frames()?;
         let mut busy = false;
+        let mut redraw = false;
         while let Ok(action) = rx.try_recv() {
             busy = true;
             if action == Action::Next
@@ -58,12 +60,24 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
                     session.act(Action::SetComponent(i, tick.0.borrow().get_checked()));
                 }
             }
+            if page == Page::Directory {
+                if let Some(field) = &live.folder {
+                    let typed = field.0.borrow().get_content()?;
+                    session.set_location(std::path::Path::new(typed.trim()));
+                }
+                if action == Action::Browse {
+                    let title = lang.line(Line::DirectoryTitle);
+                    session.browse(Some(window.handle() as isize), title);
+                }
+                // the page shows the folder and what is wrong with it.
+                redraw = true;
+            }
             if session.act(action) {
                 return Ok(session.installed());
             }
         }
         busy |= session.pump();
-        if session.wizard.page != page {
+        if session.wizard.page != page || redraw {
             page = session.wizard.page;
             // the old widgets go with the old content.
             drop(std::mem::take(&mut live));
@@ -101,6 +115,7 @@ struct Live {
     log: Option<Kept<TextView>>,
     open: Option<Kept<Checkbox>>,
     components: Vec<Kept<Checkbox>>,
+    folder: Option<Kept<TextField>>,
 }
 
 /// a widget still reachable after a container took it.
@@ -177,7 +192,7 @@ fn render(
             }
             body.add_spacer(1.0)?;
             body.add(Label::new(lang.line(Line::ClickNext))?)?;
-            let next = if wizard.has_license || !info.components.is_empty() {
+            let next = if wizard.has_license || !info.components.is_empty() || wizard.folder_open {
                 Line::Next
             } else {
                 Line::Install
@@ -197,7 +212,7 @@ fn render(
             if wizard.must_accept {
                 buttons.add(button(lang.line(Line::Agree), tx, Action::Agree)?)?;
             } else {
-                let next = if info.components.is_empty() {
+                let next = if info.components.is_empty() && !wizard.folder_open {
                     Line::Install
                 } else {
                     Line::Next
@@ -217,6 +232,34 @@ fn render(
                 let tick = Kept::new(Checkbox::with_checked(&label, *on)?);
                 body.add(tick.share())?;
                 live.components.push(tick);
+            }
+            body.add_spacer(1.0)?;
+            buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
+            let next = if wizard.folder_open {
+                Line::Next
+            } else {
+                Line::Install
+            };
+            buttons.add(button(lang.line(next), tx, Action::Next)?)?;
+            buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
+        }
+        Page::Directory => {
+            window.add(header(Line::DirectoryTitle, Line::DirectoryBody)?)?;
+            window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
+            body.add(Label::new(&fill(Line::DirectoryHint))?)?;
+            let mut row = Stack::new(Orientation::Horizontal)?;
+            let shown = wizard
+                .location
+                .as_ref()
+                .map(|l| l.display().to_string())
+                .unwrap_or_default();
+            let field = Kept::new(TextField::with_content(&shown)?);
+            row.add_weighted(field.share(), 1.0)?;
+            row.add(button(lang.line(Line::Browse), tx, Action::Browse)?)?;
+            body.add(row)?;
+            live.folder = Some(field);
+            if let Some(error) = wizard.folder_error {
+                body.add(Label::new(lang.folder_error(error))?)?;
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;

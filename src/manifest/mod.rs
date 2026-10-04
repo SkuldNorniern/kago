@@ -268,8 +268,11 @@ target linux setup appimage
     fn folder_choice_defaults_to_choose() {
         let (m, _) = check(AUREA);
         assert_eq!(m.unwrap().install.folder, FolderChoice::Choose);
-        let (m, codes) = check(&AUREA.replace("scope choose", "scope choose
-  folder fixed"));
+        let (m, codes) = check(&AUREA.replace(
+            "scope choose",
+            "scope choose
+  folder fixed",
+        ));
         assert!(codes.is_empty(), "{codes:?}");
         assert_eq!(m.unwrap().install.folder, FolderChoice::Fixed);
     }
