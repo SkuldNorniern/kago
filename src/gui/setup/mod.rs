@@ -157,6 +157,8 @@ type Work = Box<dyn FnOnce(&Reporter, Picked) -> Result<Installed, String> + Sen
 struct Session {
     wizard: Wizard,
     folder: Option<Folder>,
+    /// the folder name the app gets inside a picked folder.
+    app_folder: String,
     install: Option<Work>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -176,6 +178,7 @@ impl Session {
                 folder.is_some() && !info.upgrade,
             ),
             folder,
+            app_folder: crate::install::folder_name(&info.name),
             install: Some(Box::new(install)),
             tx,
             rx,
@@ -228,6 +231,20 @@ impl Session {
             .then(|| (folder.browse, self.wizard.location.clone()))
     }
 
+    /// a folder from the dialog. like NSIS, the app gets its own folder in
+    /// it, unless the person picked one named for the app already.
+    fn picked(&mut self, dir: &Path) {
+        let own = dir
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case(self.app_folder.as_str()));
+        let dir = if own {
+            dir.to_path_buf()
+        } else {
+            dir.join(&self.app_folder)
+        };
+        self.set_location(&dir);
+    }
+
     /// opens the folder dialog over `owner`. true when a folder was picked.
     fn browse(&mut self, owner: Option<isize>, title: &str) -> bool {
         let Some(folder) = &self.folder else {
@@ -236,7 +253,7 @@ impl Session {
         let start = self.wizard.location.clone();
         match (folder.browse)(owner, title, start.as_deref()) {
             Some(dir) => {
-                self.set_location(&dir);
+                self.picked(&dir);
                 true
             }
             None => false,
@@ -263,5 +280,49 @@ impl Session {
 
     fn closable(&self) -> bool {
         self.wizard.page != wizard::Page::Installing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info() -> Info {
+        Info {
+            name: "Ozone".into(),
+            version: "1.0.0".into(),
+            publisher: None,
+            location: Some(PathBuf::from("/apps/Ozone")),
+            upgrade: false,
+            license: None,
+            components: Vec::new(),
+        }
+    }
+
+    fn session(dialog: FolderDialog) -> Session {
+        let folder = Folder {
+            browse: dialog,
+            check: Box::new(|_| Ok(())),
+        };
+        Session::new(&info(), Some(folder), |_, _| Ok(Installed { launch: None }))
+    }
+
+    #[test]
+    fn a_picked_folder_gets_the_app_folder_inside() {
+        let mut s = session(|_, _, _| Some(PathBuf::from("/data/tools")));
+        assert!(s.browse(None, "pick"));
+        assert_eq!(s.wizard.location, Some(PathBuf::from("/data/tools/Ozone")));
+
+        let mut s = session(|_, _, _| Some(PathBuf::from("/data/ozone")));
+        s.browse(None, "pick");
+        assert_eq!(
+            s.wizard.location,
+            Some(PathBuf::from("/data/ozone")),
+            "already its own"
+        );
+
+        let mut s = session(|_, _, _| None);
+        assert!(!s.browse(None, "pick"), "cancelled");
+        assert_eq!(s.wizard.location, Some(PathBuf::from("/apps/Ozone")));
     }
 }

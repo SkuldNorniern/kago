@@ -244,7 +244,7 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
             let title = lang.line(Line::DirectoryTitle);
             let owner = window.handle() as isize;
             if let Some(dir) = browse(Some(owner), title, start.as_deref()) {
-                state.borrow_mut().session.set_location(&dir);
+                state.borrow_mut().session.picked(&dir);
             }
             redraw = true;
         }
