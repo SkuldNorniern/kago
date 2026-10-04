@@ -447,3 +447,28 @@ fn steamvr_driver_without_manifest_is_refused_at_build() {
         [crate::diagnostic::INSTALL_SOURCE]
     );
 }
+
+#[test]
+fn path_entry_survives_reinstall_and_upgrade() {
+    let w = World::new("path-upgrade");
+    w.install(MANIFEST).unwrap();
+    w.install(MANIFEST).unwrap();
+    assert!(
+        w.fake.path.borrow().contains(&w.app()),
+        "PATH lost on reinstall"
+    );
+    w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
+    assert!(
+        w.fake.path.borrow().contains(&w.app()),
+        "PATH lost on upgrade"
+    );
+    let receipt = w.store.read_receipt(&World::id()).unwrap().unwrap();
+    assert!(
+        receipt
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::PathEntry { .. }))
+    );
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(*w.fake.path.borrow(), [PathBuf::from("/already/there")]);
+}

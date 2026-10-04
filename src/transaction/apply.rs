@@ -224,19 +224,29 @@ impl Run<'_> {
             }
             Operation::AddPathEntry { directory, scope } => {
                 let entry = self.resolve(directory)?;
+                let text = entry.display().to_string();
+                let owned_before = self.previous.is_some_and(|p| {
+                    p.resources
+                        .iter()
+                        .any(|r| matches!(r, Resource::PathEntry { entry, .. } if *entry == text))
+                });
                 // tiny window: a crash between add and the journal write
                 // leaves the entry; it is never someone else's entry.
-                if self
+                let added = self
                     .platform
                     .add_path_entry(*scope, &entry)
-                    .map_err(Error::Other)?
-                {
+                    .map_err(Error::Other)?;
+                if added {
                     self.step(Undo::RemovePathEntry {
                         entry: entry.clone(),
                         scope: *scope,
                     })?;
+                }
+                // a reinstall finds its own entry there; it stays ours, or
+                // the cleanup of the old receipt would take it off PATH.
+                if added || owned_before {
                     self.resources.push(Resource::PathEntry {
-                        entry: entry.display().to_string(),
+                        entry: text,
                         scope: *scope,
                     });
                 }
