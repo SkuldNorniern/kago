@@ -41,6 +41,8 @@ pub const TARGET_CAPABILITY: Code = Code(204);
 pub const RESOLVE_MISSING: Code = Code(301);
 /// more than one variant matches the target.
 pub const RESOLVE_AMBIGUOUS: Code = Code(302);
+/// two resources install to the same path.
+pub const RESOLVE_CONFLICT: Code = Code(303);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
