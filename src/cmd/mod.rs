@@ -1,7 +1,9 @@
 mod args;
+mod build;
 mod check;
 mod lifecycle;
 mod plan;
+pub mod setup;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -20,6 +22,9 @@ commands:
   plan [manifest] [--target <target>] [--scope user|machine]
        [--components <a,b>]
                 print what an install would do, without doing it
+  build [manifest] [--target <target>] [--scope user|machine]
+        [--components <a,b>] [--out <dir>]
+                build the setup executable (default out: dist)
   install [manifest] [--scope user|machine] [--components <a,b>]
                 install the manifest on this machine
   uninstall <package-id> [--scope user|machine]
@@ -46,6 +51,8 @@ pub fn run() -> ExitCode {
         "plan" => {
             Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
         }
+        "build" => Args::parse(rest, &["--target", "--scope", "--components", "--out"])
+            .and_then(|a| build::run(&a)),
         "install" => {
             Args::parse(rest, &["--scope", "--components"]).and_then(|a| lifecycle::install(&a))
         }
