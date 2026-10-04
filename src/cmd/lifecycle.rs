@@ -3,7 +3,8 @@
 
 use std::process::ExitCode;
 
-use kago::install::Scope;
+use kago::install::{Scope, check_folder};
+use kago::manifest::FolderChoice;
 use kago::package::{PackageId, Target};
 use kago::platform::{self, Platform};
 use kago::transaction::{self, Recovered, Store};
@@ -24,10 +25,26 @@ fn open(scope: Scope) -> Result<(Box<dyn Platform>, Store), String> {
 /// installs the manifest for this machine.
 pub fn install(args: &Args) -> Result<ExitCode, String> {
     let target = Target::host().ok_or("this machine is not a kago target")?;
-    let Some((_, plan)) = plan::build(args, target, false)? else {
+    let Some((loaded, plan)) = plan::build(args, target, false)? else {
         return Ok(ExitCode::FAILURE);
     };
     let (platform, store) = open(plan.scope)?;
+    let plan = match args.value("--location") {
+        None => plan,
+        Some(_) if loaded.manifest.install.folder == FolderChoice::Fixed => {
+            return Err(format!("{} installs into a fixed folder", plan.name));
+        }
+        Some(dir) => {
+            let dir = std::path::absolute(dir).map_err(|e| format!("{dir}: {e}"))?;
+            let installed = store
+                .read_receipt(&plan.package)
+                .map_err(|e| e.to_string())?
+                .and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned());
+            check_folder(&dir, installed.as_deref())
+                .map_err(|e| format!("{}: {e}", dir.display()))?;
+            plan.at(&dir)
+        }
+    };
     let runtime = std::env::current_exe().map_err(|e| format!("cannot find kago itself: {e}"))?;
     println!(
         "installing {} {} for {}",

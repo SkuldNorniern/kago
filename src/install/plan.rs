@@ -45,6 +45,10 @@ pub struct InstallPlan {
     /// operations each brings. empty once [`InstallPlan::select`] ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
+    /// `{app}` somewhere other than the platform's default, chosen at
+    /// install. upgrades keep the folder of the install they replace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<PathBuf>,
 }
 
 /// an optional component the setup can offer as a tick box.
@@ -165,6 +169,7 @@ impl InstallPlan {
             downgrade: manifest.install.downgrade,
             operations,
             choices,
+            location: None,
         };
         (Some(plan), diagnostics)
     }
@@ -226,6 +231,15 @@ impl InstallPlan {
             components,
             operations,
             choices: Vec::new(),
+            ..self.clone()
+        }
+    }
+
+    /// the plan installing `{app}` into `dir`.
+    #[must_use]
+    pub fn at(&self, dir: &Path) -> Self {
+        Self {
+            location: Some(dir.to_path_buf()),
             ..self.clone()
         }
     }

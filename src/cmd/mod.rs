@@ -25,7 +25,7 @@ commands:
   build [manifest] [--target <target>] [--scope user|machine]
         [--components <a,b>] [--out <dir>]
                 build the setup executable (default out: dist)
-  install [manifest] [--scope user|machine] [--components <a,b>]
+  install [manifest] [--scope user|machine] [--components <a,b>] [--location <dir>]
                 install the manifest on this machine
   uninstall <package-id> [--scope user|machine]
                 remove everything the install owns
@@ -55,9 +55,8 @@ pub fn run() -> ExitCode {
         }
         "build" => Args::parse(rest, &["--target", "--scope", "--components", "--out"])
             .and_then(|a| build::run(&a)),
-        "install" => {
-            Args::parse(rest, &["--scope", "--components"]).and_then(|a| lifecycle::install(&a))
-        }
+        "install" => Args::parse(rest, &["--scope", "--components", "--location"])
+            .and_then(|a| lifecycle::install(&a)),
         "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
         "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),

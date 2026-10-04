@@ -11,5 +11,5 @@ pub use plan::{Choice, InstallPlan, Sources, hash};
 pub use resolve::{
     Resolved, ResolvedHook, ResolvedPath, ResolvedService, ResolvedShortcut, Selection, resolve,
 };
-pub use roots::{Roots, folder_name};
+pub use roots::{LocationError, Roots, check_folder, check_location, folder_name};
 pub use scope::{Scope, choose};

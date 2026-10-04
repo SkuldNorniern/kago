@@ -51,6 +51,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     let presentation = Setup {
         look: loaded.manifest.install.look,
         license: license(&loaded, target)?,
+        folder: loaded.manifest.install.folder,
     };
     let size = setup::build(stub, &plan, &presentation, icon.as_ref(), &out)
         .map_err(|e| format!("{}: {e}", out.display()))?;

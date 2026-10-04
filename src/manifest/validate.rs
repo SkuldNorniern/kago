@@ -216,6 +216,7 @@ impl Validator<'_> {
             repair: i.repair.unwrap_or(d.repair),
             rollback: i.rollback.unwrap_or(d.rollback),
             look: self.keyword("install.look", i.look.as_ref(), d.look),
+            folder: self.keyword("install.folder", i.folder.as_ref(), d.folder),
         }
     }
 

@@ -60,6 +60,7 @@ pub struct RawInstall {
     pub repair: Option<bool>,
     pub rollback: Option<bool>,
     pub look: Option<Spanned<String>>,
+    pub folder: Option<Spanned<String>>,
 }
 
 #[derive(Debug)]

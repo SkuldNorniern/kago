@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{Root, SemanticPath};
 
@@ -24,6 +25,16 @@ impl Roots {
         Ok(out)
     }
 
+    /// the same roots with `{app}` at `dir` and `{bin}` under it.
+    #[must_use]
+    pub fn with_app(mut self, dir: &Path) -> Self {
+        if self.0.contains_key(&Root::Bin) {
+            self.0.insert(Root::Bin, dir.join("bin"));
+        }
+        self.0.insert(Root::App, dir.to_path_buf());
+        self
+    }
+
     /// only the roots `paths` use, for the receipt.
     #[must_use]
     pub fn used<'a>(
@@ -37,6 +48,73 @@ impl Roots {
             }
         }
         out
+    }
+}
+
+/// why a folder cannot take an install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocationError {
+    /// relative paths depend on where setup was started.
+    NotAbsolute,
+    /// a drive or filesystem root, like `C:\` or `/`.
+    Root,
+    /// `.` or `..` in the path.
+    Unclear,
+    /// holds files that are not this package's.
+    NotEmpty,
+}
+
+impl fmt::Display for LocationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NotAbsolute => "the folder must be a full path",
+            Self::Root => "a drive root cannot hold an install",
+            Self::Unclear => "the folder must not contain `.` or `..`",
+            Self::NotEmpty => "the folder already has files in it; pick an empty or new folder",
+        })
+    }
+}
+
+/// checks a folder someone typed or picked for `{app}`. only the path; the
+/// caller checks what is on disk.
+///
+/// # Errors
+///
+/// when the path cannot hold an install.
+pub fn check_location(dir: &Path) -> Result<(), LocationError> {
+    if !dir.is_absolute() {
+        return Err(LocationError::NotAbsolute);
+    }
+    let mut named = 0;
+    for part in dir.components() {
+        match part {
+            Component::Normal(_) => named += 1,
+            Component::CurDir | Component::ParentDir => return Err(LocationError::Unclear),
+            Component::Prefix(_) | Component::RootDir => {}
+        }
+    }
+    if named == 0 {
+        return Err(LocationError::Root);
+    }
+    Ok(())
+}
+
+/// [`check_location`], then that `dir` is new or empty, unless it is
+/// where this package is installed now.
+///
+/// # Errors
+///
+/// when the path cannot hold an install or the folder has other files.
+pub fn check_folder(dir: &Path, installed: Option<&Path>) -> Result<(), LocationError> {
+    check_location(dir)?;
+    if installed.is_some_and(|now| now == dir) {
+        return Ok(());
+    }
+    let has_files = std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some());
+    if has_files {
+        Err(LocationError::NotEmpty)
+    } else {
+        Ok(())
     }
 }
 
@@ -61,6 +139,40 @@ pub fn folder_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locations_must_be_full_named_paths() {
+        let abs = if cfg!(windows) {
+            r"C:\Apps\Ozone"
+        } else {
+            "/opt/ozone"
+        };
+        assert_eq!(check_location(Path::new(abs)), Ok(()));
+        assert_eq!(
+            check_location(Path::new("Apps/Ozone")),
+            Err(LocationError::NotAbsolute)
+        );
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        assert_eq!(check_location(Path::new(root)), Err(LocationError::Root));
+        let up = if cfg!(windows) {
+            r"C:\Apps\..\Ozone"
+        } else {
+            "/opt/../ozone"
+        };
+        assert_eq!(check_location(Path::new(up)), Err(LocationError::Unclear));
+    }
+
+    #[test]
+    fn with_app_moves_bin_along() {
+        let roots = Roots(BTreeMap::from([
+            (Root::App, PathBuf::from("/a")),
+            (Root::Bin, PathBuf::from("/a/bin")),
+            (Root::Data, PathBuf::from("/d")),
+        ]))
+        .with_app(Path::new("/x/App"));
+        assert_eq!(roots.0[&Root::Bin], PathBuf::from("/x/App/bin"));
+        assert_eq!(roots.0[&Root::Data], PathBuf::from("/d"));
+    }
 
     #[test]
     fn resolves_under_root() {

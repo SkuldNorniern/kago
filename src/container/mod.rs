@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::install::{Digest, InstallPlan, Operation, hash};
-use crate::manifest::{SemanticPath, SetupLook};
+use crate::manifest::{FolderChoice, SemanticPath, SetupLook};
 
 pub const MAGIC: &[u8; 8] = b"KAGOPKG1";
 pub const FORMAT: u32 = 1;
@@ -35,6 +35,13 @@ pub struct Header {
 pub struct Setup {
     pub look: SetupLook,
     pub license: Option<LicenseText>,
+    /// whether the setup offers a folder choice.
+    #[serde(default = "choose")]
+    pub folder: FolderChoice,
+}
+
+const fn choose() -> FolderChoice {
+    FolderChoice::Choose
 }
 
 impl Default for Setup {
@@ -42,6 +49,7 @@ impl Default for Setup {
         Self {
             look: SetupLook::Modern,
             license: None,
+            folder: FolderChoice::Choose,
         }
     }
 }

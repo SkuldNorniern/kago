@@ -472,3 +472,40 @@ fn path_entry_survives_reinstall_and_upgrade() {
     uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert_eq!(*w.fake.path.borrow(), [PathBuf::from("/already/there")]);
 }
+
+#[test]
+fn chosen_folder_is_kept_on_upgrade_and_cleaned_on_uninstall() {
+    let w = World::new("location");
+    let custom = w.dir.join("elsewhere").join("App");
+    install(
+        &w.plan(MANIFEST).at(&custom),
+        &w.fake,
+        &w.store,
+        &w.dir.join("kago.exe"),
+    )
+    .unwrap();
+    assert_eq!(fs::read(custom.join("app.exe")).unwrap(), b"v1");
+    assert!(!w.app().exists(), "nothing in the default folder");
+    assert!(w.fake.path.borrow().contains(&custom));
+
+    // an upgrade without a folder stays where the install is.
+    w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
+    assert!(custom.join("app.exe").is_file());
+    assert!(!w.app().exists());
+
+    // a new folder moves it.
+    let moved = w.dir.join("moved");
+    install(
+        &w.plan(&MANIFEST.replace("1.0.0", "1.2.0")).at(&moved),
+        &w.fake,
+        &w.store,
+        &w.dir.join("kago.exe"),
+    )
+    .unwrap();
+    assert!(moved.join("app.exe").is_file());
+    assert!(!custom.exists(), "old folder cleaned up");
+    assert!(!w.fake.path.borrow().contains(&custom));
+
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(!moved.exists());
+}

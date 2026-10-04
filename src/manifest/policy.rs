@@ -87,6 +87,12 @@ keywords! {
     SetupLook { Modern => "modern", Native => "native" }
 }
 
+keywords! {
+    /// `folder` in the package block: whether the person installing may
+    /// pick where `{app}` goes.
+    FolderChoice { Choose => "choose", Fixed => "fixed" }
+}
+
 /// `[install]` after defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPolicy {
@@ -98,6 +104,7 @@ pub struct InstallPolicy {
     pub repair: bool,
     pub rollback: bool,
     pub look: SetupLook,
+    pub folder: FolderChoice,
 }
 
 impl Default for InstallPolicy {
@@ -111,6 +118,7 @@ impl Default for InstallPolicy {
             repair: true,
             rollback: true,
             look: SetupLook::Modern,
+            folder: FolderChoice::Choose,
         }
     }
 }

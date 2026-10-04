@@ -15,8 +15,8 @@ use std::path::Path;
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
-    AppKind, Downgrade, Elevation, InstallPolicy, LicenseFormat, ScopeChoice, ScopeConflict,
-    SetupLook, Upgrade,
+    AppKind, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
+    ScopeConflict, SetupLook, Upgrade,
 };
 pub use resource::{
     Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
@@ -262,6 +262,16 @@ target linux setup appimage
 ",
         ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
+    fn folder_choice_defaults_to_choose() {
+        let (m, _) = check(AUREA);
+        assert_eq!(m.unwrap().install.folder, FolderChoice::Choose);
+        let (m, codes) = check(&AUREA.replace("scope choose", "scope choose
+  folder fixed"));
+        assert!(codes.is_empty(), "{codes:?}");
+        assert_eq!(m.unwrap().install.folder, FolderChoice::Fixed);
     }
 
     #[test]

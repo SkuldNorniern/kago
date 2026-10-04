@@ -29,9 +29,18 @@ pub(super) fn install(
             offered: plan.version.to_string(),
         });
     }
-    let roots = platform
+    let mut roots = platform
         .roots(plan.scope, &plan.name)
         .map_err(Error::Other)?;
+    // a chosen folder, else wherever the installed version lives.
+    let location = plan.location.clone().or_else(|| {
+        previous
+            .as_ref()
+            .and_then(|p| p.roots.get(&Root::App).cloned())
+    });
+    if let Some(dir) = location {
+        roots = roots.with_app(&dir);
+    }
     let mut journal = Journal::begin(
         &store.journal_path(&plan.package),
         &plan.package,
@@ -102,7 +111,7 @@ pub(super) fn install(
         let stale: Vec<Resource> = previous
             .resources
             .iter()
-            .filter(|r| !receipt.resources.contains(r) && !same_place(r, &receipt))
+            .filter(|r| !same_place(r, &previous, &receipt))
             .cloned()
             .collect();
         // best effort: the new version is committed either way.
@@ -111,12 +120,16 @@ pub(super) fn install(
     Ok(receipt)
 }
 
-/// a stale resource that the new receipt still owns under another hash or
-/// size, like a replaced file. it must not be deleted.
-fn same_place(old: &Resource, new: &Receipt) -> bool {
+/// whether the new receipt still owns what `old` names, maybe under
+/// another hash or size, like a replaced file. then it must not be deleted.
+/// files and folders compare on disk: the same `{app}/x` in a folder the
+/// install moved away from is stale.
+fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
+    let on_disk =
+        |a: &SemanticPath, b: &SemanticPath| a == b && previous.absolute(a) == new.absolute(b);
     new.resources.iter().any(|n| match (old, n) {
         (Resource::File { path: a, .. }, Resource::File { path: b, .. })
-        | (Resource::Directory { path: a }, Resource::Directory { path: b }) => a == b,
+        | (Resource::Directory { path: a }, Resource::Directory { path: b }) => on_disk(a, b),
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. }) => a == b,
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
