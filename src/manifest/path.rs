@@ -129,6 +129,16 @@ impl SemanticPath {
     }
 }
 
+impl From<Root> for SemanticPath {
+    /// the root itself, like `{app}`.
+    fn from(root: Root) -> Self {
+        Self {
+            root,
+            relative: String::new(),
+        }
+    }
+}
+
 /// one path segment safe on every target filesystem.
 pub(crate) fn valid_segment(s: &str) -> bool {
     !(s.is_empty()

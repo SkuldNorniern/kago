@@ -29,3 +29,4 @@ pub mod manifest;
 pub mod package;
 pub mod platform;
 pub mod receipt;
+pub mod transaction;
