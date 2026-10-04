@@ -310,11 +310,12 @@ target linux setup appimage
         assert_eq!(m.source("release").unwrap().unpack, Unpack::Zip);
         assert_eq!(m.files.last().unwrap().source, "release:docs");
         assert_eq!(m.files.last().unwrap().target.to_string(), "{app}/docs");
-        let (_, codes) = check(&with("source web\n  fetch https://x/y.zip\n"));
+        let unpinned = with("source web\n  fetch https://x/y.zip\n");
+        let (m, d) = Manifest::parse("Kagofile", &unpinned);
+        assert!(m.is_some(), "an unpinned fetch only warns");
         assert_eq!(
-            codes,
-            vec![diagnostic::MANIFEST_VALUE],
-            "fetch needs a sha256"
+            d.iter().next().unwrap().severity,
+            crate::diagnostic::Severity::Warning
         );
     }
 
