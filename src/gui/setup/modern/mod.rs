@@ -593,15 +593,14 @@ fn welcome(
                 (&component.name, Hit::Component(index)),
                 on,
             )?;
-            if let Some(about) = &component.description {
-                let left = row.right() + 12.0;
-                pen.clipped(
-                    about,
-                    Area::new(left, y, (body.right() - left).max(0.0), 24.0),
-                    &pen.font(13.0),
-                    color::FAINT,
-                )?;
-            }
+            let (note, warn) = component.note(lang);
+            let left = row.right() + 12.0;
+            pen.clipped(
+                &note,
+                Area::new(left, y, (body.right() - left).max(0.0), 24.0),
+                &pen.font(13.0),
+                if warn { color::WARN } else { color::FAINT },
+            )?;
             y += COMPONENT_ROW;
         }
         y += 6.0;

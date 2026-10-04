@@ -40,6 +40,7 @@ pub enum Line {
     FolderRoot,
     FolderUnclear,
     FolderNotEmpty,
+    NotFound,
     InstallingTitle,
     InstallingBody,
     DoneTitle,
@@ -87,6 +88,26 @@ impl Lang {
             text = text.replace(&format!("{{{key}}}"), value);
         }
         text
+    }
+
+    /// bytes as a short size, like `12.3 MB`. the units read the same in
+    /// both languages.
+    #[must_use]
+    pub fn size(self, bytes: u64) -> String {
+        const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+        #[allow(clippy::cast_precision_loss)]
+        let mut value = bytes as f64;
+        let mut unit = 0;
+        while value >= 1024.0 && unit < UNITS.len() - 1 {
+            value /= 1024.0;
+            unit += 1;
+        }
+        let _ = self;
+        if unit == 0 || value >= 100.0 {
+            format!("{value:.0} {}", UNITS[unit])
+        } else {
+            format!("{value:.1} {}", UNITS[unit])
+        }
     }
 
     /// why a folder cannot be used, in this language.
@@ -185,6 +206,7 @@ const fn table(line: Line) -> [&'static str; 2] {
             "This folder already has files. Pick an empty or new folder.",
             "이 폴더에 이미 파일이 있습니다. 비어 있거나 새 폴더를 선택하세요.",
         ],
+        Line::NotFound => ["{item} not found", "{item}을(를) 찾을 수 없음"],
         Line::InstallingTitle => ["Installing", "설치 중"],
         Line::InstallingBody => [
             "Please wait while {name} is being installed.",
@@ -221,6 +243,14 @@ const fn table(line: Line) -> [&'static str; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_read_short() {
+        assert_eq!(Lang::En.size(512), "512 B");
+        assert_eq!(Lang::En.size(1536), "1.5 KB");
+        assert_eq!(Lang::Ko.size(3_751_936), "3.6 MB");
+        assert_eq!(Lang::En.size(400 * 1024 * 1024), "400 MB");
+    }
 
     #[test]
     fn fill_replaces_every_key() {

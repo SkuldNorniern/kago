@@ -25,6 +25,7 @@ pub mod color {
     pub const ACCENT: Color = Color::rgb(128, 150, 255);
     pub const ACCENT_TEXT: Color = Color::rgb(12, 16, 36);
     pub const GOOD: Color = Color::rgb(118, 208, 150);
+    pub const WARN: Color = Color::rgb(240, 200, 110);
     pub const BAD: Color = Color::rgb(240, 116, 106);
 
     pub fn mix(c: Color, other: Color, t: f32) -> Color {

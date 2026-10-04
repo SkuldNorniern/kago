@@ -81,12 +81,21 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                 components: plan
                     .choices
                     .iter()
-                    .map(|choice| Component {
-                        id: choice.id.clone(),
-                        name: choice.name.clone(),
-                        description: choice.description.clone(),
-                        default: choice.default,
-                        depends: choice.depends.clone(),
+                    .map(|choice| {
+                        let missing = choice
+                            .detect
+                            .filter(|d| !platform::detect(*d))
+                            .map(|d| d.name().to_owned());
+                        Component {
+                            id: choice.id.clone(),
+                            name: choice.name.clone(),
+                            description: choice.description.clone(),
+                            // not ticked for something this machine lacks.
+                            default: choice.default && missing.is_none(),
+                            depends: choice.depends.clone(),
+                            size: choice.size,
+                            missing,
+                        }
                     })
                     .collect(),
             };

@@ -291,6 +291,8 @@ mod tests {
             description: None,
             default,
             depends: depends.iter().map(|d| (*d).to_owned()).collect(),
+            size: 0,
+            missing: None,
         }
     }
 

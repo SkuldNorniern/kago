@@ -99,6 +99,16 @@ keywords! {
     Detect { SteamVr => "steamvr" }
 }
 
+impl Detect {
+    /// what people call it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::SteamVr => "SteamVR",
+        }
+    }
+}
+
 /// `[install]` after defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPolicy {

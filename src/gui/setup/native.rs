@@ -225,13 +225,11 @@ fn render(
             window.add(header(Line::ComponentsTitle, Line::ComponentsBody)?)?;
             window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
             for (component, on) in info.components.iter().zip(&wizard.chosen) {
-                let label = match &component.description {
-                    Some(about) => format!("{}  ({about})", component.name),
-                    None => component.name.clone(),
-                };
-                let tick = Kept::new(Checkbox::with_checked(&label, *on)?);
+                let tick = Kept::new(Checkbox::with_checked(&component.name, *on)?);
                 body.add(tick.share())?;
                 live.components.push(tick);
+                let (note, _) = component.note(lang);
+                body.add(Label::new(&format!("        {note}"))?)?;
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;

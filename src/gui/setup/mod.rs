@@ -45,6 +45,26 @@ pub struct Component {
     pub default: bool,
     /// other components it needs.
     pub depends: Vec<String>,
+    /// bytes it adds.
+    pub size: u64,
+    /// what it is for and was not found here, like `SteamVR`.
+    pub missing: Option<String>,
+}
+
+impl Component {
+    /// the line under or beside its name: not found, else size and
+    /// description.
+    fn note(&self, lang: Lang) -> (String, bool) {
+        if let Some(missing) = &self.missing {
+            return (lang.fill(Line::NotFound, &[("item", missing)]), true);
+        }
+        let size = lang.size(self.size);
+        let text = match &self.description {
+            Some(about) => format!("{size}  \u{b7}  {about}"),
+            None => size,
+        };
+        (text, false)
+    }
 }
 
 #[derive(Debug, Clone)]
