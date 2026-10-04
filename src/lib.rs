@@ -1,7 +1,7 @@
 //! Kago. one manifest lowered into an install plan, run by the kago runtime or emitted as native packages.
 
 /// serde as the `Display` / `FromStr` string, so ids, versions, targets and
-/// paths read the same in receipts as in `kago.toml`.
+/// paths read the same in receipts as in `Kagofile`.
 macro_rules! string_serde {
     ($($ty:ty),+ $(,)?) => {
         $(

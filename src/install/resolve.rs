@@ -290,7 +290,7 @@ mod tests {
     use crate::manifest::tests::AUREA;
 
     fn manifest(src: &str) -> Manifest {
-        let (m, d) = Manifest::parse("kago.toml", src);
+        let (m, d) = Manifest::parse("Kagofile", src);
         m.unwrap_or_else(|| panic!("{d:?}"))
     }
 
@@ -333,9 +333,7 @@ mod tests {
 
     #[test]
     fn ambiguous_variant_is_an_error() {
-        let src = format!(
-            "{AUREA}\n[[files]]\nlogical_id = \"main-executable\"\nsource = \"other.exe\"\ntarget = \"{{app}}/other.exe\"\nwhen.os = \"windows\"\n"
-        );
+        let src = format!("{AUREA}\napp main-executable\n  windows other.exe\n");
         let m = manifest(&src);
         let (_, d) = resolve_for(&m, "windows-x86_64");
         assert!(d.iter().any(|d| d.code == diagnostic::RESOLVE_AMBIGUOUS));
@@ -343,7 +341,7 @@ mod tests {
 
     #[test]
     fn same_target_twice_is_a_conflict() {
-        let src = format!("{AUREA}\n[[files]]\nsource = \"x\"\ntarget = \"{{app}}/themes\"\n");
+        let src = format!("{AUREA}\ncopy x -> {{app}}/themes\n");
         let m = manifest(&src);
         let (_, d) = resolve_for(&m, "linux-x86_64");
         assert!(d.iter().any(|d| d.code == diagnostic::RESOLVE_CONFLICT));

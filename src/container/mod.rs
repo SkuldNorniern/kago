@@ -185,7 +185,7 @@ mod tests {
         fs::create_dir_all(dir.join("themes")).unwrap();
         fs::write(dir.join("dist/windows-x86_64/aurea.exe"), b"MZ app").unwrap();
         fs::write(dir.join("themes/a.toml"), b"theme").unwrap();
-        let m = Manifest::parse("kago.toml", AUREA).0.unwrap();
+        let m = Manifest::parse("Kagofile", AUREA).0.unwrap();
         let target = "windows-x86_64".parse().unwrap();
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0

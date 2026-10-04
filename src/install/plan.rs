@@ -252,7 +252,7 @@ mod tests {
     }
 
     fn plan(dir: &Path) -> (Option<InstallPlan>, Diagnostics) {
-        let m = Manifest::parse("kago.toml", AUREA).0.unwrap();
+        let m = Manifest::parse("Kagofile", AUREA).0.unwrap();
         let target: Target = "windows-x86_64".parse().unwrap();
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0

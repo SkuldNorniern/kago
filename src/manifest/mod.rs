@@ -1,12 +1,12 @@
-//! `kago.toml` parsing, `when` selectors, normalize, validate and schema migration.
+//! the Kagofile: parsing, `when` selectors, sources and validation.
 
 mod kagofile;
-mod parse;
 mod path;
 mod policy;
 mod resource;
 mod schema;
 mod selector;
+mod source;
 mod validate;
 
 use std::collections::BTreeMap;
@@ -24,15 +24,16 @@ pub use resource::{
     ServiceRestart, ServiceStart, Shortcut, ShortcutLocation,
 };
 pub use selector::{Context, Selector};
+pub use source::{Source, SourceKind, Unpack};
 pub use validate::SCHEMA;
 
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::package::{Artifact, Os, PackageId, Version};
 
-/// default manifest file name.
-pub const FILE_NAME: &str = "kago.toml";
+/// manifest file name.
+pub const FILE_NAME: &str = "Kagofile";
 
-/// a checked `kago.toml`. every reference inside points at something that
+/// a checked Kagofile. every reference inside points at something that
 /// exists; which variant applies to a target is decided later by `install`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Manifest {
@@ -48,14 +49,10 @@ pub struct Manifest {
     pub hooks: Vec<Hook>,
     pub requirements: Vec<Requirement>,
     pub update: Option<Update>,
-    /// `targets.<os>.artifacts`, only for listed OSes.
+    /// `target <os> <artifact>...`, only for listed OSes.
     pub artifacts: BTreeMap<Os, Vec<Artifact>>,
-    /// backend settings like `[targets.windows.msi]`, read by that backend.
-    pub target_settings: BTreeMap<Os, toml::Table>,
-    /// `[distribution.*]`, read by the homebrew and winget generators.
-    pub distribution: Option<toml::Table>,
-    /// `[ui]`, read by the gui.
-    pub ui: Option<toml::Table>,
+    /// where `name:path` file sources come from.
+    pub sources: Vec<Source>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,22 +92,45 @@ pub struct Update {
 }
 
 impl Manifest {
-    /// checks `source` as the manifest named `file`. returns the manifest
-    /// when nothing is an error, plus every diagnostic including warnings.
+    /// checks Kagofile text named `file`, with paths relative to the
+    /// current directory. returns the manifest when nothing is an error,
+    /// plus every diagnostic including warnings.
     #[must_use]
     pub fn parse(file: &str, source: &str) -> (Option<Self>, Diagnostics) {
-        match parse::parse(file, source) {
-            Ok(raw) => validate::validate(raw, file, source),
-            Err(d) => (None, Diagnostics(vec![d])),
-        }
+        Self::parse_in(file, source, Path::new("."))
     }
 
-    /// reads and checks the manifest at `path`.
+    /// as `parse`, with `version from` and relative paths under `base`.
+    #[must_use]
+    pub fn parse_in(file: &str, source: &str, base: &Path) -> (Option<Self>, Diagnostics) {
+        let nodes = match kagofile::parse(file, source) {
+            Ok(nodes) => nodes,
+            Err(d) => return (None, Diagnostics(vec![d])),
+        };
+        let (lowered, mut diagnostics) = kagofile::lower(file, source, base, &nodes);
+        let Some(lowered) = lowered else {
+            return (None, diagnostics);
+        };
+        let (manifest, more) = validate::validate(lowered.raw, file, source);
+        diagnostics.extend(more.0);
+        let manifest = manifest.map(|mut m| {
+            m.sources = lowered.sources;
+            m
+        });
+        let manifest = if diagnostics.has_errors() {
+            None
+        } else {
+            manifest
+        };
+        (manifest, diagnostics)
+    }
+
+    /// reads and checks the Kagofile at `path`.
     #[must_use]
     pub fn load(path: &Path) -> (Option<Self>, Diagnostics) {
         let file = path.display().to_string();
         match std::fs::read_to_string(path) {
-            Ok(source) => Self::parse(&file, &source),
+            Ok(source) => Self::parse_in(&file, &source, path.parent().unwrap_or(Path::new("."))),
             Err(e) => (
                 None,
                 Diagnostics(vec![Diagnostic::error(
@@ -119,6 +139,11 @@ impl Manifest {
                 )]),
             ),
         }
+    }
+
+    #[must_use]
+    pub fn source(&self, name: &str) -> Option<&Source> {
+        self.sources.iter().find(|s| s.name == name)
     }
 
     #[must_use]
@@ -132,85 +157,36 @@ pub(crate) mod tests {
     use super::*;
     use crate::diagnostic::Code;
 
-    pub(crate) const AUREA: &str = r#"
-schema = 1
+    pub(crate) const AUREA: &str = r#"# Aurea test package
+package dev.eira.aurea
+  name Aurea
+  version 1.4.0
+  publisher Eira
+  description Aurea desktop application
+  scope choose
 
-[package]
-id = "dev.eira.aurea"
-name = "Aurea"
-version = "1.4.0"
-publisher = "Eira"
-description = "Aurea desktop application"
+license LICENSE.txt accept
 
-[application]
-kind = "desktop"
-entrypoint = "main-executable"
+component core Aurea required
+  app main-executable
+    to {app}/bin
+    windows x86_64 dist/windows-x86_64/aurea.exe
+    linux x86_64 dist/linux-x86_64/aurea
+    macos aarch64 dist/macos-aarch64/aurea -> {app}/Contents/MacOS/Aurea
+  copy themes
 
-[install]
-scope = "choose"
+component cli "Command-line tools" needs core
+  when windows linux
+    path
 
-[license]
-file = "LICENSE.txt"
-require_acceptance = true
+shortcut Aurea
 
-[[components]]
-id = "core"
-name = "Aurea"
-required = true
-
-[[components]]
-id = "cli"
-name = "Command-line tools"
-depends = ["core"]
-
-[[files]]
-logical_id = "main-executable"
-component = "core"
-source = "dist/windows-x86_64/aurea.exe"
-target = "{app}/bin/aurea.exe"
-when.os = "windows"
-when.arch = "x86_64"
-
-[[files]]
-logical_id = "main-executable"
-component = "core"
-source = "dist/linux-x86_64/aurea"
-target = "{app}/bin/aurea"
-when.os = "linux"
-when.arch = "x86_64"
-
-[[files]]
-logical_id = "main-executable"
-component = "core"
-source = "dist/macos-aarch64/aurea"
-target = "{app}/Contents/MacOS/Aurea"
-when.os = "macos"
-when.arch = "aarch64"
-
-[[files]]
-component = "core"
-source = "themes"
-target = "{app}/themes"
-
-[[paths]]
-resource = "main-executable"
-kind = "executable-parent"
-component = "cli"
-when.os = ["windows", "linux"]
-
-[[shortcuts]]
-name = "Aurea"
-target = "main-executable"
-
-[targets.windows]
-artifacts = ["setup", "msi"]
-
-[targets.linux]
-artifacts = ["setup", "appimage"]
+target windows setup msi
+target linux setup appimage
 "#;
 
     fn check(src: &str) -> (Option<Manifest>, Vec<Code>) {
-        let (m, d) = Manifest::parse("kago.toml", src);
+        let (m, d) = Manifest::parse("Kagofile", src);
         (m, d.iter().map(|d| d.code).collect())
     }
 
@@ -224,86 +200,131 @@ artifacts = ["setup", "appimage"]
         assert!(codes.is_empty(), "{codes:?}");
         let m = m.unwrap();
         assert_eq!(m.package.id.as_str(), "dev.eira.aurea");
+        assert_eq!(
+            m.package.description.as_deref(),
+            Some("Aurea desktop application")
+        );
         assert_eq!(m.install.scope, ScopeChoice::Choose);
         assert_eq!(m.files.len(), 4);
-        assert!(m.component("core").unwrap().default);
+        assert_eq!(m.files[2].target.to_string(), "{app}/Contents/MacOS/Aurea");
+        assert_eq!(m.files[3].target.to_string(), "{app}/themes");
+        assert!(m.component("core").unwrap().required);
+        assert_eq!(m.component("cli").unwrap().depends, ["core"]);
         assert_eq!(
             m.artifacts[&Os::Windows],
             vec![Artifact::Setup, Artifact::Msi]
         );
         assert_eq!(m.shortcuts[0].location, ShortcutLocation::Applications);
-        assert_eq!(m.application.display_name, "Aurea");
+        assert_eq!(m.shortcuts[0].target, "main-executable");
+        assert_eq!(m.application.entrypoint.as_deref(), Some("main-executable"));
+        assert!(m.license.unwrap().require_acceptance);
     }
 
     #[test]
-    fn schema_is_required_and_checked() {
-        let (m, codes) = check(&AUREA.replace("schema = 1", ""));
+    fn smallest_kagofile() {
+        let (m, codes) =
+            check("package dev.x.tool\n  version 1.0.0\napp tool\n  windows tool.exe\nshortcut\n");
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        assert_eq!(m.package.name, "tool");
+        assert_eq!(m.shortcuts[0].name, "tool");
+        assert_eq!(m.artifacts[&Os::Windows], vec![Artifact::Setup]);
+    }
+
+    #[test]
+    fn package_and_version_are_required() {
+        let (m, codes) = check("app x\n  windows x.exe\n");
         assert!(m.is_none());
-        assert_eq!(codes, vec![diagnostic::MANIFEST_SCHEMA]);
-        let (_, codes) = check(&AUREA.replace("schema = 1", "schema = 2"));
-        assert_eq!(codes, vec![diagnostic::MANIFEST_SCHEMA]);
+        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+        let (_, codes) = check("package dev.x.y\n  name Y\n");
+        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
     }
 
     #[test]
     fn bad_values_are_reported() {
         let (_, codes) = check(&AUREA.replace("dev.eira.aurea", "Aurea"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
-        let (_, codes) = check(&AUREA.replace("\"1.4.0\"", "\"1.4\""));
+        let (_, codes) = check(&AUREA.replace("version 1.4.0", "version 1.4"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
-        let (_, codes) = check(&AUREA.replace("scope = \"choose\"", "scope = \"everyone\""));
+        let (_, codes) = check(&AUREA.replace("scope choose", "scope everyone"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
     }
 
     #[test]
+    fn unknown_statements_are_syntax_errors() {
+        let (_, codes) = check(&with("install everything\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+        let (_, codes) = check(&with("copy a sideways b\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
     fn unsafe_target_paths_are_rejected() {
-        let (_, codes) = check(&AUREA.replace("{app}/themes", "{app}/../themes"));
+        let (_, codes) = check(&with("copy x -> {app}/../x\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_PATH]);
-        let (_, codes) = check(&AUREA.replace("{app}/themes", "C:/themes"));
+        let (_, codes) = check(&with("copy x -> C:/x\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_PATH]);
     }
 
     #[test]
     fn references_must_exist() {
-        let (_, codes) =
-            check(&AUREA.replace("entrypoint = \"main-executable\"", "entrypoint = \"main\""));
+        let (_, codes) = check(&with("shortcut Other -> missing\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_REFERENCE]);
-        let (_, codes) = check(&with(
-            "[[shortcuts]]\nname = \"x\"\ntarget = \"missing\"\ncomponent = \"docs\"\n",
-        ));
-        assert_eq!(
-            codes,
-            vec![
-                diagnostic::MANIFEST_REFERENCE,
-                diagnostic::MANIFEST_REFERENCE
-            ]
-        );
-        let (_, codes) = check(&AUREA.replace("depends = [\"core\"]", "depends = [\"gui\"]"));
+        let (_, codes) = check(&AUREA.replace("needs core", "needs gui"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_REFERENCE]);
+        let (_, codes) = check(&with("copy release:x\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_REFERENCE]);
     }
 
     #[test]
     fn duplicates_and_bad_artifacts() {
-        let (_, codes) = check(&with("[[components]]\nid = \"core\"\nname = \"again\"\n"));
+        let (_, codes) = check(&with("component core again\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_DUPLICATE]);
-        let (_, codes) = check(&AUREA.replace("[\"setup\", \"msi\"]", "[\"setup\", \"dmg\"]"));
+        let (_, codes) =
+            check(&AUREA.replace("target windows setup msi", "target windows setup dmg"));
         assert_eq!(codes, vec![diagnostic::TARGET_CAPABILITY]);
+        let (_, codes) = check(&with("when beos\n  copy x\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SELECTOR]);
     }
 
     #[test]
-    fn paths_need_one_source() {
-        let (_, codes) = check(&with(
-            "[[paths]]\nresource = \"main-executable\"\ndirectory = \"{app}/bin\"\n",
+    fn optional_path_gets_its_own_component() {
+        let (m, _) = check(
+            "package dev.x.tool\n  version 1.0.0\napp tool\n  windows tool.exe\npath optional \"Add tool to PATH\"\n",
+        );
+        let m = m.unwrap();
+        let c = m.component("path-tool").unwrap();
+        assert!(!c.default && !c.required);
+        assert_eq!(c.name, "Add tool to PATH");
+        assert_eq!(m.paths[0].component.as_deref(), Some("path-tool"));
+    }
+
+    #[test]
+    fn sources_are_declared_and_checked() {
+        let (m, codes) = check(&with(
+            "source build\n  dir target/release\nsource release\n  fetch https://x/${version}.zip\n  sha256 windows-x86_64 abc\n  unpack zip\ncopy release:docs\n",
         ));
-        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        assert_eq!(m.sources.len(), 2);
+        assert_eq!(m.source("release").unwrap().unpack, Unpack::Zip);
+        assert_eq!(m.files.last().unwrap().source, "release:docs");
+        assert_eq!(m.files.last().unwrap().target.to_string(), "{app}/docs");
+        let (_, codes) = check(&with("source web\n  fetch https://x/y.zip\n"));
+        assert_eq!(
+            codes,
+            vec![diagnostic::MANIFEST_VALUE],
+            "fetch needs a sha256"
+        );
     }
 
     #[test]
     fn errors_point_at_the_value() {
-        let src = AUREA.replace("target = \"{app}/themes\"", "target = \"{nope}/themes\"");
-        let (_, d) = Manifest::parse("kago.toml", &src);
+        let src = AUREA.replace("copy themes", "copy themes -> {nope}/themes");
+        let (_, d) = Manifest::parse("Kagofile", &src);
         let at = d.iter().next().unwrap().location.clone().unwrap();
         let line = src.lines().nth(at.line as usize - 1).unwrap();
-        assert!(line.starts_with("target = \"{nope}"), "{line}");
-        assert_eq!(at.column, 10);
+        assert_eq!(line.trim(), "copy themes -> {nope}/themes");
+        assert_eq!(at.column, 18);
     }
 }

@@ -17,7 +17,7 @@ usage: kago <command>
 
 commands:
   check [manifest] [--target <target>]...
-                validate kago.toml and resolve it for each target
+                validate the Kagofile and resolve it for each target
                 (default: the host)
   plan [manifest] [--target <target>] [--scope user|machine]
        [--components <a,b>]
@@ -36,7 +36,7 @@ commands:
   recover [--scope user|machine]
                 finish or roll back installs a crash left behind
 
-manifest is a kago.toml or the directory holding one (default: .)
+manifest is a Kagofile or the directory holding one (default: .)
 targets look like windows-x86_64, macos-aarch64, linux-x86_64-musl
 ";
 
@@ -77,7 +77,7 @@ pub fn run() -> ExitCode {
     }
 }
 
-/// `kago.toml` path from an optional file-or-directory argument.
+/// `Kagofile` path from an optional file-or-directory argument.
 fn manifest_path(arg: Option<&str>) -> PathBuf {
     let path = Path::new(arg.unwrap_or("."));
     if path.is_dir() {

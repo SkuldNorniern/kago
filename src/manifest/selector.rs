@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use toml::Spanned;
+use serde_spanned::Spanned;
 
-use super::schema::{OneOrMany, RawWhen};
+use super::schema::RawWhen;
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::package::{Arch, Artifact, Libc, Os, Target};
 
@@ -99,7 +99,7 @@ struct Values<'a> {
 }
 
 impl Values<'_> {
-    fn parse<T>(&mut self, key: &str, values: Option<&Spanned<OneOrMany>>) -> Option<Vec<T>>
+    fn parse<T>(&mut self, key: &str, values: Option<&Spanned<Vec<String>>>) -> Option<Vec<T>>
     where
         T: FromStr,
         T::Err: std::fmt::Display,
@@ -107,7 +107,7 @@ impl Values<'_> {
         let values = values?;
         let at = Location::at(self.file, self.source, values.span().start);
         let mut out = Vec::new();
-        for value in values.get_ref().values() {
+        for value in values.get_ref() {
             let error = if value.is_empty() {
                 Some("empty value".to_owned())
             } else {
@@ -137,10 +137,25 @@ impl Values<'_> {
 mod tests {
     use super::*;
 
-    fn when(src: &str) -> (Selector, Diagnostics) {
-        let raw: RawWhen = toml::from_str(src).unwrap();
+    /// raw `when` from `key=a,b` pairs.
+    fn when(pairs: &[(&str, &str)]) -> (Selector, Diagnostics) {
+        let mut raw = RawWhen::default();
+        for (key, values) in pairs {
+            let list = Some(Spanned::new(
+                0..1,
+                values.split(',').map(str::to_owned).collect::<Vec<_>>(),
+            ));
+            match *key {
+                "os" => raw.os = list,
+                "arch" => raw.arch = list,
+                "libc" => raw.libc = list,
+                "format" => raw.format = list,
+                "profile" => raw.profile = list,
+                _ => panic!("{key}"),
+            }
+        }
         let mut diagnostics = Diagnostics::default();
-        let s = selector(Some(&raw), "kago.toml", src, &mut diagnostics);
+        let s = selector(Some(&raw), "Kagofile", "x", &mut diagnostics);
         (s, diagnostics)
     }
 
@@ -150,10 +165,7 @@ mod tests {
 
     #[test]
     fn matches_keys_and_alternatives() {
-        let (s, d) = when(
-            "os = \"windows\"
-arch = [\"x86_64\", \"aarch64\"]",
-        );
+        let (s, d) = when(&[("os", "windows"), ("arch", "x86_64,aarch64")]);
         assert!(d.is_empty());
         assert!(s.matches(&cx("windows-x86_64")));
         assert!(s.matches(&cx("windows-aarch64")));
@@ -162,7 +174,7 @@ arch = [\"x86_64\", \"aarch64\"]",
 
     #[test]
     fn libc_needs_a_libc() {
-        let (s, _) = when("libc = \"musl\"");
+        let (s, _) = when(&[("libc", "musl")]);
         assert!(s.matches(&cx("linux-x86_64-musl")));
         assert!(!s.matches(&cx("linux-x86_64-gnu")));
         assert!(!s.matches(&cx("windows-x86_64")));
@@ -170,7 +182,7 @@ arch = [\"x86_64\", \"aarch64\"]",
 
     #[test]
     fn format_needs_a_chosen_format() {
-        let (s, _) = when("format = \"msi\"");
+        let (s, _) = when(&[("format", "msi")]);
         let mut c = cx("windows-x86_64");
         assert!(!s.matches(&c));
         c.format = Some(Artifact::Msi);
@@ -185,10 +197,7 @@ arch = [\"x86_64\", \"aarch64\"]",
 
     #[test]
     fn bad_values_are_reported_once_each() {
-        let (s, d) = when(
-            "os = [\"windows\", \"freebsd\"]
-profile = \"\"",
-        );
+        let (s, d) = when(&[("os", "windows,freebsd"), ("profile", "")]);
         assert_eq!(s.os, Some(vec![Os::Windows]));
         assert_eq!(d.iter().count(), 2);
         assert!(d.iter().all(|d| d.code == diagnostic::MANIFEST_SELECTOR));

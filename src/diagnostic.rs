@@ -149,7 +149,7 @@ impl Diagnostic {
 
 /// ```text
 /// error KAGO204
-///  --> kago.toml:48:1
+///  --> Kagofile:48:1
 ///
 /// AppImage cannot install machine service `aurea-daemon`.
 ///
@@ -228,12 +228,9 @@ mod tests {
     #[test]
     fn location_from_offset() {
         let src = "schema = 1\n[package]\nid = \"x\"\n";
-        let at = Location::at("kago.toml", src, src.find("id").unwrap());
+        let at = Location::at("Kagofile", src, src.find("id").unwrap());
         assert_eq!((at.line, at.column), (3, 1));
-        assert_eq!(
-            Location::at("kago.toml", src, 0).to_string(),
-            "kago.toml:1:1"
-        );
+        assert_eq!(Location::at("Kagofile", src, 0).to_string(), "Kagofile:1:1");
         assert_eq!(Location::at("k", "한글 x", "한글 ".len()).column, 4);
     }
 
@@ -244,14 +241,14 @@ mod tests {
             "AppImage cannot install machine service `aurea-daemon`.",
         )
         .at(Location {
-            file: "kago.toml".into(),
+            file: "Kagofile".into(),
             line: 48,
             column: 1,
         })
         .help("use linux-setup, deb, or rpm");
         assert_eq!(
             d.to_string(),
-            "error KAGO204\n --> kago.toml:48:1\n\nAppImage cannot install machine service `aurea-daemon`.\n\nhelp:\n  use linux-setup, deb, or rpm"
+            "error KAGO204\n --> Kagofile:48:1\n\nAppImage cannot install machine service `aurea-daemon`.\n\nhelp:\n  use linux-setup, deb, or rpm"
         );
     }
 

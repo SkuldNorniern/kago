@@ -102,8 +102,8 @@ mod tests {
     use crate::manifest::{Context, Manifest, tests::AUREA};
 
     fn setup(scope: &str) -> (InstallPolicy, Resolved) {
-        let src = AUREA.replace("scope = \"choose\"", &format!("scope = \"{scope}\""));
-        let m = Manifest::parse("kago.toml", &src).0.unwrap();
+        let src = AUREA.replace("scope choose", &format!("scope {scope}"));
+        let m = Manifest::parse("Kagofile", &src).0.unwrap();
         let cx = Context::target("windows-x86_64".parse().unwrap());
         let r = resolve(&m, &cx, Selection::defaults(&m)).0.unwrap();
         (m.install, r)

@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 
-use toml::Spanned;
+use serde_spanned::Spanned;
 
 use super::path::SemanticPath;
 use super::policy::{AppKind, InstallPolicy, LicenseFormat};
@@ -91,7 +91,7 @@ impl Validator<'_> {
         let services = self.services(&raw);
         let hooks = self.hooks(&raw);
         let requirements = self.requirements(&raw);
-        let (artifacts, target_settings) = self.targets(raw.targets.take());
+        let artifacts = self.targets(raw.targets.take());
         let update = raw.update.take().map(|u| Update {
             enabled: u.enabled.unwrap_or(false),
             channel: u.channel.unwrap_or_else(|| "stable".to_owned()),
@@ -111,9 +111,7 @@ impl Validator<'_> {
             requirements,
             update,
             artifacts,
-            target_settings,
-            distribution: raw.distribution.take(),
-            ui: raw.ui.take(),
+            sources: Vec::new(),
         };
         self.references(&manifest, &raw);
         manifest
@@ -432,14 +430,10 @@ impl Validator<'_> {
             .collect()
     }
 
-    fn targets(
-        &mut self,
-        raw: Option<super::schema::RawTargets>,
-    ) -> (BTreeMap<Os, Vec<Artifact>>, BTreeMap<Os, toml::Table>) {
+    fn targets(&mut self, raw: Option<super::schema::RawTargets>) -> BTreeMap<Os, Vec<Artifact>> {
         let mut artifacts = BTreeMap::new();
-        let mut settings = BTreeMap::new();
         let Some(raw) = raw else {
-            return (artifacts, settings);
+            return artifacts;
         };
         let all: [(Os, Option<RawTarget>); 3] = [
             (Os::Windows, raw.windows),
@@ -466,9 +460,8 @@ impl Validator<'_> {
                 }
             }
             artifacts.insert(os, list);
-            settings.insert(os, target.settings);
         }
-        (artifacts, settings)
+        artifacts
     }
 
     /// components, logical ids and their users all agree.

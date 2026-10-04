@@ -78,38 +78,19 @@ impl Platform for Fake {
     }
 }
 
-const MANIFEST: &str = r#"
-schema = 1
+const MANIFEST: &str = r"
+package dev.test.app
+  name App
+  version 1.0.0
 
-[package]
-id = "dev.test.app"
-name = "App"
-version = "1.0.0"
+app main
+  windows payload/app.exe
 
-[application]
-entrypoint = "main"
-
-[[files]]
-logical_id = "main"
-source = "payload/app.exe"
-target = "{app}/app.exe"
-
-[[files]]
-source = "payload/themes"
-target = "{app}/themes"
-
-[[files]]
-source = "payload/config.toml"
-target = "{config}/config.toml"
-ownership = "preserve-if-modified"
-
-[[paths]]
-resource = "main"
-
-[[shortcuts]]
-name = "App"
-target = "main"
-"#;
+copy payload/themes
+copy payload/config.toml -> {config}/config.toml keep
+path
+shortcut App
+";
 
 struct World {
     dir: PathBuf,
@@ -132,7 +113,7 @@ impl World {
     }
 
     fn plan(&self, manifest: &str) -> InstallPlan {
-        let m = Manifest::parse("kago.toml", manifest).0.unwrap();
+        let m = Manifest::parse("Kagofile", manifest).0.unwrap();
         let target = "windows-x86_64".parse().unwrap();
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0
@@ -221,7 +202,8 @@ fn upgrade_removes_files_the_new_version_dropped() {
     w.install(MANIFEST).unwrap();
     fs::write(w.dir.join("payload/app.exe"), b"v2").unwrap();
     let without_themes = MANIFEST.replace(
-        "[[files]]\nsource = \"payload/themes\"\ntarget = \"{app}/themes\"\n",
+        "copy payload/themes
+",
         "",
     );
     let receipt = w
@@ -294,11 +276,9 @@ fn downgrade_is_refused_unless_allowed() {
     // same version again is a reinstall, not a downgrade.
     w.install(MANIFEST).unwrap();
     let allowed = older.replace(
-        "[application]",
-        "[install]
-downgrade = \"allow\"
-
-[application]",
+        "  version 0.9.0",
+        "  version 0.9.0
+  downgrade allow",
     );
     assert_eq!(w.install(&allowed).unwrap().version.to_string(), "0.9.0");
 }
