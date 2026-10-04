@@ -90,14 +90,12 @@ pub(super) fn recover_one(
     Ok(Some(outcome))
 }
 
-/// drops the journal and backups of a finished transaction.
+/// drops the journal and, where possible, the backups of a finished
+/// transaction.
 pub(super) fn cleanup(store: &Store, package: &PackageId) -> Result<(), Error> {
-    let backups = store.backup_dir(package);
-    match fs::remove_dir_all(&backups) {
-        Ok(()) => {}
-        Err(e) if e.kind() == ErrorKind::NotFound => {}
-        Err(e) => return Err(Error::io(&backups, &e)),
-    }
+    // a backup of a still running exe cannot go yet; a later cleanup
+    // retries. its name is unique, so nothing new collides with it.
+    let _ = fs::remove_dir_all(store.backup_dir(package));
     let journal = store.journal_path(package);
     match fs::remove_file(&journal) {
         Ok(()) => Ok(()),

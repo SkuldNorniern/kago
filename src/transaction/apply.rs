@@ -52,6 +52,10 @@ pub(super) fn install(
                 .any(|r| matches!(r, Resource::Registration { .. }))
         }),
         previous: previous.as_ref(),
+        transaction: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+            .to_string(),
     };
     if let Err(e) = run.all() {
         let failures = roll_back(&run.undos, platform);
@@ -132,6 +136,9 @@ struct Run<'a> {
     reregister: bool,
     /// the older version's receipt, to tell user changes from its files.
     previous: Option<&'a Receipt>,
+    /// unique per run, so backups never land on files an earlier run
+    /// could not delete yet.
+    transaction: String,
 }
 
 impl Run<'_> {
@@ -319,6 +326,7 @@ impl Run<'_> {
             let backup = self
                 .store
                 .backup_dir(&self.plan.package)
+                .join(&self.transaction)
                 .join(self.backups.to_string());
             self.backups += 1;
             let dir = backup.parent().expect("backup has a parent");
