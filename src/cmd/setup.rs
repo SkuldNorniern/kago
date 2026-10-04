@@ -8,7 +8,6 @@ use std::process::ExitCode;
 use kago::container::Container;
 use kago::format::setup::{self, Embedded};
 use kago::install::Operation;
-use kago::manifest::Root;
 use kago::platform;
 use kago::transaction;
 
@@ -42,6 +41,7 @@ pub fn run_embedded() -> Option<ExitCode> {
 #[cfg(feature = "gui")]
 fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
     use kago::gui::setup::{Info, Installed, run};
+    use kago::manifest::Root;
 
     let info = match Container::open(&exe, embedded.offset) {
         Ok(c) => {
@@ -78,6 +78,8 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
 
 struct Done {
     name: String,
+    /// offered by the window as "Open".
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     launch: Option<PathBuf>,
 }
 
