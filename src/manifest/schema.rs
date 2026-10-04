@@ -78,6 +78,7 @@ pub struct RawComponent {
     pub required: Option<bool>,
     pub default: Option<bool>,
     pub depends: Vec<Spanned<String>>,
+    pub detect: Option<Spanned<String>>,
 }
 
 #[derive(Debug)]

@@ -43,6 +43,22 @@ pub fn remove(file: &Path, driver: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// whether `file` names a SteamVR runtime, which SteamVR writes there
+/// once it has run.
+#[must_use]
+pub fn runtime_installed(file: &Path) -> bool {
+    let Ok(text) = fs::read_to_string(file) else {
+        return false;
+    };
+    serde_json::from_str::<Value>(&text).is_ok_and(|v| {
+        v["runtime"].as_array().is_some_and(|r| {
+            r.iter()
+                .filter_map(Value::as_str)
+                .any(|p| Path::new(p).is_dir())
+        })
+    })
+}
+
 /// whether `driver` is in the list in `file`.
 #[cfg(test)]
 fn contains(file: &Path, driver: &Path) -> Result<bool, String> {
@@ -154,6 +170,20 @@ mod tests {
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(v["jsonid"], "vrpathreg");
         assert_eq!(v["external_drivers"], serde_json::json!(["/x/aira"]));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn runtime_counts_only_when_its_folder_exists() {
+        let dir = temp("runtime");
+        let file = dir.join("openvrpaths.vrpath");
+        assert!(!runtime_installed(&file), "no file");
+        let runtime = dir.join("SteamVR");
+        let json = serde_json::json!({ "runtime": [runtime.display().to_string()] });
+        fs::write(&file, json.to_string()).unwrap();
+        assert!(!runtime_installed(&file), "named but gone");
+        fs::create_dir_all(&runtime).unwrap();
+        assert!(runtime_installed(&file));
         fs::remove_dir_all(dir).unwrap();
     }
 

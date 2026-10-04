@@ -1,7 +1,7 @@
 //! checked manifest items that become installed resources.
 
 use super::path::SemanticPath;
-use super::policy::keywords;
+use super::policy::{Detect, keywords};
 use super::selector::Selector;
 use crate::diagnostic::Location;
 
@@ -71,6 +71,7 @@ pub struct Component {
     pub required: bool,
     pub default: bool,
     pub depends: Vec<String>,
+    pub detect: Option<Detect>,
 }
 
 /// one `[[files]]` entry. variants of the same thing share `logical_id`.

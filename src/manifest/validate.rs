@@ -4,7 +4,7 @@ use std::str::FromStr;
 use serde_spanned::Spanned;
 
 use super::path::SemanticPath;
-use super::policy::{AppKind, InstallPolicy, LicenseFormat};
+use super::policy::{AppKind, Detect, InstallPolicy, LicenseFormat};
 use super::resource::{
     Component, File, Hook, HookPrivilege, Icon, Ownership, PathEntry, PathKind, PathSource,
     Requirement, RequirementPolicy, ResourceScope, Service, ServiceRestart, ServiceStart, Shortcut,
@@ -244,6 +244,10 @@ impl Validator<'_> {
                 required,
                 default: required || c.default.unwrap_or(true),
                 depends: c.depends.iter().map(|d| d.get_ref().clone()).collect(),
+                detect: c
+                    .detect
+                    .as_ref()
+                    .map(|d| self.keyword("component.detect", Some(d), Detect::SteamVr)),
             });
         }
         out

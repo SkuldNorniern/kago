@@ -596,21 +596,34 @@ impl Lower<'_> {
                 _ => name.clone_from(&word.text),
             }
         }
-        self.components.push(RawComponent {
-            id: spanned(id),
-            name,
-            description: None,
-            required: Some(required),
-            default: Some(default),
-            depends,
-        });
         let inner = Scope {
             component: Some(spanned(id)),
             when: scope.when.clone(),
         };
+        let mut description = None;
+        let mut detect = None;
         for child in &node.children {
-            self.item(child, &inner);
+            match child.keyword() {
+                "about" if child.args().is_empty() => {
+                    self.syntax(child.at(), "expected `about <text>`");
+                }
+                "about" => description = Some(rest(child.args())),
+                "detect" => {
+                    self.no_children(child);
+                    detect = self.one(child);
+                }
+                _ => self.item(child, &inner),
+            }
         }
+        self.components.push(RawComponent {
+            id: spanned(id),
+            name,
+            description,
+            required: Some(required),
+            default: Some(default),
+            depends,
+            detect,
+        });
     }
 
     fn target(&mut self, node: &Node) {
@@ -747,6 +760,7 @@ impl Lower<'_> {
                             required: Some(false),
                             default: Some(false),
                             depends: Vec::new(),
+                            detect: None,
                         });
                         component = Some(spanned_text(&at, id));
                     }

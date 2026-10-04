@@ -9,7 +9,7 @@ use sha2::{Digest as _, Sha256};
 use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
-use crate::manifest::{Downgrade, File, Manifest, SemanticPath};
+use crate::manifest::{Detect, Downgrade, File, Manifest, SemanticPath};
 use crate::package::{PackageId, Target, Version};
 
 /// where a file source like `build:app.exe` or `themes` is on disk.
@@ -62,6 +62,12 @@ pub struct Choice {
     pub depends: Vec<String>,
     /// indexes into `operations` that only this component brings.
     pub operations: Vec<usize>,
+    /// bytes its files take once installed.
+    #[serde(default)]
+    pub size: u64,
+    /// what it is for, when the setup should look for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect: Option<Detect>,
 }
 
 impl InstallPlan {
@@ -157,7 +163,7 @@ impl InstallPlan {
         if diagnostics.has_errors() {
             return (None, diagnostics);
         }
-        let choices = choices(manifest, resolved, &owners);
+        let choices = choices(manifest, resolved, &owners, &operations);
         let plan = Self {
             package: manifest.package.id.clone(),
             name: manifest.package.name.clone(),
@@ -309,7 +315,12 @@ fn driver_shipped(
 
 /// the optional components chosen in `resolved`, each with the operations
 /// only it brings. `owners` names the component of every operation.
-fn choices(manifest: &Manifest, resolved: &Resolved, owners: &[Option<String>]) -> Vec<Choice> {
+fn choices(
+    manifest: &Manifest,
+    resolved: &Resolved,
+    owners: &[Option<String>],
+    all: &[Operation],
+) -> Vec<Choice> {
     manifest
         .components
         .iter()
@@ -327,7 +338,15 @@ fn choices(manifest: &Manifest, resolved: &Resolved, owners: &[Option<String>]) 
                 description: c.description.clone(),
                 default: c.default,
                 depends: c.depends.clone(),
+                size: operations
+                    .iter()
+                    .map(|i| match &all[*i] {
+                        Operation::InstallFile { size, .. } => *size,
+                        _ => 0,
+                    })
+                    .sum(),
                 operations,
+                detect: c.detect,
             })
         })
         .collect()
@@ -509,6 +528,7 @@ component docs Documentation off
             [("cli", true), ("docs", false)],
             "core is required, not a choice"
         );
+        assert_eq!(p.choices[1].size, 5, "docs/guide/intro.md");
 
         let defaults = p.with_defaults();
         assert!(defaults.choices.is_empty());

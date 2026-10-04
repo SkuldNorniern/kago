@@ -15,7 +15,7 @@ use std::path::Path;
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
-    AppKind, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
+    AppKind, Detect, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
     ScopeConflict, SetupLook, Upgrade,
 };
 pub use resource::{
@@ -262,6 +262,32 @@ target linux setup appimage
 ",
         ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
+    fn components_take_about_and_detect() {
+        let (m, codes) = check(&with(
+            "component steamvr \"SteamVR driver\" on
+  about Shows trackers in SteamVR
+  detect steamvr
+  copy driver
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        let c = m.component("steamvr").unwrap();
+        assert_eq!(c.description.as_deref(), Some("Shows trackers in SteamVR"));
+        assert_eq!(c.detect, Some(Detect::SteamVr));
+        assert_eq!(
+            m.files.last().unwrap().component.as_deref(),
+            Some("steamvr")
+        );
+        let (_, codes) = check(&with(
+            "component x
+  detect unicorn
+",
+        ));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
     }
 
     #[test]

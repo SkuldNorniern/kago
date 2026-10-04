@@ -117,6 +117,22 @@ pub fn host() -> Result<Box<dyn Platform>, String> {
     }
 }
 
+/// whether what a component's `detect` names is on this machine. unknown
+/// off Windows for now, which counts as present: nothing is unticked on a
+/// guess.
+#[must_use]
+pub fn detect(detect: crate::manifest::Detect) -> bool {
+    #[cfg(windows)]
+    {
+        windows::detect(detect)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = detect;
+        true
+    }
+}
+
 /// the system's folder picker, over the window `owner` when given.
 /// `None` when cancelled or when this OS has none yet.
 #[must_use]

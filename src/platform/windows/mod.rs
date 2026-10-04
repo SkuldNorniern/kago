@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Platform, Registration};
 use crate::install::{Roots, Scope, folder_name};
-use crate::manifest::Root;
+use crate::manifest::{Detect, Root};
 use registry::Key;
 
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -24,6 +24,13 @@ fn env_dir(name: &str) -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .ok_or_else(|| format!("%{name}% is not set"))
+}
+
+/// whether what `detect` names is on this machine.
+pub fn detect(detect: Detect) -> bool {
+    match detect {
+        Detect::SteamVr => openvr_paths().is_ok_and(|f| super::openvr::runtime_installed(&f)),
+    }
 }
 
 /// SteamVR's per-user path file, read by every OpenVR runtime and app.
