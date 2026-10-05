@@ -1,6 +1,7 @@
 //! Windows: per-user installs under `%LOCALAPPDATA%\Programs`, PATH in
 //! `HKCU\Environment`, Start Menu `.lnk`, uninstall entry in `HKCU`.
 
+pub mod elevation;
 mod environment;
 pub mod folder;
 mod registry;
@@ -40,16 +41,31 @@ fn openvr_paths() -> Result<PathBuf, String> {
     Ok(env_dir("LOCALAPPDATA")?.join(r"openvr\openvrpaths.vrpath"))
 }
 
-fn machine_unsupported() -> String {
-    "machine scope needs the elevation helper, which is not done yet; use `--scope user`".to_owned()
-}
-
 impl Platform for Windows {
     fn roots(&self, scope: Scope, name: &str) -> Result<Roots, String> {
-        if scope == Scope::Machine {
-            return Err(machine_unsupported());
-        }
         let folder = folder_name(name);
+        if scope == Scope::Machine {
+            // for everyone, like NSIS with `SetShellVarContext all`.
+            let programs = env_dir("ProgramFiles")?;
+            let shared = env_dir("ProgramData")?;
+            let public = env_dir("PUBLIC")?;
+            let app = programs.join(&folder);
+            let data = shared.join(&folder);
+            return Ok(Roots(BTreeMap::from([
+                (Root::App, app.clone()),
+                (Root::Bin, app.join("bin")),
+                (Root::Config, data.clone()),
+                (Root::Data, data.clone()),
+                (Root::Cache, data.join("Cache")),
+                (Root::Logs, data.join("Logs")),
+                (Root::State, data.join("State")),
+                (Root::Desktop, public.join("Desktop")),
+                (
+                    Root::Applications,
+                    shared.join(r"Microsoft\Windows\Start Menu\Programs"),
+                ),
+            ])));
+        }
         let local = env_dir("LOCALAPPDATA")?;
         let roaming = env_dir("APPDATA")?;
         let home = env_dir("USERPROFILE")?;
@@ -75,7 +91,7 @@ impl Platform for Windows {
     fn state_dir(&self, scope: Scope) -> Result<PathBuf, String> {
         match scope {
             Scope::User => Ok(env_dir("LOCALAPPDATA")?.join("Kago")),
-            Scope::Machine => Err(machine_unsupported()),
+            Scope::Machine => Ok(env_dir("ProgramData")?.join("Kago")),
         }
     }
 

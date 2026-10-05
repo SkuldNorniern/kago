@@ -215,7 +215,11 @@ fn install_then_uninstall_leaves_nothing() {
     let uninstaller = w
         .app()
         .join(format!("uninstall{}", std::env::consts::EXE_SUFFIX));
-    assert_eq!(fs::read(&uninstaller).unwrap(), b"runtime", "the runtime, as the uninstaller");
+    assert_eq!(
+        fs::read(&uninstaller).unwrap(),
+        b"runtime",
+        "the runtime, as the uninstaller"
+    );
     assert!(w.app().join("themes/dark.toml").is_file());
     assert!(w.dir.join("machine/start/App.lnk").is_file());
     assert!(w.fake.path.borrow().contains(&w.app()));

@@ -170,6 +170,38 @@ pub fn detect(detect: crate::manifest::Detect) -> bool {
     }
 }
 
+/// whether this process has administrator rights, which installs for
+/// everyone need. elsewhere: always, as there is no UAC to ask.
+#[must_use]
+pub fn is_elevated() -> bool {
+    #[cfg(windows)]
+    {
+        windows::elevation::is_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+/// starts `exe` with `arguments` after asking for administrator rights.
+/// with `wait`, returns its exit code once it ends.
+///
+/// # Errors
+///
+/// when the person says no, or it cannot start.
+pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32, String> {
+    #[cfg(windows)]
+    {
+        windows::elevation::run_elevated(exe, arguments, wait)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (exe, arguments, wait);
+        Err("asking for administrator rights is Windows-only for now".to_owned())
+    }
+}
+
 /// the system's folder picker, over the window `owner` when given.
 /// `None` when cancelled or when this OS has none yet.
 #[must_use]

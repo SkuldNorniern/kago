@@ -35,7 +35,7 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 [target."cfg(windows)".dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "Win32_Security", "Win32_System_LibraryLoader"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "Win32_Security", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
 
 [profile.release]
 lto = true
