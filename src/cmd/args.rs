@@ -3,15 +3,24 @@
 pub struct Args {
     pub positional: Vec<String>,
     options: Vec<(String, String)>,
+    switches: Vec<String>,
 }
 
 impl Args {
     pub fn parse(args: &[String], known: &[&str]) -> Result<Self, String> {
+        Self::parse_with(args, known, &[])
+    }
+
+    /// like `parse`, with `switches` that take no value, like `--force`.
+    pub fn parse_with(args: &[String], known: &[&str], switches: &[&str]) -> Result<Self, String> {
         let mut positional = Vec::new();
         let mut options = Vec::new();
+        let mut on = Vec::new();
         let mut it = args.iter();
         while let Some(arg) = it.next() {
-            if let Some(flag) = known.iter().find(|k| **k == arg) {
+            if switches.contains(&arg.as_str()) {
+                on.push(arg.clone());
+            } else if let Some(flag) = known.iter().find(|k| **k == arg) {
                 let value = it.next().ok_or_else(|| format!("`{flag}` needs a value"))?;
                 options.push(((*flag).to_owned(), value.clone()));
             } else if arg.starts_with("--") {
@@ -23,7 +32,13 @@ impl Args {
         Ok(Self {
             positional,
             options,
+            switches: on,
         })
+    }
+
+    /// whether the switch `flag` was given.
+    pub fn flag(&self, flag: &str) -> bool {
+        self.switches.iter().any(|s| s == flag)
     }
 
     pub fn first(&self) -> Option<&str> {

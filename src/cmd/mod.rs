@@ -1,6 +1,7 @@
 mod args;
 mod build;
 mod check;
+mod init;
 mod lifecycle;
 mod plan;
 pub mod setup;
@@ -16,6 +17,8 @@ const USAGE: &str = "\
 usage: kago <command>
 
 commands:
+  init [dir] [--id <package-id>] [--force]
+                write a starter Kagofile, filled in from Cargo.toml
   check [manifest] [--target <target>]...
                 validate the Kagofile and resolve it for each target
                 (default: the host)
@@ -50,6 +53,7 @@ pub fn run() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let result = match command {
+        "init" => Args::parse_with(rest, &["--id"], &["--force"]).and_then(|a| init::run(&a)),
         "check" => Args::parse(rest, &["--target"]).and_then(|a| check::run(&a)),
         "plan" => {
             Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
