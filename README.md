@@ -27,21 +27,23 @@ Check it with `kago version`.
 
 ## Make a setup in three steps
 
-From your project folder (for a Rust project, next to its `Cargo.toml`):
+From your project folder, in any language:
 
 ```sh
-cargo build --release        # build your app first
-kago init                    # writes a starter Kagofile from Cargo.toml
-kago build                   # writes dist/<Name>-<version>-setup-windows-x86_64.exe
+kago init                    # writes a starter Kagofile
+kago build                   # runs its build lines, writes dist/<Name>-<version>-setup-windows-x86_64.exe
 ```
 
-`kago init` fills in:
+`kago init` reads a `Cargo.toml`, `pyproject.toml` or `package.json` when there is one, and fills in:
 
 - the name, description and homepage
-- `version from cargo`, so the version always follows your crate
-- one `app` per binary
+- the `version` line, so the version follows your project file
+- `build` lines: `cargo build --release`, PyInstaller for Python, `npm run build` for Node
+- the program to install (one `app` per Rust binary; PyInstaller's folder for Python)
 - the first `.ico` it finds
 - your LICENSE
+
+Without a project file it writes a plain template. Fix the app path to wherever your build puts the program.
 
 Open the Kagofile and set two things:
 
@@ -91,7 +93,7 @@ The first block. Only the id and `version` are required.
 |---|---|
 | `package <id>` | reverse-domain id, like `dev.eira.ozone`; it never changes between versions |
 | `name <text>` | shown everywhere; default: the last part of the id |
-| `version 1.2.0` | or `version from cargo`, `version from cargo <path>`, `version from file <path>`, `version from git` (newest tag) |
+| `version 1.2.0` | or read it: `version from toml pyproject.toml project.version`, `version from json package.json version`, `version from file VERSION`, `version from git` (newest tag), `version from cargo [path]` |
 | `publisher`, `description`, `homepage` | shown in the setup and in Settings › Apps |
 | `setup modern` / `setup native` | the look; modern by default |
 | `folder choose` / `folder fixed` | whether people may pick the install folder; choose by default |
@@ -127,6 +129,15 @@ Install paths start with a root:
 
 File paths may use `${version}`, `${name}`, `${id}`, `${os}`, `${arch}`, `${target}`, `${triple}` (like `x86_64-pc-windows-msvc`) and `${exe}` (`.exe` on Windows).
 
+### build lines
+
+```
+build cargo build --release
+build python -m PyInstaller --noconfirm --windowed --name tool main.py
+```
+
+`kago build` runs these in order from the Kagofile's folder before it packs the setup, and stops when one fails. `kago build --no-build` skips them. A program is started directly, not through a shell; for `npm`, which is `npm.cmd` on Windows, write `build cmd /c npm run build`.
+
 ### sources
 
 Files can come from somewhere other than the Kagofile's folder:
@@ -151,13 +162,84 @@ A download is only used when its sha256 matches. Leave the `sha256` line out at 
 |---|---|
 | `shortcut` | Start menu entry for the first app; `shortcut "Name" desktop -> <app>` for others |
 | `path` | puts the app's folder on the user's PATH; `path optional "label"` makes it a tick box |
-| `steamvr <driver folder>` | copies a SteamVR driver and registers it with SteamVR; the folder needs `driver.vrdrivermanifest` |
 | `service <app> [arguments]` | installed for everyone: a Windows service (your program has to speak the service protocol); `scope user` under it: starts the app when the person signs in instead. Under it: `name "..."`, `start manual`, `restart never` (it restarts after a crash by default) |
-| `hook post-install <app> [arguments]` | runs one of your own programs after the files are in; if it fails, the install is undone |
-| `hook pre-uninstall <app> [arguments]` | runs first on uninstall |
 | `firewall <app> ["Rule name"] [public]` | lets the app accept connections through Windows Firewall on private networks (and public ones with `public`), so Windows does not ask the first time it listens; installs for everyone only, the uninstall removes the rule |
 | `require windows 10.0.17763` | refuses to install on older Windows; nothing changes |
-| `require steamvr` | refuses to install without SteamVR |
+| `require <check>` | refuses to install unless a `check` finds what it looks for, like `require steamvr` |
+
+### settings outside the package
+
+Values in other programs' settings files, the registry and the environment. Each is put back at uninstall, and on a failed install:
+
+```
+json %LOCALAPPDATA%/openvr/openvrpaths.vrpath
+  init version 1                           # only when missing; stays after uninstall
+  add external_drivers {app}/steamvr/aira  # an item in a list; taken out again
+  set theme dark                           # a value; the old one comes back
+
+registry Software\Eira\Aira                 # HKCU per user, HKLM for everyone
+  set InstallDir {app}
+  set Telemetry 0                          # a whole number is a DWORD
+registry HKCU\Software\Eira\Aira set @ "x"  # `@` is the default value; one line works too
+
+env set AIRA_HOME {app}
+env add AIRA_PLUGINS {app}/plugins         # an item in a `;` list
+```
+
+- A JSON file starts with a root like `{config}/` or a variable like `%APPDATA%/`. Keys are paths like `a.b.c`.
+- `{app}` and the other roots in a value become real paths at install.
+- A value someone changed since the install is left alone at uninstall.
+- `HKLM\` only works for installs for everyone.
+
+### running programs
+
+```
+run setup-tool --register {app}            # an app id, an installed file like {app}/x.exe, or a program on PATH
+  undo setup-tool --unregister {app}       # runs on rollback and at uninstall
+run {app}/tools/cleanup.exe
+  at uninstall                             # first thing at uninstall
+```
+
+A `run` that fails at install undoes the install. Prefer a building block above when one fits: kago can check and roll those back itself, but it cannot know what a program did. An install for everyone only runs programs from the package, never ones from the machine.
+
+### checks
+
+A `check` tells whether something is on the machine. `require`, a component's `detect` and a `prerequisite` use them:
+
+```
+check python "Python 3.12"
+  registry HKLM\SOFTWARE\Python\PythonCore\3.12      # a key, or `registry <key> <value>`
+check tool "Tool" file %ProgramFiles%/Tool/tool.exe
+check steamvr "SteamVR" json %LOCALAPPDATA%/openvr/openvrpaths.vrpath runtime   # a key that holds something
+
+require python
+```
+
+### actions
+
+An `action` is your own statement, made of the lines above. `$name` is a parameter; `$name.name` is the last part of its path:
+
+```
+action plugin dir to={app}/plugins/$dir.name
+  expect $dir/plugin.json "a plugin folder holds plugin.json"   # the build fails without it
+  copy $dir -> $to
+  json {config}/settings.json
+    add plugins $to
+
+plugin build:plugins/export
+plugin build:plugins/import to={data}/import
+```
+
+`use actions.kago` brings in the `check` and `action` lines of another file, to share them between projects.
+
+kago's own library is written the same way ([library.kago](src/manifest/kagofile/library.kago)), and a Kagofile can replace any of it by defining the same name:
+
+| name | does |
+|---|---|
+| `steamvr <driver folder> [to=<path>]` | copies a SteamVR driver and adds it to SteamVR's driver list; the folder needs `driver.vrdrivermanifest` |
+| `check steamvr` | whether SteamVR has run on this machine |
+| `vcredist <installer>` | the Visual C++ runtime as a prerequisite |
+| `webview2 <installer>` | the WebView2 runtime as a prerequisite |
 
 ### components
 
@@ -176,7 +258,7 @@ component docs "Documentation" off
 - `on` (default) / `off` sets the starting tick. `required` shows it ticked and greyed out.
 - `needs <other>` ticks the other component along with it.
 - `about` is shown beside the name, with the size.
-- `detect steamvr` starts the box unticked, with "SteamVR not found", when SteamVR is missing.
+- `detect <check>` starts the box unticked, with "SteamVR not found", when the check finds nothing. `detect` also takes a test directly, like `detect file %ProgramFiles%/Tool/tool.exe`.
 
 `when windows` (or `linux`, `x86_64`, ...) blocks limit lines to some targets.
 
@@ -190,11 +272,10 @@ source vcredist
   sha256 ...                        # the build prints the line to add
   unpack none
 
-prerequisite vcredist
-  file vcredist:vc_redist.x64.exe
+vcredist vcredist:vc_redist.x64.exe
 ```
 
-`vcredist` and `webview2` are known: kago fills in the name, the silent arguments, the check and that they need administrator rights. Anything else says it all:
+`vcredist` and `webview2` are actions from kago's library: they fill in the name, the silent arguments, the check and that they need administrator rights. Anything else says it all:
 
 ```
 prerequisite tool "Tool Runtime"
