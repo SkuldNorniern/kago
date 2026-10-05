@@ -315,7 +315,15 @@ impl Session {
             }
             Outcome::Exit { launch } => {
                 if let Some(exe) = launch {
-                    let mut cmd = std::process::Command::new(&exe);
+                    // through Explorer on Windows: an app started by a setup
+                    // running as administrator would run as administrator too.
+                    let mut cmd = if cfg!(windows) {
+                        let mut explorer = std::process::Command::new("explorer");
+                        explorer.arg(&exe);
+                        explorer
+                    } else {
+                        std::process::Command::new(&exe)
+                    };
                     if let Some(dir) = exe.parent() {
                         cmd.current_dir(dir);
                     }

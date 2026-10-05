@@ -88,6 +88,19 @@ pub fn run_embedded() -> Option<ExitCode> {
         print!("{SETUP_USAGE}");
         return Some(ExitCode::SUCCESS);
     }
+    // a package for everyone goes to Program Files: ask for administrator
+    // rights once, by starting this setup again with the UAC prompt.
+    let for_everyone = Container::open(&exe, embedded.offset)
+        .is_ok_and(|c| c.header.plan.scope == kago::install::Scope::Machine);
+    if for_everyone && !platform::is_elevated() {
+        return Some(match platform::run_elevated(&exe, &args, true) {
+            Ok(code) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
+            Err(e) => {
+                eprintln!("setup: {e}");
+                ExitCode::FAILURE
+            }
+        });
+    }
     if !parsed.silent {
         #[cfg(feature = "gui")]
         return Some(window(exe, embedded));

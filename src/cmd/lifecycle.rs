@@ -28,6 +28,12 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
     let Some((loaded, plan)) = plan::build(args, target, false)? else {
         return Ok(ExitCode::FAILURE);
     };
+    if plan.scope == Scope::Machine && !platform::is_elevated() {
+        return Err(format!(
+            "{} installs for everyone into Program Files; run this from a terminal opened as administrator",
+            plan.name
+        ));
+    }
     let (platform, store) = open(plan.scope)?;
     let plan = match args.value("--location") {
         None => plan,

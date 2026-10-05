@@ -26,7 +26,12 @@ pub fn run() -> Option<ExitCode> {
         && flag == "--uninstall"
     {
         let silent = rest.iter().any(|a| is_silent(a));
-        return Some(remove(id, silent, &exe));
+        let scope = rest
+            .windows(2)
+            .find(|w| w[0] == "--scope")
+            .and_then(|w| w[1].parse().ok())
+            .unwrap_or(Scope::User);
+        return Some(remove(id, scope, silent, &exe));
     }
     let named = exe
         .file_name()
@@ -49,21 +54,27 @@ fn is_silent(arg: &str) -> bool {
 
 /// finds the package installed in this folder and starts the temp copy.
 fn start(exe: &Path, silent: bool) -> ExitCode {
-    let found = (|| -> Result<PackageId, String> {
+    // per-user installs first, then the ones for everyone.
+    let found = (|| -> Result<(PackageId, Scope), String> {
         let platform = platform::host()?;
-        let store =
-            transaction::store(platform.as_ref(), Scope::User).map_err(|e| e.to_string())?;
         let dir = exe.parent().ok_or("the uninstaller has no folder")?;
-        store
-            .receipts()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .find(|r| r.roots.get(&Root::App).is_some_and(|app| app == dir))
-            .map(|r| r.package)
-            .ok_or_else(|| format!("nothing kago installed lives in {}", dir.display()))
+        for scope in [Scope::User, Scope::Machine] {
+            let Ok(store) = transaction::store(platform.as_ref(), scope) else {
+                continue;
+            };
+            let here = store
+                .receipts()
+                .unwrap_or_default()
+                .into_iter()
+                .find(|r| r.roots.get(&Root::App).is_some_and(|app| app == dir));
+            if let Some(receipt) = here {
+                return Ok((receipt.package, scope));
+            }
+        }
+        Err(format!("nothing kago installed lives in {}", dir.display()))
     })();
-    let package = match found {
-        Ok(package) => package,
+    let (package, scope) = match found {
+        Ok(found) => found,
         Err(e) => {
             eprintln!("uninstall: {e}");
             return ExitCode::FAILURE;
@@ -77,16 +88,29 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
         eprintln!("uninstall: cannot prepare {}: {e}", copy.display());
         return ExitCode::FAILURE;
     }
-    let mut command = Command::new(&copy);
-    command.arg("--uninstall").arg(package.as_str());
+    let mut arguments = vec![
+        "--uninstall".to_owned(),
+        package.to_string(),
+        "--scope".to_owned(),
+        scope.to_string(),
+    ];
     if silent {
-        command.arg("--silent");
+        arguments.push("--silent".to_owned());
     }
     // hand off and exit at once: this file is part of what gets removed,
     // and Windows cannot delete a running program. tools that need the
     // real exit code run QuietUninstallString, which waits.
-    match command.spawn() {
-        Ok(_) => ExitCode::SUCCESS,
+    let started = if scope == Scope::Machine && !platform::is_elevated() {
+        platform::run_elevated(&copy, &arguments, false).map(|_| ())
+    } else {
+        Command::new(&copy)
+            .args(&arguments)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    match started {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("uninstall: {e}");
             ExitCode::FAILURE
@@ -95,9 +119,9 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
 }
 
 /// the temp copy: asks (unless silent), removes, then deletes itself.
-fn remove(id: &str, silent: bool, exe: &Path) -> ExitCode {
+fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
     let code = match PackageId::new(id) {
-        Ok(package) => remove_package(&package, silent),
+        Ok(package) => remove_package(&package, scope, silent),
         Err(e) => {
             eprintln!("uninstall: {e}");
             ExitCode::FAILURE
@@ -107,9 +131,9 @@ fn remove(id: &str, silent: bool, exe: &Path) -> ExitCode {
     code
 }
 
-fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
+fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
     let opened = platform::host().and_then(|p| {
-        let store = transaction::store(p.as_ref(), Scope::User).map_err(|e| e.to_string())?;
+        let store = transaction::store(p.as_ref(), scope).map_err(|e| e.to_string())?;
         Ok((p, store))
     });
     let (platform, store) = match opened {
@@ -140,8 +164,7 @@ fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
         let package = package.clone();
         let work = move || {
             let platform = platform::host()?;
-            let store =
-                transaction::store(platform.as_ref(), Scope::User).map_err(|e| e.to_string())?;
+            let store = transaction::store(platform.as_ref(), scope).map_err(|e| e.to_string())?;
             uninstall_retrying(&package, platform.as_ref(), &store)
                 .map(|done| kago::gui::setup::Removed {
                     kept: done.kept,
