@@ -183,6 +183,48 @@ pub fn detect(detect: crate::manifest::Detect) -> bool {
     }
 }
 
+/// whether `check` finds what it looks for on this machine.
+#[must_use]
+pub fn satisfied(check: &crate::manifest::Check) -> bool {
+    use crate::manifest::Check;
+    match check {
+        Check::Known { detect: d } => detect(*d),
+        Check::File { path } => Path::new(&expand_env(path)).exists(),
+        Check::Registry { key, value } => {
+            #[cfg(windows)]
+            {
+                windows::registry_has(key, value.as_deref())
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (key, value);
+                false
+            }
+        }
+    }
+}
+
+/// `%NAME%` replaced by the environment variable `NAME`, like Windows
+/// does; unknown names stay as written.
+fn expand_env(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        let Some(len) = rest[start + 1..].find('%') else {
+            break;
+        };
+        let name = &rest[start + 1..start + 1 + len];
+        out.push_str(&rest[..start]);
+        match std::env::var(name) {
+            Ok(value) if !name.is_empty() => out.push_str(&value),
+            _ => out.push_str(&rest[start..=start + 1 + len]),
+        }
+        rest = &rest[start + 2 + len..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// whether this process has administrator rights, which installs for
 /// everyone need. elsewhere: always, as there is no UAC to ask.
 #[must_use]
@@ -351,5 +393,36 @@ pub fn set_exe_icon(exe: &Path, icon: &crate::format::ico::IconGroup) -> Result<
     {
         let _ = (exe, icon);
         Err("setting an executable icon needs Windows".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::Check;
+
+    #[test]
+    fn environment_names_expand_and_unknown_ones_stay() {
+        let path = std::env::var("PATH").unwrap();
+        assert_eq!(expand_env("%PATH%;x"), format!("{path};x"));
+        assert_eq!(expand_env(r"%KAGO_NO_SUCH%"), r"%KAGO_NO_SUCH%");
+        assert_eq!(expand_env("50%"), "50%");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registry_checks_read_the_machine() {
+        let windows = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+        let has = |key: &str, value: Option<&str>| {
+            satisfied(&Check::Registry {
+                key: key.to_owned(),
+                value: value.map(str::to_owned),
+            })
+        };
+        assert!(has(windows, None));
+        assert!(has(windows, Some("ProductName")));
+        assert!(!has(windows, Some("KagoNoSuchValue")));
+        assert!(!has(r"HKLM\SOFTWARE\KagoNoSuchKey", None));
+        assert!(!has(r"HKXX\SOFTWARE", None));
     }
 }

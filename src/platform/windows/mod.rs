@@ -32,6 +32,35 @@ fn env_dir(name: &str) -> Result<PathBuf, String> {
 }
 
 /// whether what `detect` names is on this machine.
+/// whether the registry key `key` (`HKLM\...`, `HKCU\...`) exists and,
+/// when `value` is given, holds that value set to something other than 0
+/// or empty.
+pub fn registry_has(key: &str, value: Option<&str>) -> bool {
+    use ::windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let Some((hive, path)) = key.split_once('\\') else {
+        return false;
+    };
+    let hive = match hive.to_ascii_uppercase().as_str() {
+        "HKLM" | "HKEY_LOCAL_MACHINE" => HKEY_LOCAL_MACHINE,
+        "HKCU" | "HKEY_CURRENT_USER" => HKEY_CURRENT_USER,
+        _ => return false,
+    };
+    let Ok(Some(key)) = Key::open_read(hive, path) else {
+        return false;
+    };
+    let Some(value) = value else {
+        return true;
+    };
+    match key.dword(value) {
+        Ok(Some(n)) => n != 0,
+        _ => key
+            .text(value)
+            .ok()
+            .flatten()
+            .is_some_and(|t| !t.value.is_empty()),
+    }
+}
+
 pub fn detect(detect: Detect) -> bool {
     match detect {
         Detect::SteamVr => openvr_paths().is_ok_and(|f| super::openvr::runtime_installed(&f)),
