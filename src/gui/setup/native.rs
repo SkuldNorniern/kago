@@ -13,12 +13,13 @@ use aurea::elements::{
     Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack,
     TextField, TextView,
 };
-use aurea::render::Rect;
+use aurea::render::{Canvas, Color, Image, Rect, RendererBackend};
 use aurea::{AureaResult, Window, WindowEvent};
 
 use super::text::{Lang, Line};
 use super::wizard::{Action, Page};
 use super::{Info, Session};
+use crate::format::image::Rgba;
 
 const WIDTH: i32 = 500;
 const HEIGHT: i32 = 390;
@@ -33,7 +34,8 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
     )?;
     let (tx, rx) = mpsc::channel();
     let mut page = session.wizard.page;
-    let (content, mut live) = render(info, lang, &session, &tx)?;
+    let art = Art::new(&info.brand, window.scale_factor().max(1.0));
+    let (content, mut live) = render(info, lang, &session, &tx, &art)?;
     window.set_content(content)?;
     window.show();
     let mut logged = Instant::now();
@@ -48,6 +50,12 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         let mut redraw = false;
         while let Ok(action) = rx.try_recv() {
             busy = true;
+            if action == Action::OpenLink {
+                if let Some((_, url)) = &info.brand.link {
+                    Session::open_link(url);
+                }
+                continue;
+            }
             if action == Action::Next
                 && page == Page::Done
                 && let Some(open) = &live.open
@@ -81,7 +89,7 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
             page = session.wizard.page;
             // the old widgets go with the old content.
             drop(std::mem::take(&mut live));
-            let (content, next) = render(info, lang, &session, &tx)?;
+            let (content, next) = render(info, lang, &session, &tx, &art)?;
             window.set_content(content)?;
             live = next;
         } else if busy && page == Page::Installing {
@@ -157,12 +165,67 @@ fn button(title: &str, tx: &Sender<Action>, action: Action) -> AureaResult<Butto
     })
 }
 
+/// the brand's images at the sizes NSIS Modern UI uses, scaled once for
+/// the display.
+struct Art {
+    /// fitted in 150x57, top right of the inner pages.
+    header: Option<Rgba>,
+    /// filling 164 wide, left of the welcome and finish pages.
+    side: Option<Rgba>,
+    scale: f32,
+}
+
+const HEADER_IMAGE: (f32, f32) = (150.0, 57.0);
+const SIDE_IMAGE: (f32, f32) = (164.0, 280.0);
+
+impl Art {
+    fn new(brand: &super::Brand, scale: f32) -> Self {
+        let px = |v: f32| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let px = (v * scale).round().max(1.0) as u32;
+            px
+        };
+        Self {
+            header: brand
+                .header
+                .as_ref()
+                .map(|h| h.fit(px(HEADER_IMAGE.0), px(HEADER_IMAGE.1))),
+            side: brand
+                .side
+                .as_ref()
+                .map(|s| s.cover(px(SIDE_IMAGE.0), px(SIDE_IMAGE.1))),
+            scale,
+        }
+    }
+
+    /// a canvas showing `image` at its size on screen.
+    fn canvas(&self, image: &Rgba) -> AureaResult<Canvas> {
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let (w, h) = (
+            (image.width as f32 / self.scale).round() as u32,
+            (image.height as f32 / self.scale).round() as u32,
+        );
+        let canvas = Canvas::new(w, h, RendererBackend::Cpu)?;
+        canvas.set_background_color(Color::rgb(240, 240, 240));
+        let pixels = Image::new(image.width, image.height, image.pixels.clone());
+        #[allow(clippy::cast_precision_loss)]
+        let dest = Rect::new(0.0, 0.0, w as f32, h as f32);
+        canvas.set_draw_callback(move |ctx| ctx.draw_image_rect(&pixels, dest))?;
+        Ok(canvas)
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn render(
     info: &Info,
     lang: Lang,
     session: &Session,
     tx: &Sender<Action>,
+    art: &Art,
 ) -> AureaResult<(Stack, Live)> {
     let name = info.name.as_str();
     let fill = |line| lang.fill(line, &[("name", name), ("version", &info.version)]);
@@ -171,18 +234,29 @@ fn render(
     let mut window = Stack::new(Orientation::Vertical)?;
     let mut body = Stack::new(Orientation::Vertical)?;
     let mut buttons = Stack::new(Orientation::Horizontal)?;
-    buttons.add(Label::new("Kago")?)?;
+    // like NSIS's BrandingText.
+    buttons.add(Label::new(info.brand.text.as_deref().unwrap_or("Kago"))?)?;
     buttons.add_spacer(1.0)?;
     let header = |title: Line, subtitle: Line| -> AureaResult<Stack> {
-        let mut header = Stack::new(Orientation::Vertical)?;
-        header.add(Label::new(&fill(title))?)?;
-        header.add(Label::new(&format!("    {}", fill(subtitle)))?)?;
+        let mut text = Stack::new(Orientation::Vertical)?;
+        text.add(Label::new(&fill(title))?)?;
+        text.add(Label::new(&format!("    {}", fill(subtitle)))?)?;
+        let mut header = Stack::new(Orientation::Horizontal)?;
+        header.add_weighted(text, 1.0)?;
+        if let Some(image) = &art.header {
+            header.add(art.canvas(image)?)?;
+        }
         Ok(header)
     };
     match wizard.page {
         Page::Welcome => {
             body.add(Label::new(&fill(Line::WelcomeTitle))?)?;
-            body.add(Label::new(&fill(Line::WelcomeBody))?)?;
+            let intro = info
+                .brand
+                .welcome
+                .clone()
+                .unwrap_or_else(|| fill(Line::WelcomeBody));
+            body.add(Label::new(&intro)?)?;
             if let Some(publisher) = &info.publisher {
                 body.add(Label::new(&lang.fill(Line::By, &[("name", publisher)]))?)?;
             }
@@ -281,7 +355,15 @@ fn render(
         }
         Page::Done => {
             body.add(Label::new(&fill(Line::DoneTitle))?)?;
-            body.add(Label::new(&fill(Line::DoneBody))?)?;
+            let outro = info
+                .brand
+                .finish
+                .clone()
+                .unwrap_or_else(|| fill(Line::DoneBody));
+            body.add(Label::new(&outro)?)?;
+            if let Some((label, _)) = &info.brand.link {
+                body.add(button(label, tx, Action::OpenLink)?)?;
+            }
             if wizard.launch.is_some() {
                 let open = Kept::new(Checkbox::with_checked(
                     &fill(Line::RunAfter),
@@ -301,7 +383,18 @@ fn render(
             buttons.add(button(lang.line(Line::Close), tx, Action::Next)?)?;
         }
     }
-    window.add_weighted(body, 1.0)?;
+    // NSIS puts its welcome bitmap down the left of the first and last
+    // pages.
+    let framed = matches!(wizard.page, Page::Welcome | Page::Done | Page::Failed);
+    match &art.side {
+        Some(side) if framed => {
+            let mut row = Stack::new(Orientation::Horizontal)?;
+            row.add(art.canvas(side)?)?;
+            row.add_weighted(body, 1.0)?;
+            window.add_weighted(row, 1.0)?;
+        }
+        _ => window.add_weighted(body, 1.0)?,
+    }
     window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
     window.add(buttons)?;
     Ok((window, live))

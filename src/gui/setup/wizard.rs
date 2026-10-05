@@ -33,6 +33,8 @@ pub enum Action {
     SetOpen(bool),
     /// open the folder dialog; the window handles it.
     Browse,
+    /// open the brand link; the window handles it.
+    OpenLink,
     Cancel,
 }
 
