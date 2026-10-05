@@ -31,6 +31,9 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     let Some((loaded, plan)) = plan::build(args, target, true)? else {
         return Ok(ExitCode::FAILURE);
     };
+    if let Some(warning) = icon_warning(&loaded, &plan) {
+        eprintln!("warning: {warning}");
+    }
     for warning in runtime_warnings(&plan) {
         eprintln!("warning: {warning}");
     }
@@ -76,6 +79,45 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     println!("  sha256 {digest}");
     println!("  unsigned");
     Ok(ExitCode::SUCCESS)
+}
+
+/// the main program shows a blank icon in the Start menu, the taskbar and
+/// Settings when it has no icon of its own and the Kagofile gives none.
+fn icon_warning(loaded: &Loaded, plan: &kago::install::InstallPlan) -> Option<String> {
+    use kago::install::Operation;
+
+    let has_ico = plan
+        .operations
+        .iter()
+        .any(|op| matches!(op, Operation::RegisterApplication { icon: Some(_), .. }));
+    if has_ico {
+        return None;
+    }
+    let entry = plan.operations.iter().find_map(|op| match op {
+        Operation::RegisterApplication {
+            entrypoint: Some(e),
+            ..
+        } => Some(e),
+        _ => None,
+    })?;
+    let source = plan.operations.iter().find_map(|op| match op {
+        Operation::InstallFile { source, target, .. } if target == entry => Some(source),
+        _ => None,
+    })?;
+    let bytes = fs::read(source).ok()?;
+    if kago::format::pe::has_icon(&bytes) {
+        return None;
+    }
+    let app = loaded
+        .manifest
+        .application
+        .entrypoint
+        .as_deref()
+        .unwrap_or("app");
+    Some(format!(
+        "{} has no icon, so its shortcuts and Settings entry will show a blank one; add `icon windows <file>.ico` under `app {app}`",
+        entry.segments().last().unwrap_or_default()
+    ))
 }
 
 /// programs in the payload that need the Visual C++ runtime, which a fresh

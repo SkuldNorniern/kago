@@ -57,6 +57,46 @@ fn imports_in(b: &[u8]) -> Option<Vec<String>> {
     Some(out)
 }
 
+/// whether `bytes` is a PE file with an icon in its resources, which
+/// Explorer, shortcuts and the taskbar show for it.
+#[must_use]
+pub fn has_icon(b: &[u8]) -> bool {
+    has_icon_in(b).unwrap_or(false)
+}
+
+fn has_icon_in(b: &[u8]) -> Option<bool> {
+    let u16_at = |i: usize| b.get(i..i + 2).map(|s| u16::from_le_bytes([s[0], s[1]]));
+    let u32_at = |i: usize| {
+        b.get(i..i + 4)
+            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    };
+    if b.get(..2)? != b"MZ" {
+        return None;
+    }
+    let pe = u32_at(0x3c)? as usize;
+    let sections = usize::from(u16_at(pe + 6)?);
+    let optional_size = usize::from(u16_at(pe + 20)?);
+    let optional = pe + 24;
+    let data_dirs = optional + if u16_at(optional)? == 0x20b { 112 } else { 96 };
+    let resource_rva = u32_at(data_dirs + 16)?;
+    if resource_rva == 0 {
+        return Some(false);
+    }
+    let table = optional + optional_size;
+    let root = (0..sections).find_map(|i| {
+        let s = table + i * 40;
+        let (virtual_size, address) = (u32_at(s + 8)?, u32_at(s + 12)?);
+        let (raw_size, raw) = (u32_at(s + 16)?, u32_at(s + 20)?);
+        let span = virtual_size.max(raw_size);
+        (address <= resource_rva && resource_rva < address + span)
+            .then(|| (resource_rva - address + raw) as usize)
+    })?;
+    // the root directory lists resource types; RT_GROUP_ICON is id 14.
+    let named = usize::from(u16_at(root + 12)?);
+    let ids = usize::from(u16_at(root + 14)?);
+    Some((named..named + ids).any(|i| u32_at(root + 16 + i * 8) == Some(14)))
+}
+
 /// the Visual C++ runtime DLLs among `imports`: not part of Windows, so a
 /// fresh machine cannot start the program without them.
 #[must_use]
@@ -86,6 +126,11 @@ mod tests {
         let me = std::fs::read(std::env::current_exe().unwrap()).unwrap();
         let dlls = imports(&me);
         assert!(dlls.iter().any(|d| d == "kernel32.dll"), "{dlls:?}");
+    }
+
+    #[test]
+    fn icons_need_a_resource_table() {
+        assert!(!has_icon(b"not a program"));
     }
 
     #[test]
