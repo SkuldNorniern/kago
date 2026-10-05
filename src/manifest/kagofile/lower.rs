@@ -12,8 +12,8 @@ use super::version;
 use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
     RawApplication, RawComponent, RawFile, RawHook, RawIcon, RawInstall, RawLicense, RawManifest,
-    RawPackage, RawPath, RawRequirement, RawShortcut, RawSteamVrDriver, RawTarget, RawTargets,
-    RawWhen,
+    RawPackage, RawPath, RawRequirement, RawService, RawShortcut, RawSteamVrDriver, RawTarget,
+    RawTargets, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::package::{Arch, Artifact, Libc, Os};
@@ -58,6 +58,7 @@ pub fn lower(
         steamvr_drivers: Vec::new(),
         requirements: Vec::new(),
         hooks: Vec::new(),
+        services: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
         pending: Vec::new(),
@@ -115,6 +116,7 @@ struct Lower<'a> {
     steamvr_drivers: Vec<RawSteamVrDriver>,
     requirements: Vec<RawRequirement>,
     hooks: Vec<RawHook>,
+    services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
     pending: Vec<Pending>,
@@ -177,6 +179,7 @@ impl Lower<'_> {
             "steamvr" => self.steamvr(node, scope),
             "require" => self.require(node, scope),
             "hook" => self.hook(node, scope),
+            "service" => self.service(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
                 let mut inner = scope.clone();
@@ -188,15 +191,10 @@ impl Lower<'_> {
                     self.item(child, &inner);
                 }
             }
-            "service" => self.error(
-                diagnostic::MANIFEST_VALUE,
-                node.at(),
-                format!("`{}` is not supported yet", node.keyword()),
-            ),
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, require, hook, component, when, target or license"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target or license"
                 ),
             ),
         }
@@ -482,6 +480,39 @@ impl Lower<'_> {
             source,
             target,
             ownership,
+            when,
+        });
+    }
+
+    /// `service <app> [arguments...]`, with `name "..."` and
+    /// `scope user|machine` lines under it.
+    fn service(&mut self, node: &Node, scope: &Scope) {
+        let [app, arguments @ ..] = node.args() else {
+            self.syntax(node.at(), "expected `service <app> [arguments...]`");
+            return;
+        };
+        let mut name = None;
+        let mut service_scope = None;
+        for child in &node.children {
+            match child.keyword() {
+                "name" => name = Some(rest(child.args())),
+                "scope" => service_scope = self.one(child),
+                other => self.syntax(
+                    child.at(),
+                    format!("unknown service field `{other}`; expected name or scope"),
+                ),
+            }
+        }
+        let when = self.when(scope, &[]);
+        self.services.push(RawService {
+            id: spanned(app),
+            name,
+            command: spanned(app),
+            arguments: arguments.iter().map(|a| a.text.clone()).collect(),
+            scope: service_scope,
+            start: None,
+            restart: None,
+            component: scope.component.clone(),
             when,
         });
     }
@@ -884,7 +915,7 @@ impl Lower<'_> {
             paths: self.paths,
             steamvr_drivers: self.steamvr_drivers,
             shortcuts: self.shortcuts,
-            services: Vec::new(),
+            services: self.services,
             hooks: self.hooks,
             requirements: self.requirements,
             update: None,

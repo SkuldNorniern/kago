@@ -307,6 +307,19 @@ impl Steps {
             self.push(op, s.shortcut.component.clone());
         }
         for s in &resolved.services {
+            if scope.of(s.service.scope) == Scope::Machine {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::TARGET_CAPABILITY,
+                        format!(
+                            "service `{}` for every user needs the elevation helper, which is not done yet",
+                            s.service.id
+                        ),
+                    )
+                    .at(s.service.at.clone()),
+                );
+                continue;
+            }
             let op = Operation::InstallService {
                 id: s.service.id.clone(),
                 command: s.command.clone(),

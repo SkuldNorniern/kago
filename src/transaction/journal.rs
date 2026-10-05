@@ -35,6 +35,11 @@ pub enum Undo {
     RemoveSteamVrDriver {
         directory: PathBuf,
     },
+    /// puts a login item back as it was, removing it for `None`.
+    RestoreLoginItem {
+        name: String,
+        previous: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

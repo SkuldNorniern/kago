@@ -4,7 +4,7 @@ use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, WIN32_ERROR};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ,
     REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW,
-    RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -170,6 +170,16 @@ impl Key {
         // SAFETY: bytes is a nul-terminated UTF-16 buffer.
         let e = unsafe { RegSetValueExW(self.0, &HSTRING::from(name), None, kind, Some(&bytes)) };
         check(e, "cannot write registry value", name)
+    }
+
+    /// removes one value; missing is fine.
+    pub fn delete_value(&self, name: &str) -> Result<(), String> {
+        // SAFETY: the key is open and the name lives across the call.
+        let e = unsafe { RegDeleteValueW(self.0, &HSTRING::from(name)) };
+        if e == ERROR_FILE_NOT_FOUND {
+            return Ok(());
+        }
+        check(e, "cannot delete registry value", name)
     }
 
     pub fn set_dword(&self, name: &str, value: u32) -> Result<(), String> {

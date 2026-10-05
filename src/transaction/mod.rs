@@ -219,7 +219,9 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         Resource::UninstallHook { .. } => 0,
         Resource::Registration { .. } => 1,
         Resource::Shortcut { .. } => 2,
-        Resource::PathEntry { .. } | Resource::SteamVrDriver { .. } => 3,
+        Resource::PathEntry { .. }
+        | Resource::SteamVrDriver { .. }
+        | Resource::LoginItem { .. } => 3,
         Resource::File { .. } => 4,
         Resource::Directory { path } => 5 + usize::MAX / 2 - path.segments().count(),
     };
@@ -238,6 +240,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 let _ = hook::run(Path::new(command), arguments);
                 Ok(())
             }
+            Resource::LoginItem { name } => platform.set_login_item(name, None),
             Resource::SteamVrDriver { directory } => {
                 platform.remove_steamvr_driver(Path::new(directory))
             }

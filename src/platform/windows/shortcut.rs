@@ -35,8 +35,13 @@ pub fn create(link: &Path, target: &Path, arguments: &[String]) -> Result<(), St
     }
 }
 
+/// one argument quoted for a windows command line.
+pub fn quote(a: &str) -> String {
+    join_arguments(&[a.to_owned()])
+}
+
 /// windows command-line quoting for each argument.
-fn join_arguments(arguments: &[String]) -> String {
+pub fn join_arguments(arguments: &[String]) -> String {
     arguments
         .iter()
         .map(|a| {

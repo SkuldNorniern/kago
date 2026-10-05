@@ -17,6 +17,7 @@ struct Fake {
     steamvr: RefCell<Vec<PathBuf>>,
     fail_register: bool,
     has_steamvr: bool,
+    login: RefCell<BTreeMap<String, String>>,
 }
 
 impl Fake {
@@ -28,6 +29,7 @@ impl Fake {
             steamvr: RefCell::new(vec![PathBuf::from("/other/driver")]),
             fail_register: false,
             has_steamvr: false,
+            login: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -60,6 +62,32 @@ impl Platform for Fake {
 
     fn remove_path_entry(&self, _: Scope, entry: &Path) -> Result<(), String> {
         self.path.borrow_mut().retain(|p| p != entry);
+        Ok(())
+    }
+
+    fn login_item(&self, name: &str) -> Result<Option<String>, String> {
+        Ok(self.login.borrow().get(name).cloned())
+    }
+
+    fn add_login_item(
+        &self,
+        name: &str,
+        exe: &Path,
+        arguments: &[String],
+    ) -> Result<String, String> {
+        let command = format!("{} {}", exe.display(), arguments.join(" "));
+        self.login
+            .borrow_mut()
+            .insert(name.to_owned(), command.clone());
+        Ok(command)
+    }
+
+    fn set_login_item(&self, name: &str, command: Option<&str>) -> Result<(), String> {
+        let mut items = self.login.borrow_mut();
+        match command {
+            Some(c) => items.insert(name.to_owned(), c.to_owned()),
+            None => items.remove(name),
+        };
         Ok(())
     }
 
@@ -591,4 +619,34 @@ fn pre_uninstall_hook_is_kept_for_uninstall_and_skipped_on_upgrade() {
     let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert!(done.failed.is_empty(), "{:?}", done.failed);
     assert!(!w.app().exists());
+}
+
+#[test]
+fn service_starts_at_sign_in_and_survives_a_failed_upgrade() {
+    let mut w = World::new("service");
+    let manifest = format!("{MANIFEST}service main --background\n");
+    let receipt = w.install(&manifest).unwrap();
+    let name = "dev.test.app.main";
+    let command = w.fake.login.borrow().get(name).cloned().unwrap();
+    assert!(command.ends_with("app.exe --background"), "{command}");
+    assert!(
+        receipt
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::LoginItem { name: n } if n == name))
+    );
+
+    // a failed upgrade puts the old entry back.
+    w.fake.fail_register = true;
+    w.install(
+        &manifest
+            .replace("--background", "--new")
+            .replace("1.0.0", "1.1.0"),
+    )
+    .unwrap_err();
+    assert_eq!(w.fake.login.borrow().get(name), Some(&command));
+
+    w.fake.fail_register = false;
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.login.borrow().is_empty());
 }

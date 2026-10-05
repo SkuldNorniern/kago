@@ -161,7 +161,11 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         (Resource::File { path: a, .. }, Resource::File { path: b, .. })
         | (Resource::Directory { path: a }, Resource::Directory { path: b }) => on_disk(a, b),
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
-        | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. }) => a == b,
+        | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
+        | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
+        | (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
+            a == b
+        }
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
         (
             Resource::UninstallHook {
@@ -173,9 +177,6 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
                 arguments: y,
             },
         ) => a == b && x == y,
-        (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
-            a == b
-        }
         _ => false,
     })
 }
@@ -309,9 +310,12 @@ impl Run<'_> {
                 display_name,
                 entrypoint,
             } => self.register(display_name, entrypoint.as_ref()),
-            Operation::InstallService { id, .. } => Err(Error::Other(format!(
-                "service `{id}`: installing services is not supported yet"
-            ))),
+            Operation::InstallService {
+                id,
+                command,
+                arguments,
+                scope,
+            } => self.login_item(id, command, arguments, *scope),
         }
     }
 
@@ -345,6 +349,34 @@ impl Run<'_> {
             self.resources
                 .push(Resource::PathEntry { entry: text, scope });
         }
+        Ok(())
+    }
+
+    /// a per-user service: started when the user signs in, under a name
+    /// made from the package id, so it is never someone else's.
+    fn login_item(
+        &mut self,
+        id: &str,
+        command: &SemanticPath,
+        arguments: &[String],
+        scope: Scope,
+    ) -> Result<(), Error> {
+        if scope == Scope::Machine {
+            return Err(Error::Other(format!(
+                "service `{id}` for every user needs the elevation helper, which is not done yet"
+            )));
+        }
+        let exe = self.resolve(command)?;
+        let name = format!("{}.{id}", self.plan.package);
+        let previous = self.platform.login_item(&name).map_err(Error::Other)?;
+        self.step(Undo::RestoreLoginItem {
+            name: name.clone(),
+            previous,
+        })?;
+        self.platform
+            .add_login_item(&name, &exe, arguments)
+            .map_err(Error::Other)?;
+        self.resources.push(Resource::LoginItem { name });
         Ok(())
     }
 

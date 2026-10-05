@@ -76,6 +76,34 @@ pub trait Platform {
     /// when SteamVR's path file cannot be read or written.
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
 
+    /// the command a login item named `name` runs now, if there is one.
+    ///
+    /// # Errors
+    ///
+    /// when the login items cannot be read.
+    fn login_item(&self, name: &str) -> Result<Option<String>, String>;
+
+    /// starts `exe` with `arguments` when the user signs in, under `name`.
+    /// returns the command line it wrote.
+    ///
+    /// # Errors
+    ///
+    /// when the login items cannot be written.
+    fn add_login_item(
+        &self,
+        name: &str,
+        exe: &Path,
+        arguments: &[String],
+    ) -> Result<String, String>;
+
+    /// puts back a login item exactly as `login_item` read it, or removes
+    /// it for `None`.
+    ///
+    /// # Errors
+    ///
+    /// when the login items cannot be written.
+    fn set_login_item(&self, name: &str, command: Option<&str>) -> Result<(), String>;
+
     /// this OS's version as dotted numbers, like `10.0.22631`.
     fn os_version(&self) -> Option<String>;
 

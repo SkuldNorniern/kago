@@ -265,6 +265,27 @@ target linux setup appimage
     }
 
     #[test]
+    fn service_and_hook_lines() {
+        let (m, codes) = check(&with(
+            "service main-executable --tray
+  name \"Aurea tray\"
+hook post-install main-executable --setup
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        assert_eq!(m.services[0].command, "main-executable");
+        assert_eq!(m.services[0].arguments, ["--tray"]);
+        assert_eq!(m.services[0].name.as_deref(), Some("Aurea tray"));
+        assert_eq!(m.hooks[0].phase, HookPhase::PostInstall);
+        let (_, codes) = check(&with(
+            "hook post-install
+",
+        ));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
     fn require_reads_os_minimums_and_software() {
         let (m, codes) = check(&with(
             "require windows 10.0.19041

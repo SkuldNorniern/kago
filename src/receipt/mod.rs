@@ -50,6 +50,10 @@ pub enum Resource {
     Shortcut {
         path: PathBuf,
     },
+    /// starts a program when the user signs in.
+    LoginItem {
+        name: String,
+    },
     /// the package's own program to run first at uninstall.
     UninstallHook {
         command: String,

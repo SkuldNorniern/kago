@@ -238,7 +238,7 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Shortcut => ["Create shortcut: {item}", "바로 가기 만들기: {item}"],
         Line::Hook => ["Run: {item}", "실행: {item}"],
         Line::Register => ["Register {item}", "{item} 등록"],
-        Line::Service => ["Install service: {item}", "서비스 설치: {item}"],
+        Line::Service => ["Start at sign-in: {item}", "로그인 시 시작: {item}"],
     }
 }
 

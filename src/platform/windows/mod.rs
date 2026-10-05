@@ -16,6 +16,8 @@ use crate::manifest::{Detect, Root};
 use registry::Key;
 
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+/// programs started when the user signs in.
+const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 pub struct Windows;
 
@@ -95,6 +97,37 @@ impl Platform for Windows {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         super::openvr::remove(&openvr_paths()?, directory)
+    }
+
+    fn login_item(&self, name: &str) -> Result<Option<String>, String> {
+        let Some(key) = Key::open_read(registry::hive(Scope::User), RUN)? else {
+            return Ok(None);
+        };
+        Ok(key.text(name)?.map(|t| t.value))
+    }
+
+    fn add_login_item(
+        &self,
+        name: &str,
+        exe: &Path,
+        arguments: &[String],
+    ) -> Result<String, String> {
+        let mut command = shortcut::quote(&exe.display().to_string());
+        let rest = shortcut::join_arguments(arguments);
+        if !rest.is_empty() {
+            command.push(' ');
+            command.push_str(&rest);
+        }
+        Key::create(registry::hive(Scope::User), RUN)?.set_text(name, &command, false)?;
+        Ok(command)
+    }
+
+    fn set_login_item(&self, name: &str, command: Option<&str>) -> Result<(), String> {
+        let key = Key::create(registry::hive(Scope::User), RUN)?;
+        match command {
+            Some(command) => key.set_text(name, command, false),
+            None => key.delete_value(name),
+        }
     }
 
     fn os_version(&self) -> Option<String> {

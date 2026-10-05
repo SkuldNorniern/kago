@@ -53,6 +53,9 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
         Undo::RemovePathEntry { entry, scope } => platform.remove_path_entry(*scope, entry),
         Undo::RemoveRegistration { key, scope } => platform.unregister(*scope, key),
         Undo::RemoveSteamVrDriver { directory } => platform.remove_steamvr_driver(directory),
+        Undo::RestoreLoginItem { name, previous } => {
+            platform.set_login_item(name, previous.as_deref())
+        }
     }
 }
 

@@ -62,6 +62,7 @@ pub fn verify(receipt: &Receipt) -> Verified {
             Resource::PathEntry { .. }
             | Resource::SteamVrDriver { .. }
             | Resource::UninstallHook { .. }
+            | Resource::LoginItem { .. }
             | Resource::Registration { .. } => out.unchecked += 1,
         }
     }
