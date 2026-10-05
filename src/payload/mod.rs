@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use fetch::file_url;
+pub use fetch::{fetch, file_url};
 pub use vars::Vars;
 
 use crate::install::Sources;

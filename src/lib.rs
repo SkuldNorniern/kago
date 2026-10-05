@@ -36,3 +36,4 @@ pub mod platform;
 pub mod receipt;
 pub mod sign;
 pub mod transaction;
+pub mod update;
