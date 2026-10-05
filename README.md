@@ -226,8 +226,6 @@ What gets signed:
 
 Your files are signed as copies inside the setup; the ones in your build folder stay as they are. `kago build --no-sign` skips signing, for quick test builds.
 
-[Docs/authenticode](../Docs/authenticode) has the background: keys on hardware, timestamps, why a setup is signed last.
-
 ## Commands
 
 ```
