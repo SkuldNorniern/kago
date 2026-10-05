@@ -1,5 +1,6 @@
-# goes at the aira-studio repo root. build first: cargo build --release, and
-# the SteamVR driver and client in ../aira-motion/aira-openvr with CMake.
+# the Windows setup: `kago build` writes it to dist/. build first:
+# cargo build --release, and the SteamVR driver and client in
+# ../aira-motion/aira-openvr with CMake.
 package dev.eira.aira-studio
   name Aira Studio
   version from cargo
@@ -15,6 +16,8 @@ require windows 10.0.17763
 
 app aira-studio
   windows target/release/aira-studio.exe
+  # remake with: aira-studio --export-icon packaging/windows/aira.ico
+  icon windows packaging/windows/aira.ico
 
 shortcut
 
