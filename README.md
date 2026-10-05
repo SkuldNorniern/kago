@@ -179,6 +179,32 @@ component docs "Documentation" off
 
 `when windows` (or `linux`, `x86_64`, ...) blocks limit lines to some targets.
 
+### prerequisites
+
+Other vendors' installers your app needs, like the Visual C++ runtime. The installer is pinned and fetched at build time like any `source`, then carried inside the setup. At install time it runs only when its check says it is missing, with a UAC prompt when it needs administrator rights:
+
+```
+source vcredist
+  fetch https://aka.ms/vs/17/release/vc_redist.x64.exe
+  sha256 ...                        # the build prints the line to add
+  unpack none
+
+prerequisite vcredist
+  file vcredist:vc_redist.x64.exe
+```
+
+`vcredist` and `webview2` are known: kago fills in the name, the silent arguments, the check and that they need administrator rights. Anything else says it all:
+
+```
+prerequisite tool "Tool Runtime"
+  file deps:tool-setup.msi            # .msi files run through Windows Installer
+  arguments /qn
+  detect registry HKLM\SOFTWARE\Tool Version   # or: detect file %ProgramFiles%\Tool\tool.exe
+  admin
+```
+
+Exit codes 0, 3010 and 1641 (restart later) and 1638 (a newer one is there) count as installed. Uninstalling your app leaves prerequisites in place, since other programs may use them.
+
 ### license
 
 ```
