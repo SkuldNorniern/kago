@@ -117,6 +117,20 @@ impl Platform for Windows {
         super::openvr::remove(&openvr_paths()?, directory)
     }
 
+    fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
+        use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
+        // SAFETY: the path string lives until the call returns; no target
+        // means delete.
+        unsafe {
+            MoveFileExW(
+                &windows::core::HSTRING::from(path),
+                windows::core::PCWSTR::null(),
+                MOVEFILE_DELAY_UNTIL_REBOOT,
+            )
+        }
+        .map_err(|e| format!("{}: {}", path.display(), e.message()))
+    }
+
     fn login_item(&self, name: &str) -> Result<Option<String>, String> {
         let Some(key) = Key::open_read(registry::hive(Scope::User), RUN)? else {
             return Ok(None);

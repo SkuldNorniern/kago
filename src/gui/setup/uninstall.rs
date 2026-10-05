@@ -45,6 +45,8 @@ pub struct Removed {
     pub kept: Vec<String>,
     /// files that could not be removed, like one still in use.
     pub failed: Vec<String>,
+    /// in use, so removed when the computer next starts.
+    pub at_restart: Vec<String>,
 }
 
 impl Removing {
@@ -62,10 +64,12 @@ impl Removing {
 impl Removed {
     /// removed, or removed but for what is listed.
     pub(super) const fn headline(&self) -> Line {
-        if self.failed.is_empty() {
+        if !self.failed.is_empty() {
+            Line::RemovedPartly
+        } else if self.at_restart.is_empty() {
             Line::Removed
         } else {
-            Line::RemovedPartly
+            Line::RemovedRestart
         }
     }
 }
@@ -133,6 +137,10 @@ impl Removal {
         if !done.failed.is_empty() {
             notes.push(lang.line(Line::NotRemoved).to_owned());
             notes.extend(done.failed.iter().cloned());
+        }
+        if !done.at_restart.is_empty() {
+            notes.push(lang.line(Line::AtRestart).to_owned());
+            notes.extend(done.at_restart.iter().cloned());
         }
         if !done.kept.is_empty() {
             notes.push(lang.line(Line::Kept).to_owned());

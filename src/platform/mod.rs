@@ -78,6 +78,19 @@ pub trait Platform {
     /// when SteamVR's path file cannot be read or written.
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
 
+    /// has the file or empty folder at `path` deleted when the computer
+    /// next starts, for one still in use now.
+    ///
+    /// # Errors
+    ///
+    /// when this OS cannot, or without the rights to ask.
+    fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
+        Err(format!(
+            "{} cannot be removed at restart here",
+            path.display()
+        ))
+    }
+
     /// the command a login item named `name` runs now, if there is one.
     ///
     /// # Errors

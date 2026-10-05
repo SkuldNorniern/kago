@@ -147,6 +147,9 @@ pub struct Uninstalled {
     /// user data and modified files kept by ownership rules.
     pub kept: Vec<String>,
     pub failed: Vec<String>,
+    /// in use, so removed when the computer next starts; see
+    /// [`remove_at_restart`].
+    pub at_restart: Vec<String>,
 }
 
 /// removes everything the receipt owns, keeps what ownership says to keep.
@@ -180,7 +183,59 @@ pub fn uninstall(
     Ok(Uninstalled {
         kept: outcome.kept,
         failed: outcome.failed,
+        at_restart: Vec::new(),
     })
+}
+
+/// what an earlier uninstall could not remove because it was in use:
+/// deleted when the computer next starts, like NSIS's `/REBOOTOK`, and no
+/// longer the package's. returns those paths; what cannot be scheduled
+/// stays in the receipt.
+///
+/// # Errors
+///
+/// when locked or the receipt cannot be read or written.
+pub fn remove_at_restart(
+    package: &PackageId,
+    platform: &dyn Platform,
+    store: &Store,
+) -> Result<Vec<String>, Error> {
+    let held = lock(store, package)?;
+    let Some(mut receipt) = store.read_receipt(package)? else {
+        return Ok(Vec::new());
+    };
+    let mut scheduled = Vec::new();
+    let mut left = Vec::new();
+    // Windows deletes them in the order asked: files, then folders
+    // deepest first, so each folder is empty by its turn.
+    let mut resources = std::mem::take(&mut receipt.resources);
+    resources.sort_by_key(|r| match r {
+        Resource::Directory { path } => usize::MAX - path.segments().count(),
+        _ => 0,
+    });
+    for resource in resources {
+        let path = match &resource {
+            Resource::File { path, .. } | Resource::Directory { path } => receipt.absolute(path),
+            Resource::Shortcut { path } => Some(path.clone()),
+            _ => None,
+        };
+        match path {
+            Some(path) if !path.exists() => {}
+            Some(path) if platform.delete_at_restart(&path).is_ok() => {
+                scheduled.push(path.display().to_string());
+            }
+            _ => left.push(resource),
+        }
+    }
+    if left.is_empty() {
+        store.remove_receipt(package)?;
+        drop(held);
+        let _ = fs::remove_file(store.lock_path(package));
+    } else {
+        receipt.resources = left;
+        store.write_receipt(&receipt)?;
+    }
+    Ok(scheduled)
 }
 
 /// finishes or rolls back every transaction a crash left in `store`.

@@ -196,6 +196,7 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
                 .map(|done| kago::gui::setup::Removed {
                     kept: done.kept,
                     failed: done.failed,
+                    at_restart: done.at_restart,
                 })
                 .map_err(|e| e.to_string())
         };
@@ -265,6 +266,13 @@ fn uninstall_retrying(
             Err(transaction::Error::NotInstalled(_)) => done.failed.clear(),
             Err(e) => return Err(e),
         }
+    }
+    if !done.failed.is_empty() {
+        // still in use: gone at the next restart.
+        let scheduled = transaction::remove_at_restart(package, platform, store)?;
+        done.failed
+            .retain(|f| !scheduled.iter().any(|s| f.starts_with(s.as_str())));
+        done.at_restart = scheduled;
     }
     Ok(done)
 }

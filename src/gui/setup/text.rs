@@ -74,6 +74,8 @@ pub enum Line {
     Removing,
     Removed,
     RemovedPartly,
+    RemovedRestart,
+    AtRestart,
     Kept,
     NotRemoved,
     UninstallFailed,
@@ -334,6 +336,14 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Uninstall => ["Uninstall", "제거"],
         Line::Removing => ["Removing {name}...", "{name} 제거 중..."],
         Line::Removed => ["{name} was removed.", "{name}이(가) 제거되었습니다."],
+        Line::RemovedRestart => [
+            "{name} was removed. Restart Windows to finish.",
+            "{name}이(가) 제거되었습니다. 마무리하려면 Windows를 다시 시작하세요.",
+        ],
+        Line::AtRestart => [
+            "Still in use, removed when Windows restarts:",
+            "사용 중이라 Windows를 다시 시작할 때 제거됩니다:",
+        ],
         Line::RemovedPartly => [
             "{name} was removed, but not completely.",
             "{name}이(가) 제거되었지만 일부가 남았습니다.",

@@ -18,6 +18,8 @@ struct Fake {
     fail_register: bool,
     has_steamvr: bool,
     login: RefCell<BTreeMap<String, String>>,
+    /// what was left for the next restart, in order.
+    at_restart: RefCell<Vec<PathBuf>>,
 }
 
 impl Fake {
@@ -30,6 +32,7 @@ impl Fake {
             fail_register: false,
             has_steamvr: false,
             login: RefCell::new(BTreeMap::new()),
+            at_restart: RefCell::new(Vec::new()),
         }
     }
 }
@@ -110,6 +113,11 @@ impl Platform for Fake {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         self.steamvr.borrow_mut().retain(|d| d != directory);
+        Ok(())
+    }
+
+    fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
+        self.at_restart.borrow_mut().push(path.to_path_buf());
         Ok(())
     }
 
@@ -237,6 +245,30 @@ fn install_then_uninstall_leaves_nothing() {
     assert!(w.fake.registered.borrow().is_empty());
     assert_eq!(w.store.read_receipt(&World::id()).unwrap(), None);
     assert!(!w.store.lock_path(&World::id()).exists());
+}
+
+#[test]
+fn what_stays_in_use_goes_at_restart_files_first() {
+    let w = World::new("restart");
+    w.install(MANIFEST).unwrap();
+    let scheduled = remove_at_restart(&World::id(), &w.fake, &w.store).unwrap();
+    let order = w.fake.at_restart.borrow();
+    assert_eq!(order.len(), scheduled.len());
+    let app = order.iter().position(|p| *p == w.app()).unwrap();
+    let file = order
+        .iter()
+        .position(|p| *p == w.app().join("app.exe"))
+        .unwrap();
+    assert!(file < app, "the folder after its files");
+    // files and folders are no longer the package's; the rest stays.
+    let left = w.store.read_receipt(&World::id()).unwrap().unwrap();
+    assert!(
+        left.resources
+            .iter()
+            .all(|r| !matches!(r, Resource::File { .. } | Resource::Directory { .. })),
+        "{:?}",
+        left.resources
+    );
 }
 
 #[test]

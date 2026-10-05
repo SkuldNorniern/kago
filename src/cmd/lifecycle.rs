@@ -101,8 +101,17 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
         ));
     }
     let (platform, store) = open(scope)?;
-    let done =
+    let mut done =
         transaction::uninstall(&package, platform.as_ref(), &store).map_err(|e| e.to_string())?;
+    if !done.failed.is_empty() {
+        let scheduled = transaction::remove_at_restart(&package, platform.as_ref(), &store)
+            .map_err(|e| e.to_string())?;
+        done.failed
+            .retain(|f| !scheduled.iter().any(|s| f.starts_with(s.as_str())));
+        for path in &scheduled {
+            println!("removed when Windows restarts: {path}");
+        }
+    }
     for kept in &done.kept {
         println!("kept {kept}");
     }
