@@ -78,10 +78,6 @@ pub enum Resource {
         command: String,
         arguments: Vec<String>,
     },
-    /// a driver folder registered with SteamVR.
-    SteamVrDriver {
-        directory: String,
-    },
     /// a value set outside the package. uninstall takes an added item
     /// out, and puts `previous` back where the value is still the one set.
     Changed {
@@ -133,7 +129,11 @@ impl Receipt {
     ///
     /// when `json` is not a receipt or has another schema.
     pub fn from_json(json: &str) -> Result<Self, String> {
-        let receipt: Self = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let mut value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        if let Some(resources) = value["resources"].as_array_mut() {
+            resources.iter_mut().for_each(steamvr_driver);
+        }
+        let receipt: Self = serde_json::from_value(value).map_err(|e| e.to_string())?;
         if receipt.schema != SCHEMA {
             return Err(format!(
                 "receipt schema {} is not supported, this kago reads schema {SCHEMA}",
@@ -142,6 +142,24 @@ impl Receipt {
         }
         Ok(receipt)
     }
+}
+
+/// a SteamVR driver from a receipt older kagos wrote, when it was a
+/// resource of its own: the item it added to SteamVR's list.
+fn steamvr_driver(resource: &mut serde_json::Value) {
+    if resource["kind"] != "steam-vr-driver" {
+        return;
+    }
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let file = PathBuf::from(local).join(r"openvr\openvrpaths.vrpath");
+    *resource = serde_json::json!({
+        "kind": "changed",
+        "slot": { "in": "json", "file": file, "key": ["external_drivers"] },
+        "edit": "add",
+        "value": resource["directory"].clone(),
+    });
 }
 
 #[cfg(test)]
@@ -191,6 +209,29 @@ mod tests {
         assert!(json.contains("\"path\": \"{app}/ozone.exe\""), "{json}");
         assert!(json.contains("\"app\":"), "{json}");
         assert_eq!(Receipt::from_json(&json).unwrap(), r);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn an_older_steamvr_driver_reads_as_a_change() {
+        let mut json: serde_json::Value = serde_json::from_str(&receipt().to_json()).unwrap();
+        json["resources"] = serde_json::json!([
+            { "kind": "steam-vr-driver", "directory": r"C:\x\steamvr\aira" }
+        ]);
+        let read = Receipt::from_json(&json.to_string()).unwrap();
+        let Resource::Changed {
+            slot: Slot::Json { file, key },
+            edit,
+            value,
+            ..
+        } = &read.resources[0]
+        else {
+            panic!("{:?}", read.resources)
+        };
+        assert!(file.ends_with(r"openvr\openvrpaths.vrpath"));
+        assert_eq!(key, &["external_drivers"]);
+        assert_eq!(*edit, Edit::Add);
+        assert_eq!(value.as_str(), Some(r"C:\x\steamvr\aira"));
     }
 
     #[test]

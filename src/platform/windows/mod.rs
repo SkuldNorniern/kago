@@ -69,11 +69,6 @@ pub fn registry_has(key: &str, value: Option<&str>) -> bool {
     }
 }
 
-/// SteamVR's per-user path file, read by every OpenVR runtime and app.
-fn openvr_paths() -> Result<PathBuf, String> {
-    Ok(env_dir("LOCALAPPDATA")?.join(r"openvr\openvrpaths.vrpath"))
-}
-
 impl Platform for Windows {
     fn roots(&self, scope: Scope, name: &str) -> Result<Roots, String> {
         let folder = folder_name(name);
@@ -138,16 +133,6 @@ impl Platform for Windows {
 
     fn remove_path_entry(&self, scope: Scope, entry: &Path) -> Result<(), String> {
         environment::remove(scope, entry)
-    }
-
-    fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {
-        let item = serde_json::Value::from(directory.display().to_string());
-        super::json::add(&openvr_paths()?, &["external_drivers".to_owned()], &item)
-    }
-
-    fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
-        let item = serde_json::Value::from(directory.display().to_string());
-        super::json::remove(&openvr_paths()?, &["external_drivers".to_owned()], &item)
     }
 
     fn value(&self, slot: &Slot) -> Result<Option<Value>, String> {

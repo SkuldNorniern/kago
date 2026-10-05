@@ -2,6 +2,7 @@
 //! blocks by indentation, lowered into the raw manifest the validator
 //! checks.
 
+mod action;
 mod lower;
 mod tree;
 mod version;

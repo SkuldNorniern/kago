@@ -448,7 +448,6 @@ fn window_step(stage: &Stage<'_>) -> kago::gui::setup::Step {
             Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
             Operation::InstallFile { target, .. } => Step::File(target.to_string()),
             Operation::AddPathEntry { directory, .. } => Step::Path(directory.to_string()),
-            Operation::RegisterSteamVrDriver { directory } => Step::Setting(directory.to_string()),
             Operation::Change { place, .. } => Step::Setting(place.to_string()),
             Operation::CreateShortcut { name, .. } => Step::Shortcut(name.clone()),
             Operation::RegisterApplication { display_name, .. } => {

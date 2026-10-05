@@ -7,20 +7,50 @@ use std::path::Path;
 
 use serde_spanned::Spanned;
 
+use super::action::{self, Action};
 use super::tree::{Node, Word};
 use super::version;
 use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
     RawApplication, RawComponent, RawFile, RawHook, RawIcon, RawInstall, RawLicense, RawManifest,
-    RawPackage, RawPath, RawRequirement, RawService, RawShortcut, RawSteamVrDriver, RawTarget,
-    RawTargets, RawUpdate, RawWhen,
+    RawPackage, RawPath, RawRequirement, RawService, RawShortcut, RawTarget, RawTargets, RawUpdate,
+    RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Change, Check, Detect, Edit, FirewallRule, Place, Prerequisite, Setting, Sign, SignKey,
-    TIMESTAMP, Value, parse_color, preset,
+    Brand, Change, Check, Detect, Edit, Expect, FirewallRule, Place, Prerequisite, Setting, Sign,
+    SignKey, TIMESTAMP, Value, parse_color,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
+
+/// the statements kago knows; anything else is an action.
+const STATEMENTS: &[&str] = &[
+    "package",
+    "source",
+    "app",
+    "copy",
+    "shortcut",
+    "path",
+    "service",
+    "require",
+    "hook",
+    "component",
+    "when",
+    "target",
+    "license",
+    "brand",
+    "sign",
+    "prerequisite",
+    "update",
+    "firewall",
+    "json",
+    "registry",
+    "env",
+    "check",
+    "action",
+    "use",
+    "expect",
+];
 
 /// kago's own checks and actions, written in Kagofile syntax.
 const LIBRARY: &str = include_str!("library.kago");
@@ -34,6 +64,7 @@ pub struct Lowered {
     pub prerequisites: Vec<Prerequisite>,
     pub firewall: Vec<FirewallRule>,
     pub changes: Vec<Change>,
+    pub expects: Vec<Expect>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -67,7 +98,6 @@ pub fn lower(
         components: Vec::new(),
         files: Vec::new(),
         paths: Vec::new(),
-        steamvr_drivers: Vec::new(),
         requirements: Vec::new(),
         hooks: Vec::new(),
         services: Vec::new(),
@@ -82,6 +112,10 @@ pub fn lower(
         changes: Vec::new(),
         checks: BTreeMap::new(),
         library_checks: BTreeSet::new(),
+        actions: BTreeMap::new(),
+        library_actions: BTreeSet::new(),
+        depth: 0,
+        expects: Vec::new(),
     };
     // sources and checks first, so references to them work in any
     // order. the library's checks come before the Kagofile's own, which
@@ -90,13 +124,14 @@ pub fn lower(
         l.source_block(node);
     }
     let library = super::tree::parse("kago library", LIBRARY).expect("the library parses");
-    for node in library.iter().filter(|n| n.keyword() == "check") {
-        l.check_block(node);
-    }
+    let library: Vec<Node> = library.iter().map(|n| action::moved(n, 0)).collect();
+    l.definitions(&library);
     l.library_checks = l.checks.keys().cloned().collect();
-    for node in nodes.iter().filter(|n| n.keyword() == "check") {
-        l.check_block(node);
+    l.library_actions = l.actions.keys().cloned().collect();
+    for node in nodes.iter().filter(|n| n.keyword() == "use") {
+        l.use_file(node);
     }
+    l.definitions(nodes);
     for node in nodes {
         l.top(node);
     }
@@ -143,7 +178,6 @@ struct Lower<'a> {
     components: Vec<RawComponent>,
     files: Vec<RawFile>,
     paths: Vec<Spanned<RawPath>>,
-    steamvr_drivers: Vec<RawSteamVrDriver>,
     requirements: Vec<RawRequirement>,
     hooks: Vec<RawHook>,
     services: Vec<RawService>,
@@ -161,6 +195,13 @@ struct Lower<'a> {
     /// ids of the checks that came from the library, which a Kagofile may
     /// define again.
     library_checks: BTreeSet<String>,
+    actions: BTreeMap<String, Action>,
+    /// names of the actions from the library, which a Kagofile may define
+    /// again.
+    library_actions: BTreeSet<String>,
+    /// how many action calls deep the current line is.
+    depth: usize,
+    expects: Vec<Expect>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -223,7 +264,7 @@ impl Lower<'_> {
 
     fn top(&mut self, node: &Node) {
         match node.keyword() {
-            "source" | "check" => {}
+            "source" | "check" | "action" | "use" => {}
             "package" => self.package_block(node),
             "target" => self.target(node),
             "license" => self.license(node),
@@ -231,6 +272,7 @@ impl Lower<'_> {
             "sign" => self.sign_block(node),
             "prerequisite" => self.prerequisite(node),
             "update" => self.update(node),
+            name if self.actions.contains_key(name) => self.call(node, &Scope::default(), true),
             _ => self.item(node, &Scope::default()),
         }
     }
@@ -242,7 +284,7 @@ impl Lower<'_> {
             "copy" => self.copy(node, scope),
             "shortcut" => self.shortcut(node, scope),
             "path" => self.path(node, scope),
-            "steamvr" => self.steamvr(node, scope),
+            "expect" => self.expect(node, scope),
             "require" => self.require(node, scope),
             "hook" => self.hook(node, scope),
             "service" => self.service(node, scope),
@@ -259,13 +301,149 @@ impl Lower<'_> {
                     self.item(child, &inner);
                 }
             }
+            name if self.actions.contains_key(name) => self.call(node, scope, false),
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite, update, firewall, json, registry or env"
+                    "unknown statement `{other}`; expected {}, or an action like {}",
+                    STATEMENTS.join(", "),
+                    self.actions.keys().cloned().collect::<Vec<_>>().join(", ")
                 ),
             ),
         }
+    }
+
+    /// the `check` and `action` definitions among `nodes`.
+    fn definitions(&mut self, nodes: &[Node]) {
+        for node in nodes {
+            match node.keyword() {
+                "check" => self.check_block(node),
+                "action" => self.action(node),
+                _ => {}
+            }
+        }
+    }
+
+    fn action(&mut self, node: &Node) {
+        let (name, defined) = match Action::define(node) {
+            Ok(a) => a,
+            Err((at, e)) => return self.syntax(at, e),
+        };
+        let at = node.args().first().map_or(node.at(), |w| w.at);
+        if STATEMENTS.contains(&name.as_str()) {
+            return self.error(
+                diagnostic::MANIFEST_VALUE,
+                at,
+                format!("`{name}` is a statement already; name the action something else"),
+            );
+        }
+        if self.actions.contains_key(&name) && !self.library_actions.remove(&name) {
+            return self.error(
+                diagnostic::MANIFEST_DUPLICATE,
+                at,
+                format!("action `{name}` is declared twice"),
+            );
+        }
+        self.actions.insert(name, defined);
+    }
+
+    /// `use <file>`: the checks and actions in another Kagofile-syntax
+    /// file, relative to this one.
+    fn use_file(&mut self, node: &Node) {
+        self.no_children(node);
+        let Some([path]) = self.args(node, 1, "use <file>") else {
+            return;
+        };
+        let file = self.base.join(&path.text);
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(e) => {
+                return self.error(
+                    diagnostic::MANIFEST_REFERENCE,
+                    path.at,
+                    format!("cannot read {}: {e}", file.display()),
+                );
+            }
+        };
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        let nodes = match super::tree::parse(&file.display().to_string(), text) {
+            Ok(nodes) => nodes,
+            Err(d) => return self.diagnostics.push(d),
+        };
+        let mut used = Vec::new();
+        for node in &nodes {
+            match node.keyword() {
+                "check" | "action" => used.push(action::moved(node, path.at)),
+                other => self.syntax(
+                    path.at,
+                    format!(
+                        "{} has `{other}`; a used file holds only `check` and `action`",
+                        file.display()
+                    ),
+                ),
+            }
+        }
+        self.definitions(&used);
+    }
+
+    /// an action's lines in place of the call, as if written there.
+    fn call(&mut self, node: &Node, scope: &Scope, top: bool) {
+        let name = node.keyword();
+        let defined = &self.actions[name];
+        if let Some(child) = node.children.first() {
+            return self.syntax(
+                child.at(),
+                format!("`{}` takes no indented lines", defined.usage(name)),
+            );
+        }
+        if self.depth >= 16 {
+            return self.syntax(
+                node.at(),
+                format!("`{name}` calls actions 16 deep; does it call itself?"),
+            );
+        }
+        let lines = match defined.call(node.args(), node.at()) {
+            Ok(lines) => lines,
+            Err((at, e)) => {
+                let usage = defined.usage(name);
+                return self.syntax(at, format!("{e}; expected `{usage}`"));
+            }
+        };
+        self.depth += 1;
+        for line in &lines {
+            if top {
+                self.top(line);
+            } else {
+                self.item(line, scope);
+            }
+        }
+        self.depth -= 1;
+    }
+
+    /// `expect <file> ["message"]`: the build fails unless the file is
+    /// there, like the manifest a driver folder must hold.
+    fn expect(&mut self, node: &Node, scope: &Scope) {
+        self.no_children(node);
+        let (file, message) = match node.args() {
+            [file] => (file, None),
+            [file, message] => (file, Some(message.text.clone())),
+            _ => return self.syntax(node.at(), "expected `expect <file> [\"message\"]`"),
+        };
+        let source = self.reference(file).into_inner();
+        let when = self.when(scope, &[]);
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
+        self.expects.push(Expect {
+            source,
+            message,
+            component: scope.component.as_ref().map(|c| c.get_ref().clone()),
+            when,
+            at: Location::at(self.file, self.source, node.at()),
+        });
     }
 
     fn package_block(&mut self, node: &Node) {
@@ -919,45 +1097,6 @@ impl Lower<'_> {
         });
     }
 
-    /// `steamvr <dir> [-> <path>]`: copies a SteamVR driver folder and
-    /// registers it with SteamVR, by default as `{app}/steamvr/<dir name>`.
-    fn steamvr(&mut self, node: &Node, scope: &Scope) {
-        self.no_children(node);
-        let usage = "expected `steamvr <driver dir> [-> <path>]`";
-        let args = node.args();
-        let (from, target) = match args {
-            [from] => (from, None),
-            [from, arrow, to] if arrow.text == "->" && !arrow.quoted => (from, Some(to)),
-            _ => {
-                self.syntax(node.at(), usage);
-                return;
-            }
-        };
-        let target = match target {
-            Some(t) => spanned(t),
-            None => Spanned::new(
-                from.at..from.at + from.text.len(),
-                format!("{{app}}/steamvr/{}", basename(&from.text)),
-            ),
-        };
-        let source = self.reference(from);
-        let when = self.when(scope, &[]);
-        self.files.push(RawFile {
-            logical_id: None,
-            component: scope.component.clone(),
-            source,
-            target: target.clone(),
-            ownership: None,
-            when,
-        });
-        let when = self.when(scope, &[]);
-        self.steamvr_drivers.push(RawSteamVrDriver {
-            directory: target,
-            component: scope.component.clone(),
-            when,
-        });
-    }
-
     fn shortcut(&mut self, node: &Node, scope: &Scope) {
         self.no_children(node);
         let mut name = None;
@@ -1232,11 +1371,10 @@ impl Lower<'_> {
                 return;
             }
         };
-        let known = preset(&id.text);
         let mut file = None;
-        let mut arguments = known.as_ref().map(|k| k.1.clone()).unwrap_or_default();
-        let mut check = known.as_ref().map(|k| k.2.clone());
-        let mut admin = known.as_ref().is_some_and(|k| k.3);
+        let mut arguments = Vec::new();
+        let mut check = None;
+        let mut admin = false;
         for child in &node.children {
             self.no_children(child);
             let args = child.args();
@@ -1271,14 +1409,12 @@ impl Lower<'_> {
         let Some(check) = check else {
             self.syntax(
                 node.at(),
-                "a prerequisite needs `detect ...` to tell whether it is installed already",
+                "a prerequisite needs `detect ...` to tell whether it is installed already; kago's library has `vcredist <file>` and `webview2 <file>` ready",
             );
             return;
         };
         self.prerequisites.push(Prerequisite {
-            name: name
-                .or_else(|| known.map(|k| k.0.to_owned()))
-                .unwrap_or_else(|| id.text.clone()),
+            name: name.unwrap_or_else(|| id.text.clone()),
             id: id.text.clone(),
             file,
             arguments,
@@ -1498,7 +1634,6 @@ impl Lower<'_> {
             components: self.components,
             files: self.files,
             paths: self.paths,
-            steamvr_drivers: self.steamvr_drivers,
             shortcuts: self.shortcuts,
             services: self.services,
             hooks: self.hooks,
@@ -1518,6 +1653,7 @@ impl Lower<'_> {
             prerequisites: self.prerequisites,
             firewall: self.firewall,
             changes: self.changes,
+            expects: self.expects,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

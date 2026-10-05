@@ -24,10 +24,6 @@ pub enum Operation {
         directory: SemanticPath,
         scope: Scope,
     },
-    /// registers a SteamVR driver folder with SteamVR.
-    RegisterSteamVrDriver {
-        directory: SemanticPath,
-    },
     CreateShortcut {
         name: String,
         target: SemanticPath,
@@ -94,7 +90,6 @@ impl Operation {
             Self::CreateDirectory { .. } => "create-directory",
             Self::InstallFile { .. } => "install-file",
             Self::AddPathEntry { .. } => "add-path-entry",
-            Self::RegisterSteamVrDriver { .. } => "register-steamvr-driver",
             Self::CreateShortcut { .. } => "create-shortcut",
             Self::RegisterApplication { .. } => "register-application",
             Self::RunHook { .. } => "run-hook",
@@ -113,7 +108,6 @@ impl fmt::Display for Operation {
                 write!(f, "file      {target} ({size} bytes)")
             }
             Self::AddPathEntry { directory, scope } => write!(f, "path      {directory} ({scope})"),
-            Self::RegisterSteamVrDriver { directory } => write!(f, "steamvr   {directory}"),
             Self::CreateShortcut {
                 name,
                 target,

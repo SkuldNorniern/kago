@@ -60,7 +60,6 @@ pub fn verify(receipt: &Receipt) -> Verified {
                 }
             }
             Resource::PathEntry { .. }
-            | Resource::SteamVrDriver { .. }
             | Resource::UninstallHook { .. }
             | Resource::LoginItem { .. }
             | Resource::FirewallRule { .. }

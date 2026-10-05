@@ -28,11 +28,11 @@ pub use policy::{
     AppKind, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
     ScopeConflict, SetupLook, Upgrade,
 };
-pub use prerequisite::{Prerequisite, preset};
+pub use prerequisite::Prerequisite;
 pub use resource::{
-    Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
+    Component, Expect, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
     PathSource, Requirement, RequirementKind, RequirementPolicy, ResourceScope, Service,
-    ServiceRestart, ServiceStart, Shortcut, ShortcutLocation, SteamVrDriver,
+    ServiceRestart, ServiceStart, Shortcut, ShortcutLocation,
 };
 pub use selector::{Context, Selector};
 pub use sign::{Setting, Sign, SignKey, TIMESTAMP};
@@ -56,7 +56,8 @@ pub struct Manifest {
     pub components: Vec<Component>,
     pub files: Vec<File>,
     pub paths: Vec<PathEntry>,
-    pub steamvr_drivers: Vec<SteamVrDriver>,
+    /// files the build must find.
+    pub expects: Vec<Expect>,
     pub shortcuts: Vec<Shortcut>,
     pub services: Vec<Service>,
     pub hooks: Vec<Hook>,
@@ -157,6 +158,7 @@ impl Manifest {
             m.prerequisites = lowered.prerequisites;
             m.firewall = lowered.firewall;
             m.changes = lowered.changes;
+            m.expects = lowered.expects;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -274,7 +276,7 @@ target linux setup appimage
     }
 
     #[test]
-    fn steamvr_driver_copies_and_registers() {
+    fn steamvr_comes_from_the_library() {
         let (m, codes) = check(&with(
             "component steamvr \"SteamVR driver\" on
   when windows
@@ -283,26 +285,79 @@ target linux setup appimage
         ));
         assert!(codes.is_empty(), "{codes:?}");
         let m = m.unwrap();
-        let driver = &m.steamvr_drivers[0];
-        assert_eq!(driver.directory.to_string(), "{app}/steamvr/aira");
-        assert_eq!(driver.component.as_deref(), Some("steamvr"));
         let copied = m.files.last().unwrap();
         assert_eq!(copied.source, "driver/aira");
-        assert_eq!(copied.target, driver.directory);
-
-        let (m, _) = check(&with(
-            "steamvr out/aira -> {data}/steamvr/aira
-",
-        ));
+        assert_eq!(copied.target.to_string(), "{app}/steamvr/aira");
+        assert_eq!(copied.component.as_deref(), Some("steamvr"));
+        assert_eq!(m.expects[0].source, "driver/aira/driver.vrdrivermanifest");
+        let add = m.changes.iter().find(|c| c.edit == Edit::Add).unwrap();
         assert_eq!(
-            m.unwrap().steamvr_drivers[0].directory.to_string(),
+            add.place,
+            Place::Json {
+                file: "%LOCALAPPDATA%/openvr/openvrpaths.vrpath".into(),
+                key: vec!["external_drivers".into()],
+            }
+        );
+        assert_eq!(add.value, Value::text("{app}/steamvr/aira"));
+        assert_eq!(add.component.as_deref(), Some("steamvr"));
+
+        let (m, _) = check(&with("steamvr out/aira to={data}/steamvr/aira\n"));
+        assert_eq!(
+            m.unwrap().files.last().unwrap().target.to_string(),
             "{data}/steamvr/aira"
         );
-        let (_, codes) = check(&with(
-            "steamvr a b
-",
-        ));
+        let (_, codes) = check(&with("steamvr a b c\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
+    fn actions_are_written_and_used() {
+        let dir = std::env::temp_dir().join(format!("kago-use-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("shared.kago"),
+            "action settings file\n  json {config}/$file\n    set theme dark\n",
+        )
+        .unwrap();
+        let src = format!(
+            "{AUREA}use shared.kago\naction twice a\n  copy $a\n  settings $a.json\ntwice docs\n"
+        );
+        let (m, d) = Manifest::parse_in("Kagofile", &src, &dir);
+        let codes: Vec<_> = d.iter().map(|d| d.code).collect();
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        assert_eq!(m.files.last().unwrap().source, "docs");
+        assert_eq!(m.changes[0].place.to_string(), "{config}/docs.json theme");
+
+        for (extra, code) in [
+            ("action copy x\n  copy $x\n", diagnostic::MANIFEST_VALUE),
+            (
+                "action a\n  copy x\naction a\n  copy y\n",
+                diagnostic::MANIFEST_DUPLICATE,
+            ),
+            ("action a\n  a\na\n", diagnostic::MANIFEST_SYNTAX),
+            ("use missing.kago\n", diagnostic::MANIFEST_REFERENCE),
+            ("nope 1\n", diagnostic::MANIFEST_SYNTAX),
+        ] {
+            let (_, d) = Manifest::parse_in("Kagofile", &format!("{AUREA}{extra}"), &dir);
+            assert!(
+                d.iter().any(|d| d.code == code),
+                "{extra}: {:?}",
+                d.iter().map(|d| &d.message).collect::<Vec<_>>()
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn vcredist_comes_from_the_library() {
+        let (m, codes) = check(&with("vcredist vc_redist.x64.exe\n"));
+        assert!(codes.is_empty(), "{codes:?}");
+        let p = &m.unwrap().prerequisites[0];
+        assert_eq!(p.name, "Microsoft Visual C++ Runtime");
+        assert_eq!(p.file, "vc_redist.x64.exe");
+        assert!(p.admin);
+        assert_eq!(p.arguments, ["/install", "/quiet", "/norestart"]);
     }
 
     #[test]
@@ -476,9 +531,7 @@ require steamvr
     fn prerequisites_take_presets_and_their_own_checks() {
         let head = "package dev.x.y\n  version 1.0.0\nsource vc\n  dir deps\n";
         let parse = |p: &str| Manifest::parse("Kagofile", &format!("{head}{p}"));
-        let m = parse("prerequisite vcredist\n  file vc:vc_redist.x64.exe\n")
-            .0
-            .unwrap();
+        let m = parse("vcredist vc:vc_redist.x64.exe\n").0.unwrap();
         let vc = &m.prerequisites[0];
         assert_eq!(vc.name, "Microsoft Visual C++ Runtime");
         assert!(vc.admin);

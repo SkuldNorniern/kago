@@ -214,6 +214,7 @@ impl InstallPlan {
         for op in hooks(resolved, &mut diagnostics) {
             steps.push(op, None);
         }
+        expected(resolved, sources, &mut diagnostics);
         let needs = needs(resolved, &mut diagnostics);
         let prerequisites = prerequisites(manifest, target, sources, &mut diagnostics);
         if diagnostics.has_errors() {
@@ -523,7 +524,7 @@ impl Steps {
         self.owners.push(owner);
     }
 
-    /// PATH entries, SteamVR drivers, shortcuts and services.
+    /// PATH entries, shortcuts and services.
     fn resources(
         &mut self,
         resolved: &Resolved,
@@ -538,15 +539,6 @@ impl Steps {
                 scope: scope.of(p.scope),
             };
             self.push(op, p.component.clone());
-        }
-        for driver in &resolved.steamvr_drivers {
-            if let Err(d) = driver_shipped(driver, &self.operations) {
-                diagnostics.push(d);
-            }
-            let op = Operation::RegisterSteamVrDriver {
-                directory: driver.directory.clone(),
-            };
-            self.push(op, driver.component.clone());
         }
         for s in &resolved.shortcuts {
             // the main app's icon goes on shortcuts to the main app.
@@ -732,27 +724,24 @@ fn needs(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Need> {
     out
 }
 
-/// a SteamVR driver folder must ship its `driver.vrdrivermanifest`, or
-/// SteamVR skips it without a word.
-fn driver_shipped(
-    driver: &crate::manifest::SteamVrDriver,
-    operations: &[Operation],
-) -> Result<(), Diagnostic> {
-    let manifest_file = driver.directory.join("driver.vrdrivermanifest");
-    let shipped = operations
-        .iter()
-        .any(|op| matches!(op, Operation::InstallFile { target, .. } if *target == manifest_file));
-    if shipped {
-        return Ok(());
+/// an error for each `expect` file the build does not find.
+fn expected<S: Sources + ?Sized>(resolved: &Resolved, sources: &S, diagnostics: &mut Diagnostics) {
+    for e in &resolved.expects {
+        if sources.locate(&e.source).is_ok_and(|p| p.exists()) {
+            continue;
+        }
+        let message = e
+            .message
+            .clone()
+            .unwrap_or_else(|| "the build needs it".to_owned());
+        diagnostics.push(
+            Diagnostic::error(
+                diagnostic::INSTALL_SOURCE,
+                format!("{} is missing: {message}", e.source),
+            )
+            .at(e.at.clone()),
+        );
     }
-    Err(Diagnostic::error(
-        diagnostic::INSTALL_SOURCE,
-        format!(
-            "SteamVR driver `{}` has no `driver.vrdrivermanifest`; point `steamvr` at the driver folder that holds it",
-            driver.directory
-        ),
-    )
-    .at(driver.at.clone()))
 }
 
 /// the optional components chosen in `resolved`, each with the operations

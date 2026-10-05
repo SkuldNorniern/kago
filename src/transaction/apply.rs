@@ -169,10 +169,7 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
         | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
         | (Resource::Service { name: a }, Resource::Service { name: b })
-        | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
-        | (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
-            a == b
-        }
+        | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b }) => a == b,
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
         // a value set is the same wherever it is set; an added item is
         // only the same item.
@@ -297,7 +294,6 @@ impl Run<'_> {
                 Ok(())
             }
             Operation::AddPathEntry { directory, scope } => self.path_entry(directory, *scope),
-            Operation::RegisterSteamVrDriver { directory } => self.steamvr_driver(directory),
             Operation::RunHook {
                 phase,
                 command,
@@ -558,32 +554,6 @@ impl Run<'_> {
             return Ok(());
         }
         super::hook::run(&exe, arguments).map_err(Error::Other)
-    }
-
-    fn steamvr_driver(&mut self, directory: &SemanticPath) -> Result<(), Error> {
-        let dir = self.resolve(directory)?;
-        let entry = dir.display().to_string();
-        let owned_before = self.previous.is_some_and(|p| {
-            p.resources
-                .iter()
-                .any(|r| matches!(r, Resource::SteamVrDriver { directory } if *directory == entry))
-        });
-        if self
-            .platform
-            .add_steamvr_driver(&dir)
-            .map_err(Error::Other)?
-        {
-            self.step(Undo::RemoveSteamVrDriver {
-                directory: dir.clone(),
-            })?;
-            self.resources
-                .push(Resource::SteamVrDriver { directory: entry });
-        } else if owned_before {
-            // an upgrade: still ours, though this run did not add it.
-            self.resources
-                .push(Resource::SteamVrDriver { directory: entry });
-        }
-        Ok(())
     }
 
     fn keep_user_file(

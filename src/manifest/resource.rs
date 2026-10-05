@@ -108,10 +108,14 @@ pub struct PathEntry {
     pub at: Location,
 }
 
-/// a SteamVR driver folder to register with SteamVR.
+/// `expect`: a file the build must find, like the manifest a driver
+/// folder has to hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SteamVrDriver {
-    pub directory: SemanticPath,
+pub struct Expect {
+    /// build-side, like `build:driver/driver.manifest`.
+    pub source: String,
+    /// says what is wrong when it is missing.
+    pub message: Option<String>,
     pub component: Option<String>,
     pub when: Selector,
     pub at: Location,

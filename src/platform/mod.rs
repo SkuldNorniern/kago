@@ -63,22 +63,6 @@ pub trait Platform {
     /// when PATH cannot be read or written.
     fn remove_path_entry(&self, scope: Scope, entry: &Path) -> Result<(), String>;
 
-    /// registers a SteamVR driver folder, as `vrpathreg adddriver` does.
-    /// `false` when it was already registered, so the install does not own
-    /// it.
-    ///
-    /// # Errors
-    ///
-    /// when SteamVR's path file cannot be read or written.
-    fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String>;
-
-    /// removes a SteamVR driver folder from SteamVR. missing is fine.
-    ///
-    /// # Errors
-    ///
-    /// when SteamVR's path file cannot be read or written.
-    fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
-
     /// the value at `slot`; `None` when there is none.
     ///
     /// # Errors

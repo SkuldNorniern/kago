@@ -278,7 +278,6 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         Resource::Registration { .. } => 1,
         Resource::Shortcut { .. } => 2,
         Resource::PathEntry { .. }
-        | Resource::SteamVrDriver { .. }
         | Resource::LoginItem { .. }
         | Resource::FirewallRule { .. }
         | Resource::Service { .. }
@@ -310,9 +309,6 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 value,
                 previous,
             } => revert(platform, slot, *edit, value, previous.as_ref()),
-            Resource::SteamVrDriver { directory } => {
-                platform.remove_steamvr_driver(Path::new(directory))
-            }
             Resource::File {
                 path,
                 sha256,

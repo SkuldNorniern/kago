@@ -32,9 +32,6 @@ pub enum Undo {
         key: String,
         scope: Scope,
     },
-    RemoveSteamVrDriver {
-        directory: PathBuf,
-    },
     /// puts a value back as it was, removing it for `None`.
     PutBack {
         slot: crate::install::Slot,

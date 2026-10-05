@@ -5,3 +5,34 @@
 # SteamVR writes the runtime folder here once it has run.
 check steamvr "SteamVR"
   json %LOCALAPPDATA%/openvr/openvrpaths.vrpath runtime
+
+# a SteamVR driver folder: installed, and added to SteamVR's driver list
+# the way `vrpathreg adddriver` does it.
+#   steamvr build:driver/aira
+action steamvr dir to={app}/steamvr/$dir.name
+  expect $dir/driver.vrdrivermanifest "a SteamVR driver folder holds driver.vrdrivermanifest; point `steamvr` at that folder"
+  copy $dir -> $to
+  json %LOCALAPPDATA%/openvr/openvrpaths.vrpath
+    init jsonid vrpathreg
+    init version 1
+    add external_drivers $to
+
+# the Visual C++ 2015-2022 runtime, x64, from its vc_redist.x64.exe. a
+# newer one installed already makes it exit with 1638, which counts as
+# done.
+#   vcredist vcredist:vc_redist.x64.exe
+action vcredist file
+  prerequisite vcredist "Microsoft Visual C++ Runtime"
+    file $file
+    arguments /install /quiet /norestart
+    detect registry HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64 Installed
+    admin
+
+# the Evergreen WebView2 runtime, through its bootstrapper.
+#   webview2 webview2:MicrosoftEdgeWebview2Setup.exe
+action webview2 file
+  prerequisite webview2 "Microsoft Edge WebView2 Runtime"
+    file $file
+    arguments /silent /install
+    detect registry HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5} pv
+    admin
