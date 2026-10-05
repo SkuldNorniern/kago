@@ -339,9 +339,10 @@ fn finished(
 ) -> AureaResult<()> {
     let lang = s.lang;
     let fill = |line| fill(s, line);
-    badge(pen, body.x + 22.0, body.y + 22.0, true)?;
+    let whole = done.failed.is_empty();
+    badge(pen, body.x + 22.0, body.y + 22.0, whole)?;
     pen.clipped(
-        &fill(Line::Removed),
+        &fill(done.headline()),
         Area::new(body.x + 60.0, body.y + 10.0, body.w - 60.0, 24.0),
         &pen.bold(16.0),
         color::TEXT,

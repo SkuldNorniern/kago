@@ -84,6 +84,8 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
         "{package}-uninstall{}",
         std::env::consts::EXE_SUFFIX
     ));
+    // the copy must not start in the app folder either; see `remove`.
+    let _ = std::env::set_current_dir(std::env::temp_dir());
     if let Err(e) = std::fs::copy(exe, &copy) {
         eprintln!("uninstall: cannot prepare {}: {e}", copy.display());
         return ExitCode::FAILURE;
@@ -122,6 +124,9 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
 
 /// the temp copy: asks (unless silent), removes, then deletes itself.
 fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
+    // started from the app folder, this process has it as its working
+    // folder, and Windows does not delete a folder a process works in.
+    let _ = std::env::set_current_dir(std::env::temp_dir());
     let code = match PackageId::new(id) {
         Ok(package) => remove_package(&package, scope, silent),
         Err(e) => {

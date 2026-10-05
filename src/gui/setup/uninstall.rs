@@ -45,6 +45,17 @@ pub struct Removed {
     pub failed: Vec<String>,
 }
 
+impl Removed {
+    /// removed, or removed but for what is listed.
+    pub(super) const fn headline(&self) -> Line {
+        if self.failed.is_empty() {
+            Line::Removed
+        } else {
+            Line::RemovedPartly
+        }
+    }
+}
+
 pub(super) enum Page {
     Ask,
     Working,
@@ -211,7 +222,7 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
             body.add_spacer(1.0)?;
         }
         Page::Done(done) => {
-            body.add(Label::new(&fill(Line::Removed))?)?;
+            body.add(Label::new(&fill(done.headline()))?)?;
             let notes = Removal::notes(lang, done);
             if notes.is_empty() {
                 body.add_spacer(1.0)?;

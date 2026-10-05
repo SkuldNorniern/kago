@@ -64,6 +64,7 @@ pub enum Line {
     Uninstall,
     Removing,
     Removed,
+    RemovedPartly,
     Kept,
     NotRemoved,
     UninstallFailed,
@@ -297,6 +298,10 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Uninstall => ["Uninstall", "제거"],
         Line::Removing => ["Removing {name}...", "{name} 제거 중..."],
         Line::Removed => ["{name} was removed.", "{name}이(가) 제거되었습니다."],
+        Line::RemovedPartly => [
+            "{name} was removed, but not completely.",
+            "{name}이(가) 제거되었지만 일부가 남았습니다.",
+        ],
         Line::Kept => [
             "Kept, because you changed them or they hold your data:",
             "변경했거나 사용자 데이터라서 남겨 둔 항목:",
