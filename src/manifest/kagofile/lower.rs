@@ -16,7 +16,7 @@ use crate::manifest::schema::{
     RawTargets, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
-use crate::manifest::{Brand, parse_color};
+use crate::manifest::{Brand, Setting, Sign, SignKey, TIMESTAMP, parse_color};
 use crate::package::{Arch, Artifact, Libc, Os};
 
 /// what one Kagofile lowers to.
@@ -24,6 +24,7 @@ pub struct Lowered {
     pub raw: RawManifest,
     pub sources: Vec<Source>,
     pub brand: Brand,
+    pub sign: Option<Sign>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -65,6 +66,7 @@ pub fn lower(
         targets: BTreeMap::new(),
         pending: Vec::new(),
         brand: Brand::default(),
+        sign: None,
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -124,6 +126,28 @@ struct Lower<'a> {
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
     pending: Vec<Pending>,
     brand: Brand,
+    sign: Option<Sign>,
+}
+
+/// `<text>` or `env <VARIABLE>`.
+fn setting(words: &[&str]) -> Option<Setting> {
+    match words {
+        ["env", name] => Some(Setting::Env((*name).to_owned())),
+        [text] if *text != "env" => Some(Setting::Text((*text).to_owned())),
+        _ => None,
+    }
+}
+
+fn sign_usage(field: &str) -> &'static str {
+    match field {
+        "certificate" => "expected `certificate [machine] <thumbprint>` or `certificate env <VAR>`",
+        "pfx" => {
+            "expected `pfx <file.pfx> [env <VAR>]`: a password comes from the environment, never the Kagofile"
+        }
+        "azure" => "expected `azure <metadata.json> dlib <path to Azure.CodeSigning.Dlib.dll>`",
+        "timestamp" => "expected `timestamp <url>`",
+        _ => "expected `programs on` or `programs off`",
+    }
 }
 
 fn spanned(word: &Word) -> Spanned<String> {
@@ -170,6 +194,7 @@ impl Lower<'_> {
             "target" => self.target(node),
             "license" => self.license(node),
             "brand" => self.brand_block(node),
+            "sign" => self.sign_block(node),
             _ => self.item(node, &Scope::default()),
         }
     }
@@ -199,7 +224,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target or license"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand or sign"
                 ),
             ),
         }
@@ -821,6 +846,87 @@ impl Lower<'_> {
         }
     }
 
+    /// `sign` with one key line (`certificate`, `pfx` or `azure`), and
+    /// `timestamp` and `programs off` when wanted.
+    fn sign_block(&mut self, node: &Node) {
+        if !node.args().is_empty() {
+            self.syntax(node.at(), "`sign` takes its settings on the lines under it");
+        }
+        let mut key = None;
+        let mut timestamp = TIMESTAMP.to_owned();
+        let mut programs = true;
+        for child in &node.children {
+            self.no_children(child);
+            let args = child.args();
+            let words: Vec<&str> = args.iter().map(|w| w.text.as_str()).collect();
+            let found = match (child.keyword(), words.as_slice()) {
+                ("certificate", ["machine", rest @ ..]) => {
+                    setting(rest).map(|t| SignKey::Certificate {
+                        thumbprint: t,
+                        machine: true,
+                    })
+                }
+                ("certificate", rest) => setting(rest).map(|t| SignKey::Certificate {
+                    thumbprint: t,
+                    machine: false,
+                }),
+                ("pfx", [_]) => Some(SignKey::Pfx {
+                    file: self.reference(&args[0]).into_inner(),
+                    password: None,
+                }),
+                ("pfx", [_, "env", name]) => Some(SignKey::Pfx {
+                    file: self.reference(&args[0]).into_inner(),
+                    password: Some((*name).to_owned()),
+                }),
+                ("azure", [_, "dlib", _]) => Some(SignKey::Azure {
+                    metadata: self.reference(&args[0]).into_inner(),
+                    dlib: args[2].text.clone(),
+                }),
+                ("timestamp", [url]) => {
+                    (*url).clone_into(&mut timestamp);
+                    continue;
+                }
+                ("programs", ["on" | "off"]) => {
+                    programs = words[0] == "on";
+                    continue;
+                }
+                ("pfx" | "azure" | "timestamp" | "programs", _) => {
+                    self.syntax(child.at(), sign_usage(child.keyword()));
+                    continue;
+                }
+                (other, _) => {
+                    self.syntax(
+                        child.at(),
+                        format!(
+                            "unknown sign field `{other}`; expected certificate, pfx, azure, timestamp or programs"
+                        ),
+                    );
+                    continue;
+                }
+            };
+            match found {
+                Some(_) if key.is_some() => {
+                    self.syntax(child.at(), "`sign` takes one of certificate, pfx or azure");
+                }
+                Some(found) => key = Some(found),
+                None => self.syntax(child.at(), sign_usage(child.keyword())),
+            }
+        }
+        match key {
+            Some(key) => {
+                self.sign = Some(Sign {
+                    key,
+                    timestamp,
+                    programs,
+                });
+            }
+            None => self.syntax(
+                node.at(),
+                "`sign` needs where the key is: `certificate <thumbprint>`, `pfx <file> env <VAR>` or `azure <metadata.json> dlib <path>`",
+            ),
+        }
+    }
+
     fn license(&mut self, node: &Node) {
         self.no_children(node);
         match node.args() {
@@ -1006,6 +1112,7 @@ impl Lower<'_> {
             raw,
             sources: self.sources,
             brand: self.brand,
+            sign: self.sign,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

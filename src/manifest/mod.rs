@@ -7,6 +7,7 @@ mod policy;
 mod resource;
 mod schema;
 mod selector;
+mod sign;
 mod source;
 mod validate;
 
@@ -26,6 +27,7 @@ pub use resource::{
     ServiceRestart, ServiceStart, Shortcut, ShortcutLocation, SteamVrDriver,
 };
 pub use selector::{Context, Selector};
+pub use sign::{Setting, Sign, SignKey, TIMESTAMP};
 pub use source::{Source, SourceKind, Unpack};
 pub use validate::SCHEMA;
 
@@ -58,6 +60,8 @@ pub struct Manifest {
     pub sources: Vec<Source>,
     /// how the setup looks beyond the defaults.
     pub brand: Brand,
+    /// how `kago build` signs; unsigned without it.
+    pub sign: Option<Sign>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +127,7 @@ impl Manifest {
         let manifest = manifest.map(|mut m| {
             m.sources = lowered.sources;
             m.brand = lowered.brand;
+            m.sign = lowered.sign;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -373,6 +378,41 @@ require steamvr
 ",
         ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+    }
+
+    #[test]
+    fn sign_blocks() {
+        let head = "package dev.x.y\n  version 1.0.0\n";
+        let parse = |sign: &str| Manifest::parse("Kagofile", &format!("{head}{sign}"));
+        let m = parse("sign\n  certificate env KAGO_THUMB\n  programs off\n").0.unwrap();
+        let sign = m.sign.unwrap();
+        assert_eq!(
+            sign.key,
+            SignKey::Certificate {
+                thumbprint: Setting::Env("KAGO_THUMB".into()),
+                machine: false,
+            }
+        );
+        assert!(!sign.programs);
+        assert_eq!(sign.timestamp, TIMESTAMP);
+        let m = parse("sign\n  pfx certs/code.pfx env KAGO_PFX\n").0.unwrap();
+        assert_eq!(
+            m.sign.unwrap().key,
+            SignKey::Pfx {
+                file: "certs/code.pfx".into(),
+                password: Some("KAGO_PFX".into()),
+            }
+        );
+        assert!(
+            parse("sign\n  pfx certs/code.pfx hunter2\n").0.is_none(),
+            "no passwords in the Kagofile"
+        );
+        assert!(parse("sign\n  timestamp http://t\n").0.is_none(), "needs a key");
+        assert!(
+            parse("sign\n  certificate AB\n  certificate CD\n").0.is_none(),
+            "one key"
+        );
+        assert!(parse("").0.unwrap().sign.is_none());
     }
 
     #[test]
