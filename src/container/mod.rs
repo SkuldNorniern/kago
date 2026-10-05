@@ -28,6 +28,29 @@ pub struct Header {
     pub payload: Vec<Entry>,
     #[serde(default)]
     pub setup: Setup,
+    /// files the setup window uses, stored as they are after the payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<Asset>,
+}
+
+/// a named file for the setup window, like the logo PNG.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Asset {
+    pub name: String,
+    /// from the start of the payload.
+    pub offset: u64,
+    pub size: u64,
+}
+
+/// how the setup is branded; images are assets named `logo`, `header` and
+/// `side`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupBrand {
+    pub text: Option<String>,
+    pub accent: Option<[u8; 3]>,
+    pub welcome: Option<String>,
+    pub finish: Option<String>,
+    pub link: Option<(String, String)>,
 }
 
 /// what the setup window shows besides the plan.
@@ -38,6 +61,8 @@ pub struct Setup {
     /// whether the setup offers a folder choice.
     #[serde(default = "choose")]
     pub folder: FolderChoice,
+    #[serde(default)]
+    pub brand: SetupBrand,
 }
 
 const fn choose() -> FolderChoice {
@@ -50,6 +75,7 @@ impl Default for Setup {
             look: SetupLook::Modern,
             license: None,
             folder: FolderChoice::Choose,
+            brand: SetupBrand::default(),
         }
     }
 }
@@ -76,12 +102,18 @@ pub struct Entry {
 /// zstd level for payload. high, since builds run once and installs many times.
 const LEVEL: i32 = 19;
 
-/// writes `plan` and its payload. returns the bytes written.
+/// writes `plan`, its payload and the setup window's `assets`. returns the
+/// bytes written.
 ///
 /// # Errors
 ///
 /// when a payload file cannot be read or `out` cannot be written.
-pub fn write(plan: &InstallPlan, setup: &Setup, out: &mut impl Write) -> io::Result<u64> {
+pub fn write(
+    plan: &InstallPlan,
+    setup: &Setup,
+    assets: &[(String, Vec<u8>)],
+    out: &mut impl Write,
+) -> io::Result<u64> {
     let mut plan = plan.clone();
     let mut packed = Vec::new();
     let mut payload = Vec::new();
@@ -107,17 +139,30 @@ pub fn write(plan: &InstallPlan, setup: &Setup, out: &mut impl Write) -> io::Res
             packed.push(bytes);
         }
     }
+    let mut stored = Vec::new();
+    for (name, bytes) in assets {
+        stored.push(Asset {
+            name: name.clone(),
+            offset,
+            size: bytes.len() as u64,
+        });
+        offset += bytes.len() as u64;
+    }
     let header = serde_json::to_vec(&Header {
         format: FORMAT,
         plan,
         payload,
         setup: setup.clone(),
+        assets: stored,
     })
     .map_err(io::Error::other)?;
     out.write_all(MAGIC)?;
     out.write_all(&(header.len() as u64).to_le_bytes())?;
     out.write_all(&header)?;
     for bytes in &packed {
+        out.write_all(bytes)?;
+    }
+    for (_, bytes) in assets {
         out.write_all(bytes)?;
     }
     Ok(16 + header.len() as u64 + offset)
@@ -131,6 +176,23 @@ pub struct Container {
 }
 
 impl Container {
+    /// the asset called `name`, if the container has one.
+    ///
+    /// # Errors
+    ///
+    /// when it cannot be read.
+    pub fn asset(&mut self, name: &str) -> io::Result<Option<Vec<u8>>> {
+        let Some(asset) = self.header.assets.iter().find(|a| a.name == name) else {
+            return Ok(None);
+        };
+        let size = usize::try_from(asset.size).map_err(io::Error::other)?;
+        let mut bytes = vec![0; size];
+        self.file
+            .seek(SeekFrom::Start(self.payload_start + asset.offset))?;
+        self.file.read_exact(&mut bytes)?;
+        Ok(Some(bytes))
+    }
+
     /// reads the container that starts at `offset` in `path`.
     ///
     /// # Errors
@@ -251,11 +313,14 @@ mod tests {
         let path = dir.join("out.bin");
         let mut out = fs::File::create(&path).unwrap();
         out.write_all(b"stub").unwrap();
-        write(&plan, &Setup::default(), &mut out).unwrap();
+        let assets = [("logo".to_owned(), b"png bytes".to_vec())];
+        write(&plan, &Setup::default(), &assets, &mut out).unwrap();
         drop(out);
 
         let mut c = Container::open(&path, 4).unwrap();
         assert_eq!(c.header.payload.len(), 2);
+        assert_eq!(c.asset("logo").unwrap().as_deref(), Some(&b"png bytes"[..]));
+        assert_eq!(c.asset("side").unwrap(), None);
         let mut seen = Vec::new();
         let extracted = c
             .extract_observed(&dir.join("staging"), &mut |i, n, target| {
@@ -282,7 +347,8 @@ mod tests {
 
         // flip one payload byte: extraction must refuse.
         let mut bytes = fs::read(&path).unwrap();
-        let last = bytes.len() - 1;
+        // the last payload byte; the asset comes after it.
+        let last = bytes.len() - 1 - b"png bytes".len();
         bytes[last] ^= 0xff;
         fs::write(&path, bytes).unwrap();
         let mut c = Container::open(&path, 4).unwrap();

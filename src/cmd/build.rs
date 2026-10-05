@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use kago::container::{LicenseText, Setup};
+use kago::container::{LicenseText, Setup, SetupBrand};
 use kago::format::ico::{self, IconGroup};
 use kago::format::setup;
 use kago::install::{Sources, folder_name, hash};
@@ -48,12 +48,21 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         None => &me,
     };
     let icon = icon(&loaded, target)?;
+    let brand = &loaded.manifest.brand;
     let presentation = Setup {
         look: loaded.manifest.install.look,
         license: license(&loaded, target)?,
         folder: loaded.manifest.install.folder,
+        brand: SetupBrand {
+            text: brand.text.clone(),
+            accent: brand.accent,
+            welcome: brand.welcome.clone(),
+            finish: brand.finish.clone(),
+            link: brand.link.clone(),
+        },
     };
-    let size = setup::build(stub, &plan, &presentation, icon.as_ref(), &out)
+    let assets = brand_images(&loaded, target, icon.as_ref())?;
+    let size = setup::build(stub, &plan, &presentation, &assets, icon.as_ref(), &out)
         .map_err(|e| format!("{}: {e}", out.display()))?;
     if stub != me {
         let _ = fs::remove_file(stub);
@@ -64,6 +73,38 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     println!("  sha256 {digest}");
     println!("  unsigned");
     Ok(ExitCode::SUCCESS)
+}
+
+/// the brand's PNGs as setup assets, each checked to decode. without a
+/// `logo`, the app icon's PNG image stands in when it has one.
+fn brand_images(
+    loaded: &Loaded,
+    target: Target,
+    icon: Option<&IconGroup>,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let brand = &loaded.manifest.brand;
+    let payload = Payload::new(&loaded.manifest, &loaded.base, target);
+    let mut out = Vec::new();
+    for (name, reference) in [
+        ("logo", &brand.logo),
+        ("header", &brand.header),
+        ("side", &brand.side),
+    ] {
+        let Some(reference) = reference else {
+            continue;
+        };
+        let path = payload.locate(reference)?;
+        let bytes = fs::read(&path).map_err(|e| format!("brand {name} {}: {e}", path.display()))?;
+        kago::format::image::decode_png(&bytes)
+            .map_err(|e| format!("brand {name} {}: {e}", path.display()))?;
+        out.push((name.to_owned(), bytes));
+    }
+    if brand.logo.is_none()
+        && let Some(png) = icon.and_then(kago::format::image::png_in_icon)
+    {
+        out.push(("logo".to_owned(), png.to_vec()));
+    }
+    Ok(out)
 }
 
 /// the license text to show, read from the manifest's `license` file.
