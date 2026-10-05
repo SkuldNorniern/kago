@@ -6,6 +6,7 @@ mod environment;
 pub mod folder;
 mod registry;
 pub mod resource;
+pub mod restart;
 mod shortcut;
 
 use std::collections::BTreeMap;

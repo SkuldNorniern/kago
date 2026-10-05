@@ -221,6 +221,42 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     }
 }
 
+/// names of the programs that have any of `files` open, like the app an
+/// update would replace. empty where this OS cannot tell.
+///
+/// # Errors
+///
+/// when the system cannot be asked.
+pub fn programs_using(files: &[PathBuf]) -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        windows::restart::programs_using(files)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = files;
+        Ok(Vec::new())
+    }
+}
+
+/// closes the programs that have any of `files` open: asks first, then
+/// ends those that stay.
+///
+/// # Errors
+///
+/// when one cannot be closed.
+pub fn close_programs(files: &[PathBuf]) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        windows::restart::close_programs(files)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = files;
+        Ok(())
+    }
+}
+
 /// the system's folder picker, over the window `owner` when given.
 /// `None` when cancelled or when this OS has none yet.
 #[must_use]
