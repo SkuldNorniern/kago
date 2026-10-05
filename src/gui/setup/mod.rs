@@ -49,6 +49,8 @@ pub struct Component {
     pub size: u64,
     /// what it is for and was not found here, like `SteamVR`.
     pub missing: Option<String>,
+    /// always installed; shown ticked and locked.
+    pub required: bool,
 }
 
 impl Component {

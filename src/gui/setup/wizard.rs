@@ -52,6 +52,7 @@ pub enum Outcome {
 struct Offer {
     id: String,
     depends: Vec<String>,
+    required: bool,
 }
 
 #[derive(Debug)]
@@ -89,17 +90,18 @@ impl Wizard {
         location: Option<PathBuf>,
         folder_open: bool,
     ) -> Self {
-        Self {
+        let mut wizard = Self {
             page: Page::Welcome,
             has_license: license.is_some(),
             must_accept: license.unwrap_or(false),
             accepted: false,
-            chosen: components.iter().map(|c| c.default).collect(),
+            chosen: components.iter().map(|c| c.default || c.required).collect(),
             offers: components
                 .iter()
                 .map(|c| Offer {
                     id: c.id.clone(),
                     depends: c.depends.clone(),
+                    required: c.required,
                 })
                 .collect(),
             location,
@@ -110,7 +112,13 @@ impl Wizard {
             launch: None,
             open_after: true,
             error: None,
+        };
+        for i in 0..wizard.chosen.len() {
+            if wizard.locked(i) {
+                wizard.chosen[i] = true;
+            }
         }
+        wizard
     }
 
     /// whether Next works on this page right now.
@@ -199,10 +207,40 @@ impl Wizard {
 
     /// ticking a component ticks what it needs; unticking one unticks what
     /// needs it.
+    /// whether the component at `index` cannot be unticked: it is
+    /// required, or something locked needs it.
+    #[must_use]
+    pub fn locked(&self, index: usize) -> bool {
+        let Some(offer) = self.offers.get(index) else {
+            return false;
+        };
+        // walk from the required ones down what they need.
+        let mut seen: Vec<&str> = Vec::new();
+        let mut todo: Vec<&str> = self
+            .offers
+            .iter()
+            .filter(|o| o.required)
+            .map(|o| o.id.as_str())
+            .collect();
+        while let Some(id) = todo.pop() {
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            if let Some(o) = self.offers.iter().find(|o| o.id == id) {
+                todo.extend(o.depends.iter().map(String::as_str));
+            }
+        }
+        seen.contains(&offer.id.as_str())
+    }
+
     fn set_component(&mut self, index: usize, on: bool) {
         let Some(offer) = self.offers.get(index) else {
             return;
         };
+        if !on && self.locked(index) {
+            return;
+        }
         let mut todo = vec![offer.id.clone()];
         while let Some(id) = todo.pop() {
             let Some(i) = self.offers.iter().position(|o| o.id == id) else {
@@ -293,6 +331,7 @@ mod tests {
             depends: depends.iter().map(|d| (*d).to_owned()).collect(),
             size: 0,
             missing: None,
+            required: false,
         }
     }
 
@@ -386,6 +425,26 @@ mod tests {
         assert_eq!(w.chosen_ids(), ["tools"], "plugins needs core-extras");
         w.act(Action::SetComponent(9, true));
         assert_eq!(w.chosen_ids(), ["tools"]);
+    }
+
+    #[test]
+    fn required_components_stay_ticked() {
+        let mut driver = component("steamvr", false, &["runtime"]);
+        driver.required = true;
+        let offers = [component("runtime", false, &[]), driver];
+        let mut w = Wizard::new(None, &offers, None, false);
+        assert_eq!(
+            w.chosen_ids(),
+            ["runtime", "steamvr"],
+            "ticked from the start"
+        );
+        assert!(
+            w.locked(0) && w.locked(1),
+            "runtime is needed by a required part"
+        );
+        w.act(Action::SetComponent(1, false));
+        w.act(Action::SetComponent(0, false));
+        assert_eq!(w.chosen_ids(), ["runtime", "steamvr"]);
     }
 
     #[test]

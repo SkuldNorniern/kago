@@ -224,8 +224,13 @@ fn render(
         Page::Components => {
             window.add(header(Line::ComponentsTitle, Line::ComponentsBody)?)?;
             window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
-            for (component, on) in info.components.iter().zip(&wizard.chosen) {
-                let tick = Kept::new(Checkbox::with_checked(&component.name, *on)?);
+            for (i, (component, on)) in info.components.iter().zip(&wizard.chosen).enumerate() {
+                let mut checkbox = Checkbox::with_checked(&component.name, *on)?;
+                if wizard.locked(i) {
+                    // like NSIS's read-only sections: shown, ticked, greyed.
+                    checkbox.set_enabled(false)?;
+                }
+                let tick = Kept::new(checkbox);
                 body.add(tick.share())?;
                 live.components.push(tick);
                 let (note, _) = component.note(lang);

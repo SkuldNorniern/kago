@@ -63,6 +63,9 @@ pub struct Choice {
     pub description: Option<String>,
     /// ticked unless the person unticks it.
     pub default: bool,
+    /// always installed; shown ticked and locked.
+    #[serde(default)]
+    pub required: bool,
     pub depends: Vec<String>,
     /// indexes into `operations` that only this component brings.
     pub operations: Vec<usize>,
@@ -161,12 +164,21 @@ impl InstallPlan {
     #[must_use]
     pub fn select<'a>(&self, chosen: impl IntoIterator<Item = &'a str>) -> Self {
         let mut on: BTreeSet<&str> = BTreeSet::new();
-        let mut todo: Vec<&str> = chosen.into_iter().collect();
+        let required = self
+            .choices
+            .iter()
+            .filter(|c| c.required)
+            .map(|c| c.id.clone());
+        let mut todo: Vec<String> = chosen
+            .into_iter()
+            .map(str::to_owned)
+            .chain(required)
+            .collect();
         while let Some(id) = todo.pop() {
             if let Some(choice) = self.choices.iter().find(|c| c.id == id)
                 && on.insert(choice.id.as_str())
             {
-                todo.extend(choice.depends.iter().map(String::as_str));
+                todo.extend(choice.depends.iter().cloned());
             }
         }
         let dropped: BTreeSet<usize> = self
@@ -415,7 +427,7 @@ fn choices(
     manifest
         .components
         .iter()
-        .filter(|c| !c.required && resolved.components.contains(Some(&c.id)))
+        .filter(|c| resolved.components.contains(Some(&c.id)))
         .filter_map(|c| {
             let operations: Vec<usize> = owners
                 .iter()
@@ -428,6 +440,7 @@ fn choices(
                 name: c.name.clone(),
                 description: c.description.clone(),
                 default: c.default,
+                required: c.required,
                 depends: c.depends.clone(),
                 size: operations
                     .iter()
@@ -614,12 +627,9 @@ component docs Documentation off
             .iter()
             .map(|c| (c.id.as_str(), c.default))
             .collect();
-        assert_eq!(
-            ids,
-            [("cli", true), ("docs", false)],
-            "core is required, not a choice"
-        );
-        assert_eq!(p.choices[1].size, 5, "docs/guide/intro.md");
+        assert_eq!(ids, [("core", true), ("cli", true), ("docs", false)]);
+        assert!(p.choices[0].required, "core is shown, locked");
+        assert_eq!(p.choices[2].size, 5, "docs/guide/intro.md");
 
         let defaults = p.with_defaults();
         assert!(defaults.choices.is_empty());

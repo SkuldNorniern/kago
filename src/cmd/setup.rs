@@ -90,8 +90,10 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                             id: choice.id.clone(),
                             name: choice.name.clone(),
                             description: choice.description.clone(),
-                            // not ticked for something this machine lacks.
-                            default: choice.default && missing.is_none(),
+                            // not ticked for something this machine lacks,
+                            // unless it cannot be left out.
+                            default: choice.required || (choice.default && missing.is_none()),
+                            required: choice.required,
                             depends: choice.depends.clone(),
                             size: choice.size,
                             missing,

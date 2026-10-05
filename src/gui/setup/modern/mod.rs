@@ -449,29 +449,26 @@ fn tick(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
     at: (f32, f32),
-    (text, hit): (&str, Hit),
+    (text, hit): (&str, Option<Hit>),
     on: f32,
 ) -> AureaResult<Area> {
     let font = pen.font(14.0);
     let w = 22.0 + 10.0 + pen.width(text, &font);
     let a = Area::new(at.0, at.1, w, 24.0);
-    let t = frame.hover(hit);
+    // no hit: locked, ticked and quieter.
+    let t = hit.map_or(0.0, |hit| frame.hover(hit));
+    let fill = if hit.is_some() {
+        color::ACCENT
+    } else {
+        color::mix(color::ACCENT, color::SURFACE, 0.45)
+    };
     let boxed = Area::new(a.x, a.y + 2.0, 20.0, 20.0);
     pen.round(
         boxed,
         6.0,
-        color::mix(
-            color::mix(color::RAISED, color::HOVER, t),
-            color::ACCENT,
-            on,
-        ),
+        color::mix(color::mix(color::RAISED, color::HOVER, t), fill, on),
     )?;
-    pen.outline(
-        boxed,
-        6.0,
-        1.0,
-        color::mix(color::BORDER, color::ACCENT, on),
-    )?;
+    pen.outline(boxed, 6.0, 1.0, color::mix(color::BORDER, fill, on))?;
     if on > 0.05 {
         let c = color::mix(color::RAISED, color::ACCENT_TEXT, on);
         pen.line(
@@ -493,7 +490,9 @@ fn tick(
         &font,
         color::mix(color::DIM, color::TEXT, t.max(on)),
     )?;
-    frame.hits.push((a, hit));
+    if let Some(hit) = hit {
+        frame.hits.push((a, hit));
+    }
     Ok(a)
 }
 
@@ -590,7 +589,10 @@ fn welcome(
                 pen,
                 frame,
                 (body.x, y),
-                (&component.name, Hit::Component(index)),
+                (
+                    &component.name,
+                    (!wizard.locked(i)).then_some(Hit::Component(index)),
+                ),
                 on,
             )?;
             let (note, warn) = component.note(lang);
@@ -613,7 +615,7 @@ fn welcome(
                 pen,
                 frame,
                 (left, y),
-                (lang.line(Line::LicenseAccept), Hit::Accept),
+                (lang.line(Line::LicenseAccept), Some(Hit::Accept)),
                 on,
             )?;
             left = ticked.right() + 16.0;
@@ -684,7 +686,7 @@ fn license(
             pen,
             frame,
             (body.x, card.bottom() + 12.0),
-            (lang.line(Line::LicenseAccept), Hit::Accept),
+            (lang.line(Line::LicenseAccept), Some(Hit::Accept)),
             on,
         )?;
     }
