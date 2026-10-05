@@ -62,6 +62,8 @@ pub struct Manifest {
     pub services: Vec<Service>,
     /// programs started at install or uninstall.
     pub runs: Vec<Run>,
+    /// what `kago build` runs first to make the files, in order.
+    pub build: Vec<Command>,
     pub requirements: Vec<Requirement>,
     pub update: Option<Update>,
     /// `target <os> <artifact>...`, only for listed OSes.
@@ -161,6 +163,7 @@ impl Manifest {
             m.changes = lowered.changes;
             m.expects = lowered.expects;
             m.runs = lowered.runs;
+            m.build = lowered.build;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -349,6 +352,20 @@ target linux setup appimage
             );
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn build_lines_run_in_order() {
+        let (m, codes) = check(&with(
+            "build python -m PyInstaller app.spec\nbuild cargo build --release\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let build = m.unwrap().build;
+        assert_eq!(build[0].program, "python");
+        assert_eq!(build[0].arguments, ["-m", "PyInstaller", "app.spec"]);
+        assert_eq!(build[1].program, "cargo");
+        let (_, codes) = check(&with("build\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
     }
 
     #[test]

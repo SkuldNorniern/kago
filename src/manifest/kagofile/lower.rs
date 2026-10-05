@@ -50,6 +50,7 @@ const STATEMENTS: &[&str] = &[
     "action",
     "use",
     "expect",
+    "build",
 ];
 
 /// kago's own checks and actions, written in Kagofile syntax.
@@ -66,6 +67,7 @@ pub struct Lowered {
     pub changes: Vec<Change>,
     pub expects: Vec<Expect>,
     pub runs: Vec<Run>,
+    pub build: Vec<Command>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -101,6 +103,7 @@ pub fn lower(
         paths: Vec::new(),
         requirements: Vec::new(),
         runs: Vec::new(),
+        build: Vec::new(),
         services: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
@@ -181,6 +184,7 @@ struct Lower<'a> {
     paths: Vec<Spanned<RawPath>>,
     requirements: Vec<RawRequirement>,
     runs: Vec<Run>,
+    build: Vec<Command>,
     services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
@@ -273,6 +277,13 @@ impl Lower<'_> {
             "sign" => self.sign_block(node),
             "prerequisite" => self.prerequisite(node),
             "update" => self.update(node),
+            "build" => {
+                self.no_children(node);
+                match invocation(node.args()) {
+                    Some(step) => self.build.push(step),
+                    None => self.syntax(node.at(), "expected `build <program> [arguments...]`"),
+                }
+            }
             name if self.actions.contains_key(name) => self.call(node, &Scope::default(), true),
             _ => self.item(node, &Scope::default()),
         }
@@ -1680,6 +1691,7 @@ impl Lower<'_> {
             changes: self.changes,
             expects: self.expects,
             runs: self.runs,
+            build: self.build,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

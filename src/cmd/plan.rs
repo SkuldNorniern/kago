@@ -26,9 +26,10 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
 }
 
 /// manifest argument, `--scope` and `--components` to the manifest, its
-/// directory and an install plan for `target`. without `--components`,
-/// `offer` takes every component, so a setup can let the person choose;
-/// otherwise the defaults. `None` after diagnostics were printed.
+/// directory and an install plan for `target`. for a setup, the `build`
+/// lines run first unless `--no-build`, and without `--components` every
+/// component is offered so the person can choose; otherwise the defaults.
+/// `None` after diagnostics were printed.
 pub fn build(
     args: &Args,
     target: Target,
@@ -39,6 +40,9 @@ pub fn build(
     let Some(manifest) = load(&path) else {
         return Ok(None);
     };
+    if offer && !args.flag("--no-build") {
+        run_build(&manifest, path.parent().unwrap_or(Path::new(".")))?;
+    }
     let requested: Option<Scope> = args.value("--scope").map(str::parse).transpose()?;
     let selection = match args.value("--components") {
         Some(list) => {
@@ -80,6 +84,30 @@ pub fn build(
             plan,
         )
     }))
+}
+
+/// the Kagofile's `build` lines, in its folder, each until it ends.
+fn run_build(manifest: &Manifest, base: &Path) -> Result<(), String> {
+    for step in &manifest.build {
+        let line = std::iter::once(step.program.as_str())
+            .chain(step.arguments.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("build: {line}");
+        let status = std::process::Command::new(&step.program)
+            .args(&step.arguments)
+            .current_dir(if base.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                base
+            })
+            .status()
+            .map_err(|e| format!("build: `{line}` cannot start: {e}"))?;
+        if !status.success() {
+            return Err(format!("build: `{line}` failed ({status})"));
+        }
+    }
+    Ok(())
 }
 
 /// a checked manifest and the directory its paths are relative to.

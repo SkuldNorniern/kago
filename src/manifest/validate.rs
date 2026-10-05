@@ -106,6 +106,7 @@ impl Validator<'_> {
             shortcuts,
             services,
             runs: Vec::new(),
+            build: Vec::new(),
             requirements,
             update,
             artifacts,
