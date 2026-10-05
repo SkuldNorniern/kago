@@ -184,13 +184,30 @@ pub fn is_elevated() -> bool {
     }
 }
 
+/// why a program did not start with administrator rights.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ElevationError {
+    /// the person said no to the prompt.
+    Declined,
+    Failed(String),
+}
+
+impl std::fmt::Display for ElevationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Declined => f.write_str("administrator rights were not given"),
+            Self::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
 /// starts `exe` with `arguments` after asking for administrator rights.
 /// with `wait`, returns its exit code once it ends.
 ///
 /// # Errors
 ///
 /// when the person says no, or it cannot start.
-pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32, String> {
+pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32, ElevationError> {
     #[cfg(windows)]
     {
         windows::elevation::run_elevated(exe, arguments, wait)
@@ -198,7 +215,9 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     #[cfg(not(windows))]
     {
         let _ = (exe, arguments, wait);
-        Err("asking for administrator rights is Windows-only for now".to_owned())
+        Err(ElevationError::Failed(
+            "asking for administrator rights is Windows-only for now".to_owned(),
+        ))
     }
 }
 

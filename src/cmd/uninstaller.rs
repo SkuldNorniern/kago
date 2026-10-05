@@ -101,7 +101,9 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
     // and Windows cannot delete a running program. tools that need the
     // real exit code run QuietUninstallString, which waits.
     let started = if scope == Scope::Machine && !platform::is_elevated() {
-        platform::run_elevated(&copy, &arguments, false).map(|_| ())
+        platform::run_elevated(&copy, &arguments, false)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     } else {
         Command::new(&copy)
             .args(&arguments)

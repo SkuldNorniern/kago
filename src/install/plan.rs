@@ -318,7 +318,11 @@ impl fmt::Display for InstallPlan {
         writeln!(f, "{} {} ({})", self.name, self.version, self.package)?;
         writeln!(f, "target: {}", self.target)?;
         if self.scope_open {
-            writeln!(f, "scope: {}, or the other when picked at install", self.scope)?;
+            writeln!(
+                f,
+                "scope: {}, or the other when picked at install",
+                self.scope
+            )?;
         } else {
             writeln!(f, "scope: {}", self.scope)?;
         }

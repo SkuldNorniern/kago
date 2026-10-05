@@ -40,7 +40,12 @@ pub fn is_elevated() -> bool {
 
 /// starts `exe` with `arguments` after the UAC prompt. with `wait`, returns
 /// its exit code once it ends; without, 0 once it started.
-pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32, String> {
+pub fn run_elevated(
+    exe: &Path,
+    arguments: &[String],
+    wait: bool,
+) -> Result<u32, crate::platform::ElevationError> {
+    use crate::platform::ElevationError;
     let file = HSTRING::from(exe);
     let parameters = HSTRING::from(super::shortcut::join_arguments(arguments));
     let mut info = SHELLEXECUTEINFOW {
@@ -57,9 +62,12 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     unsafe {
         ShellExecuteExW(&raw mut info).map_err(|e| {
             if e.code() == windows::Win32::Foundation::ERROR_CANCELLED.to_hresult() {
-                "administrator rights were not given".to_owned()
+                ElevationError::Declined
             } else {
-                format!("cannot start {} as administrator: {e}", exe.display())
+                ElevationError::Failed(format!(
+                    "cannot start {} as administrator: {e}",
+                    exe.display()
+                ))
             }
         })?;
         let process = info.hProcess;
