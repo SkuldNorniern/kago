@@ -58,10 +58,13 @@ impl Component {
         if let Some(missing) = &self.missing {
             return (lang.fill(Line::NotFound, &[("item", missing)]), true);
         }
-        let size = lang.size(self.size);
-        let text = match &self.description {
-            Some(about) => format!("{size}  \u{b7}  {about}"),
-            None => size,
+        // a component of shortcuts or settings only has no size to show.
+        let size = (self.size > 0).then(|| lang.size(self.size));
+        let text = match (size, &self.description) {
+            (Some(size), Some(about)) => format!("{size}  \u{b7}  {about}"),
+            (Some(size), None) => size,
+            (None, Some(about)) => about.clone(),
+            (None, None) => String::new(),
         };
         (text, false)
     }
