@@ -256,6 +256,23 @@ pub fn tell(title: &str, text: &str) {
     }
 }
 
+/// bytes free for this user on the drive `path` is on, or would be on
+/// once created. `None` when it cannot be told.
+#[must_use]
+pub fn free_space(path: &Path) -> Option<u64> {
+    // the nearest folder that exists: the install folder usually does not.
+    let existing = path.ancestors().find(|p| p.is_dir())?;
+    #[cfg(windows)]
+    {
+        windows::folder::free_space(existing)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = existing;
+        None
+    }
+}
+
 /// names of the programs that have any of `files` open, like the app an
 /// update would replace. empty where this OS cannot tell.
 ///

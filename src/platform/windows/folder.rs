@@ -45,3 +45,20 @@ pub fn pick(owner: Option<isize>, title: &str, start: Option<&Path>) -> Option<P
         picked.ok()
     }
 }
+
+/// bytes free to the caller on the drive holding `dir`.
+pub fn free_space(dir: &std::path::Path) -> Option<u64> {
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let mut free = 0u64;
+    // SAFETY: the path string lives until the call returns.
+    unsafe {
+        GetDiskFreeSpaceExW(
+            &windows::core::HSTRING::from(dir),
+            Some(&raw mut free),
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    Some(free)
+}

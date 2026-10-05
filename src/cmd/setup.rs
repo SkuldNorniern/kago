@@ -482,6 +482,100 @@ fn running_check(package: kago::package::PackageId) -> kago::gui::setup::Running
     })
 }
 
+/// the plan with what the person picked, after checking the picks, the
+/// folder and that the drives have room.
+fn chosen(
+    plan: &InstallPlan,
+    choice: &Choice<'_>,
+    store: &transaction::Store,
+    platform: &dyn kago::platform::Platform,
+    staging: &Path,
+) -> Result<InstallPlan, String> {
+    if let Some(chosen) = choice.components
+        && let Some(unknown) = chosen
+            .iter()
+            .find(|c| !plan.choices.iter().any(|choice| &choice.id == *c))
+    {
+        let known: Vec<&str> = plan.choices.iter().map(|c| c.id.as_str()).collect();
+        return Err(format!(
+            "unknown component `{unknown}`; this setup has {}",
+            if known.is_empty() {
+                "none".to_owned()
+            } else {
+                known.join(", ")
+            }
+        ));
+    }
+    if let Some(dir) = choice.location {
+        let installed = store
+            .read_receipt(&plan.package)
+            .ok()
+            .flatten()
+            .and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned());
+        kago::install::check_folder(dir, installed.as_deref())
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    // an update or repair keeps what is installed.
+    let previous = store.read_receipt(&plan.package).ok().flatten();
+    let plan = match (choice.components, &previous) {
+        (Some(chosen), _) => plan.select(chosen.iter().map(String::as_str)),
+        (None, Some(r)) => {
+            let kept = plan.kept_choices(&r.components, &r.offered);
+            plan.select(kept.iter().map(String::as_str))
+        }
+        (None, None) => plan.with_defaults(),
+    };
+    let app = choice
+        .location
+        .map(Path::to_path_buf)
+        .or_else(|| previous.and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned()))
+        .or_else(|| {
+            let roots = platform.roots(plan.scope, &plan.name).ok()?;
+            roots.0.get(&kago::manifest::Root::App).cloned()
+        });
+    if let Some(app) = app {
+        check_space(plan.payload_size(), staging, &app)?;
+    }
+    Ok(plan)
+}
+
+/// refuses when a drive lacks room. the payload is unpacked into
+/// `staging`, then copied to `app`, so both hold it for a moment.
+fn check_space(needed: u64, staging: &Path, app: &Path) -> Result<(), String> {
+    /// the runtime, the receipt and the journal.
+    const SLACK: u64 = 16 << 20;
+    let drive = |p: &Path| {
+        p.components()
+            .next()
+            .map(|c| c.as_os_str().to_ascii_uppercase())
+    };
+    let mut wants = vec![(staging, needed + SLACK)];
+    if drive(staging) == drive(app) {
+        wants[0].1 += needed;
+    } else {
+        wants.push((app, needed + SLACK));
+    }
+    for (path, want) in wants {
+        if let Some(free) = platform::free_space(path)
+            && free < want
+        {
+            return Err(format!(
+                "not enough space on the drive of {}: {} needed, {} free",
+                path.display(),
+                megabytes(want),
+                megabytes(free)
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn megabytes(bytes: u64) -> String {
+    #[allow(clippy::cast_precision_loss, reason = "shown rounded")]
+    let mb = bytes as f64 / 1_000_000.0;
+    format!("{mb:.1} MB")
+}
+
 /// every file the package has installed, for everyone or just this user.
 fn installed_files(
     platform: &dyn kago::platform::Platform,
@@ -551,41 +645,7 @@ fn install(
     let _ = fs::remove_dir_all(&staging);
     let result = (|| {
         // choose first: what is not installed is not unpacked either.
-        let plan = &plan;
-        if let Some(chosen) = choice.components
-            && let Some(unknown) = chosen
-                .iter()
-                .find(|c| !plan.choices.iter().any(|choice| &choice.id == *c))
-        {
-            let known: Vec<&str> = plan.choices.iter().map(|c| c.id.as_str()).collect();
-            return Err(format!(
-                "unknown component `{unknown}`; this setup has {}",
-                if known.is_empty() {
-                    "none".to_owned()
-                } else {
-                    known.join(", ")
-                }
-            ));
-        }
-        if let Some(dir) = choice.location {
-            let installed = store
-                .read_receipt(&plan.package)
-                .ok()
-                .flatten()
-                .and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned());
-            kago::install::check_folder(dir, installed.as_deref())
-                .map_err(|e| format!("{}: {e}", dir.display()))?;
-        }
-        // an update or repair keeps what is installed.
-        let previous = store.read_receipt(&plan.package).ok().flatten();
-        let plan = match (choice.components, previous) {
-            (Some(chosen), _) => plan.select(chosen.iter().map(String::as_str)),
-            (None, Some(r)) => {
-                let kept = plan.kept_choices(&r.components, &r.offered);
-                plan.select(kept.iter().map(String::as_str))
-            }
-            (None, None) => plan.with_defaults(),
-        };
+        let plan = chosen(&plan, choice, &store, platform.as_ref(), &staging)?;
         let operations = plan.operations.len();
         #[allow(clippy::cast_precision_loss)]
         let share = |done: usize, total: usize| done as f32 / total.max(1) as f32;
