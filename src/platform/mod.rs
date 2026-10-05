@@ -405,7 +405,7 @@ mod tests {
     fn environment_names_expand_and_unknown_ones_stay() {
         let path = std::env::var("PATH").unwrap();
         assert_eq!(expand_env("%PATH%;x"), format!("{path};x"));
-        assert_eq!(expand_env(r"%KAGO_NO_SUCH%"), r"%KAGO_NO_SUCH%");
+        assert_eq!(expand_env(r"%KAGO_NO_SUCH%\a"), r"%KAGO_NO_SUCH%\a");
         assert_eq!(expand_env("50%"), "50%");
     }
 
