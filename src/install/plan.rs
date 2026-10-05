@@ -10,7 +10,10 @@ use super::need::Need;
 use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
-use crate::manifest::{Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, SemanticPath};
+use crate::manifest::{
+    Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, ResourceScope, ScopeChoice,
+    SemanticPath,
+};
 use crate::package::{PackageId, Target, Version};
 
 /// where a file source like `build:app.exe` or `themes` is on disk.
@@ -38,6 +41,10 @@ pub struct InstallPlan {
     pub publisher: Option<String>,
     pub target: Target,
     pub scope: Scope,
+    /// the person installing picks between everyone and just themselves;
+    /// `scope` is where the pick starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scope_open: bool,
     pub components: Vec<String>,
     /// whether this may replace a newer installed version.
     pub downgrade: Downgrade,
@@ -128,6 +135,10 @@ impl InstallPlan {
                 .find(|f| f.logical_id.as_deref() == Some(icon_id.as_str()))
                 .map(|f| f.target.clone())
         });
+        let scope_open = manifest.install.scope == ScopeChoice::Choose;
+        if scope_open {
+            fixed_with_open_scope(resolved, &mut diagnostics);
+        }
         steps.resources(resolved, scope, icon.as_ref(), manifest, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
@@ -158,6 +169,7 @@ impl InstallPlan {
             publisher: manifest.package.publisher.clone(),
             target,
             scope,
+            scope_open,
             components: resolved.components.iter().map(str::to_owned).collect(),
             downgrade: manifest.install.downgrade,
             operations,
@@ -247,6 +259,35 @@ impl InstallPlan {
         }
     }
 
+    /// the plan installing for everyone or just this user, when the person
+    /// installing may pick. PATH entries follow; `None` when the scope is
+    /// fixed and `scope` is not it.
+    #[must_use]
+    pub fn in_scope(&self, scope: Scope) -> Option<Self> {
+        if scope == self.scope {
+            return Some(self.clone());
+        }
+        if !self.scope_open {
+            return None;
+        }
+        let operations = self
+            .operations
+            .iter()
+            .map(|op| match op {
+                Operation::AddPathEntry { directory, .. } => Operation::AddPathEntry {
+                    directory: directory.clone(),
+                    scope,
+                },
+                op => op.clone(),
+            })
+            .collect();
+        Some(Self {
+            scope,
+            operations,
+            ..self.clone()
+        })
+    }
+
     /// the plan as the defaults would install it.
     #[must_use]
     pub fn with_defaults(&self) -> Self {
@@ -276,7 +317,11 @@ impl fmt::Display for InstallPlan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{} {} ({})", self.name, self.version, self.package)?;
         writeln!(f, "target: {}", self.target)?;
-        writeln!(f, "scope: {}", self.scope)?;
+        if self.scope_open {
+            writeln!(f, "scope: {}, or the other when picked at install", self.scope)?;
+        } else {
+            writeln!(f, "scope: {}", self.scope)?;
+        }
         writeln!(f, "components: {}", self.components.join(", "))?;
         writeln!(f, "payload: {} bytes", self.payload_size())?;
         writeln!(f)?;
@@ -349,7 +394,8 @@ impl Steps {
                             s.service.id
                         ),
                     )
-                    .at(s.service.at.clone()),
+                    .at(s.service.at.clone())
+                    .help("add `scope user` under it: it starts when the person installing signs in"),
                 );
                 continue;
             }
@@ -360,6 +406,37 @@ impl Steps {
                 scope: scope.of(s.service.scope),
             };
             self.push(op, s.service.component.clone());
+        }
+    }
+}
+
+/// with `scope choose`, PATH entries follow the pick, and a service has
+/// to say it is per-user: one for everyone is not done yet.
+fn fixed_with_open_scope(resolved: &Resolved, diagnostics: &mut Diagnostics) {
+    for p in &resolved.paths {
+        if p.scope != ResourceScope::ResolvedInstall {
+            diagnostics.push(Diagnostic::error(
+                diagnostic::INSTALL_SCOPE,
+                format!(
+                    "PATH entry `{}` has its own scope, but with `scope choose` it follows the person's pick",
+                    p.directory
+                ),
+            ));
+        }
+    }
+    for s in &resolved.services {
+        if s.service.scope == ResourceScope::ResolvedInstall {
+            diagnostics.push(
+                Diagnostic::error(
+                    diagnostic::INSTALL_SCOPE,
+                    format!(
+                        "service `{}` would run for everyone when the person picks that, which is not done yet",
+                        s.service.id
+                    ),
+                )
+                .at(s.service.at.clone())
+                .help("add `scope user` under it: it starts when the person installing signs in"),
+            );
         }
     }
 }
@@ -622,6 +699,29 @@ mod tests {
         assert_eq!(p.components, ["cli", "core"]);
         // same input, same plan.
         assert_eq!(plan(&dir).0.unwrap(), p);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_open_scope_moves_path_entries_with_the_pick() {
+        let dir = payload_dir("scope");
+        let p = plan(&dir).0.unwrap();
+        assert!(p.scope_open, "the example says `scope choose`");
+        let everyone = p.in_scope(Scope::Machine).unwrap();
+        assert_eq!(everyone.scope, Scope::Machine);
+        assert!(everyone.operations.iter().any(|op| matches!(
+            op,
+            Operation::AddPathEntry {
+                scope: Scope::Machine,
+                ..
+            }
+        )));
+        let fixed = InstallPlan {
+            scope_open: false,
+            ..p
+        };
+        assert!(fixed.in_scope(Scope::Machine).is_none());
+        assert!(fixed.in_scope(Scope::User).is_some());
         fs::remove_dir_all(dir).unwrap();
     }
 
