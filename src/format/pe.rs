@@ -97,6 +97,27 @@ fn has_icon_in(b: &[u8]) -> Option<bool> {
     Some((named..named + ids).any(|i| u32_at(root + 16 + i * 8) == Some(14)))
 }
 
+/// whether `bytes` is a PE file with an Authenticode signature: its
+/// certificate table, data directory 4, is filled in.
+#[must_use]
+pub fn is_signed(b: &[u8]) -> bool {
+    let u16_at = |i: usize| b.get(i..i + 2).map(|s| u16::from_le_bytes([s[0], s[1]]));
+    let u32_at = |i: usize| {
+        b.get(i..i + 4)
+            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    };
+    let signed = || -> Option<bool> {
+        if b.get(..2)? != b"MZ" {
+            return None;
+        }
+        let pe = u32_at(0x3c)? as usize;
+        let optional = pe + 24;
+        let data_dirs = optional + if u16_at(optional)? == 0x20b { 112 } else { 96 };
+        Some(u32_at(data_dirs + 4 * 8 + 4)? != 0)
+    };
+    signed().unwrap_or(false)
+}
+
 /// the Visual C++ runtime DLLs among `imports`: not part of Windows, so a
 /// fresh machine cannot start the program without them.
 #[must_use]
@@ -131,6 +152,13 @@ mod tests {
     #[test]
     fn icons_need_a_resource_table() {
         assert!(!has_icon(b"not a program"));
+    }
+
+    #[test]
+    fn unsigned_test_binaries_and_non_programs() {
+        let me = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        assert!(!is_signed(&me), "cargo does not sign");
+        assert!(!is_signed(b"not a program"));
     }
 
     #[test]

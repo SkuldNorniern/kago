@@ -34,4 +34,5 @@ pub mod package;
 pub mod payload;
 pub mod platform;
 pub mod receipt;
+pub mod sign;
 pub mod transaction;
