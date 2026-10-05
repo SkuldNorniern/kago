@@ -45,6 +45,10 @@ pub enum Line {
     JustMeNote,
     AdminDeclined,
     AlreadyRunning,
+    SpaceNote,
+    SpaceShort,
+    SpaceRequired,
+    SpaceAvailable,
     RunningTitle,
     RunningBody,
     RunningNote,
@@ -263,6 +267,16 @@ const fn table(line: Line) -> [&'static str; 2] {
             "{name} is being installed or removed already. Wait for that to finish.",
             "{name}을(를) 이미 설치하거나 제거하는 중입니다. 끝날 때까지 기다리세요.",
         ],
+        Line::SpaceNote => [
+            "{needed} needed  \u{b7}  {free} free",
+            "필요 {needed}  \u{b7}  남은 공간 {free}",
+        ],
+        Line::SpaceShort => [
+            "Not enough space on this drive: {needed} needed, {free} free.",
+            "이 드라이브에 공간이 부족합니다. 필요 {needed}, 남은 공간 {free}.",
+        ],
+        Line::SpaceRequired => ["Space required: {item}", "필요한 공간: {item}"],
+        Line::SpaceAvailable => ["Space available: {item}", "사용 가능한 공간: {item}"],
         Line::RunningTitle => ["Close Applications", "프로그램 닫기"],
         Line::RunningBody => [
             "These programs use files Setup has to replace.",

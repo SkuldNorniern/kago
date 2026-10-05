@@ -23,7 +23,7 @@ use aurea::render::{Color, Image};
 use pen::{Anim, Area, Pen, color, smooth};
 
 const WIDTH: u32 = 640;
-const HEIGHT: u32 = 420;
+const HEIGHT: u32 = 440;
 /// a components caption and one row per component.
 const COMPONENTS_CAPTION: f32 = 24.0;
 const COMPONENT_ROW: f32 = 30.0;
@@ -648,12 +648,25 @@ fn location_card(
     let font = pen.font(14.0);
     let body = at;
     let y = at.y;
+    let space = |line| {
+        wizard.free.map(|free| {
+            lang.fill(
+                line,
+                &[
+                    ("needed", &lang.size(wizard.space_needed())),
+                    ("free", &lang.size(free)),
+                ],
+            )
+        })
+    };
     let note = if let Some(error) = wizard.folder_error {
-        Some((lang.folder_error(error), color::BAD))
+        Some((lang.folder_error(error).to_owned(), color::BAD))
+    } else if wizard.short_of_space() {
+        space(Line::SpaceShort).map(|t| (t, color::BAD))
     } else if wizard.existing.installed() {
-        Some((lang.line(Line::UpdateHere), color::FAINT))
+        Some((lang.line(Line::UpdateHere).to_owned(), color::FAINT))
     } else {
-        None
+        space(Line::SpaceNote).map(|t| (t, color::FAINT))
     };
     let card_h = if note.is_some() { 84.0 } else { 64.0 };
     let card = Area::new(body.x, y, body.w, card_h);
@@ -680,7 +693,7 @@ fn location_card(
     )?;
     if let Some((text, tone)) = note {
         pen.clipped(
-            text,
+            &text,
             Area::new(card.x + 16.0, card.y + 56.0, card.w - 32.0, 18.0),
             &pen.font(12.0),
             tone,
@@ -890,7 +903,7 @@ fn welcome(
         footer,
         (
             lang.line(wizard.existing.verb()),
-            wizard.folder_error.is_none() && !wizard.blocked,
+            wizard.folder_error.is_none() && !wizard.blocked && !wizard.short_of_space(),
         ),
         Some(lang.line(Line::Cancel)),
     )

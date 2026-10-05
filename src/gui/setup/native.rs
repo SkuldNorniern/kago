@@ -393,6 +393,15 @@ fn render(
             if let Some(error) = wizard.folder_error {
                 body.add(Label::new(lang.folder_error(error))?)?;
             }
+            // like NSIS, under the folder.
+            let size = |line, bytes| lang.fill(line, &[("item", &lang.size(bytes))]);
+            body.add(Label::new(&size(
+                Line::SpaceRequired,
+                wizard.space_needed(),
+            ))?)?;
+            if let Some(free) = wizard.free {
+                body.add(Label::new(&size(Line::SpaceAvailable, free))?)?;
+            }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
             buttons.add(button(lang.line(next), tx, Action::Next)?)?;

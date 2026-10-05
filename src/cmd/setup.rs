@@ -291,6 +291,7 @@ fn window(
                 };
                 Folder {
                     browse: platform::pick_folder,
+                    free: platform::free_space,
                     check: Box::new(move |dir: &Path, everyone| {
                         check_folder(dir, installed(everyone).as_deref())
                     }),
@@ -320,6 +321,7 @@ fn window(
                     text: l.text.clone(),
                     accept: l.accept,
                 }),
+                base_size: plan.payload_size() - plan.choices.iter().map(|c| c.size).sum::<u64>(),
                 components: window_components(plan, kept.as_deref()),
             };
             (info, c.header.setup.look, folder)

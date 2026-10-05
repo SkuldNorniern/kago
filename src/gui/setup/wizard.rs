@@ -61,6 +61,7 @@ struct Offer {
     id: String,
     depends: Vec<String>,
     required: bool,
+    size: u64,
 }
 
 #[derive(Debug)]
@@ -96,6 +97,10 @@ pub struct Wizard {
     pub running: Vec<String>,
     /// the person agreed to close them.
     pub close_ok: bool,
+    /// bytes installed whatever is ticked.
+    pub base_size: u64,
+    /// bytes free on the drive of `location`, when known.
+    pub free: Option<u64>,
     /// why `location` cannot be used, if it cannot.
     pub folder_error: Option<LocationError>,
     /// a newer version is installed that this one may not replace.
@@ -128,6 +133,7 @@ impl Wizard {
                     id: c.id.clone(),
                     depends: c.depends.clone(),
                     required: c.required,
+                    size: c.size,
                 })
                 .collect(),
             folder_open: folder && !place.existing.installed(),
@@ -141,6 +147,8 @@ impl Wizard {
             before: Page::Welcome,
             running: Vec::new(),
             close_ok: false,
+            base_size: 0,
+            free: None,
             folder_error: None,
             fraction: 0.0,
             log: Vec::new(),
@@ -390,9 +398,28 @@ impl Wizard {
         Outcome::Stay
     }
 
+    /// bytes the install takes with what is ticked.
+    #[must_use]
+    pub fn space_needed(&self) -> u64 {
+        self.base_size
+            + self
+                .offers
+                .iter()
+                .zip(&self.chosen)
+                .filter(|(_, on)| **on)
+                .map(|(o, _)| o.size)
+                .sum::<u64>()
+    }
+
+    /// whether the drive of `location` lacks room for what is ticked.
+    #[must_use]
+    pub fn short_of_space(&self) -> bool {
+        self.free.is_some_and(|free| free < self.space_needed())
+    }
+
     /// installing begins unless the folder is unusable.
     fn start(&mut self) -> Outcome {
-        if self.folder_error.is_some() || self.blocked {
+        if self.folder_error.is_some() || self.blocked || self.short_of_space() {
             return Outcome::Stay;
         }
         if self.page != Page::Running {
@@ -674,6 +701,21 @@ mod tests {
         assert!(w.close_ok);
         w.not_started("no".into());
         assert_eq!(w.page, Page::License);
+    }
+
+    #[test]
+    fn a_full_drive_blocks_starting() {
+        let mut big = component("docs", true, &[]);
+        big.size = 600;
+        let mut w = Wizard::new(None, &[big], Place::default(), false);
+        w.base_size = 500;
+        w.free = Some(1000);
+        assert_eq!(w.space_needed(), 1100);
+        assert!(w.short_of_space());
+        assert_eq!(w.act(Action::Install), Outcome::Stay);
+        w.act(Action::SetComponent(0, false));
+        assert!(!w.short_of_space(), "fits without the docs");
+        assert_eq!(w.act(Action::Install), Outcome::Start);
     }
 
     #[test]

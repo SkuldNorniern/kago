@@ -40,6 +40,8 @@ pub struct Info {
     /// the window starts installing straight away.
     pub picked: Option<Picked>,
     pub license: Option<License>,
+    /// bytes installed whatever is ticked.
+    pub base_size: u64,
     /// optional parts the person can tick or untick.
     pub components: Vec<Component>,
     pub brand: Brand,
@@ -192,6 +194,8 @@ pub struct Folder {
     /// whether a folder can take the install, for everyone (true) or just
     /// this user.
     pub check: FolderCheck,
+    /// bytes free on the drive a folder is on.
+    pub free: fn(&Path) -> Option<u64>,
 }
 
 /// whether a folder can take the install, for everyone (true) or not.
@@ -350,10 +354,11 @@ impl Session {
             folder.is_some(),
         );
         wizard.for_everyone = info.for_everyone;
+        wizard.base_size = info.base_size;
         if let Some(other) = &info.other {
             wizard.offer_scope(info.for_everyone, other.clone());
         }
-        Self {
+        let mut session = Self {
             wizard,
             folder,
             app_folder: crate::install::folder_name(&info.name),
@@ -364,6 +369,15 @@ impl Session {
             lang: Lang::En,
             tx,
             rx,
+        };
+        session.refresh_free();
+        session
+    }
+
+    /// looks up the room on the drive of the folder now shown.
+    fn refresh_free(&mut self) {
+        if let Some(folder) = &self.folder {
+            self.wizard.free = self.wizard.location.as_deref().and_then(folder.free);
         }
     }
 
@@ -385,6 +399,9 @@ impl Session {
     /// applies `action`. true when the window should close.
     fn act(&mut self, action: Action) -> bool {
         let outcome = self.wizard.act(action);
+        if matches!(action, Action::SetEveryone(_)) {
+            self.refresh_free();
+        }
         self.follow(outcome)
     }
 
@@ -466,6 +483,7 @@ impl Session {
             .as_ref()
             .map_or(Ok(()), |f| (f.check)(dir, everyone));
         self.wizard.set_location(dir, check);
+        self.refresh_free();
     }
 
     /// the folder dialog and where it should start, for a caller that has
@@ -562,6 +580,7 @@ mod tests {
             other: None,
             picked: None,
             license: None,
+            base_size: 0,
             components: Vec::new(),
             brand: Brand::default(),
         }
@@ -571,6 +590,7 @@ mod tests {
         let folder = Folder {
             browse: dialog,
             check: Box::new(|_, _| Ok(())),
+            free: |_| None,
         };
         Session::new(&info(), Some(folder), |_, _| Ok(Installed { launch: None }))
     }
