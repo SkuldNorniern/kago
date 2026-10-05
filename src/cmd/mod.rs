@@ -6,6 +6,7 @@ mod lifecycle;
 mod plan;
 pub mod setup;
 pub mod uninstaller;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -40,6 +41,9 @@ commands:
                 list installed packages
   recover [--scope user|machine]
                 finish or roll back installs a crash left behind
+  update [<package-id>] [--check] [--silent]
+                install newer versions from where the Kagofile's `update`
+                line points; --check only says what is newer
   version       print kago's version
 
 manifest is a Kagofile or the directory holding one (default: .)
@@ -72,6 +76,9 @@ pub fn run() -> ExitCode {
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
         "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),
         "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
+        "update" => {
+            Args::parse_with(rest, &[], &["--check", "--silent"]).and_then(|a| update::run(&a))
+        }
         "version" | "--version" | "-V" => {
             println!("kago {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;

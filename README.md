@@ -205,6 +205,28 @@ prerequisite tool "Tool Runtime"
 
 Exit codes 0, 3010 and 1641 (restart later) and 1638 (a newer one is there) count as installed. Uninstalling your app leaves prerequisites in place, since other programs may use them.
 
+### updates
+
+```
+update github SkuldNorniern/aira-studio       # the newest GitHub release
+# update feed https://example.com/aira/latest.json
+```
+
+With an `update` line, `kago build` writes `latest.json` next to the setup: the version, the setup's file name, sha256 and size. Publish both together:
+
+- **GitHub:** attach both files to the release. GitHub sends `releases/latest/download/latest.json` to the newest release, and the setup is taken from that same release.
+- **Your own server:** put both files in one folder and point `update feed` at the `latest.json` there. Builds for several targets add to the same `latest.json`.
+
+Installed apps then update with the kago runtime that the setup puts in place:
+
+```
+%LOCALAPPDATA%\Kago\bin\kago.exe update dev.eira.aira-studio --check    # just says what is newer
+%LOCALAPPDATA%\Kago\bin\kago.exe update dev.eira.aira-studio            # the new setup's window
+%LOCALAPPDATA%\Kago\bin\kago.exe update dev.eira.aira-studio --silent   # no window
+```
+
+For installs for everyone the runtime is `%ProgramData%\Kago\bin\kago.exe`, and the setup asks for administrator rights. Your app can run these itself, for example from an "Check for updates" menu. A download is only run when its sha256 matches `latest.json`. The update closes the app if it is still running, so quit it first if you want to restart it afterwards.
+
 ### license
 
 ```
@@ -264,6 +286,7 @@ kago uninstall <package-id>
 kago verify <package-id>                        compare installed files with the receipt
 kago status                                     what is installed
 kago recover                                    finish or undo an install a crash cut short
+kago update [<package-id>] [--check] [--silent] install a newer version from the `update` feed
 kago version
 ```
 
@@ -307,4 +330,4 @@ Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 - `service` for everyone (a Windows service); per-user sign-in services work
 - Linux and macOS setups, and MSI, DMG, AppImage, DEB, RPM outputs; `target` lines for them only check the Kagofile
 - building a setup for another OS or architecture than the machine running `kago build`
-- updates from a server (the `update` part of a package)
+- checking for updates on a schedule; the app or the person runs `kago update`
