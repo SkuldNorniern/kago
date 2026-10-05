@@ -219,19 +219,22 @@ fn install(
     let staging = store.root().join("staging").join(header.package.as_str());
     let _ = fs::remove_dir_all(&staging);
     let result = (|| {
-        let operations = container.header.plan.operations.len();
-        #[allow(clippy::cast_precision_loss)]
-        let share = |done: usize, total: usize| done as f32 / total.max(1) as f32;
-        let plan = container
-            .extract_observed(&staging.join("payload"), &mut |i, n, target| {
-                progress(share(i, n + operations), Stage::Unpack(target));
-            })
-            .map_err(|e| format!("cannot unpack: {e}"))?;
-        let files = container.header.payload.len();
+        // choose first: what is not installed is not unpacked either.
+        let plan = &container.header.plan;
         let plan = match choice.components {
             Some(chosen) => plan.select(chosen.iter().map(String::as_str)),
             None => plan.with_defaults(),
         };
+        let operations = plan.operations.len();
+        #[allow(clippy::cast_precision_loss)]
+        let share = |done: usize, total: usize| done as f32 / total.max(1) as f32;
+        let mut files = 0;
+        let plan = container
+            .extract_plan(plan, &staging.join("payload"), &mut |i, n, target| {
+                files = n;
+                progress(share(i, n + operations), Stage::Unpack(target));
+            })
+            .map_err(|e| format!("cannot unpack: {e}"))?;
         let plan = match choice.location {
             Some(dir) => plan.at(dir),
             None => plan,

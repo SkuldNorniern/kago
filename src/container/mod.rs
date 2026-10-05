@@ -246,9 +246,28 @@ impl Container {
         dir: &Path,
         observe: &mut dyn FnMut(usize, usize, &SemanticPath),
     ) -> io::Result<InstallPlan> {
+        let plan = self.header.plan.clone();
+        self.extract_plan(plan, dir, observe)
+    }
+
+    /// unpacks only the files `plan` installs, like the header's plan after
+    /// [`InstallPlan::select`], so unticked components are never unpacked.
+    ///
+    /// # Errors
+    ///
+    /// as [`Self::extract`].
+    pub fn extract_plan(
+        &mut self,
+        mut plan: InstallPlan,
+        dir: &Path,
+        observe: &mut dyn FnMut(usize, usize, &SemanticPath),
+    ) -> io::Result<InstallPlan> {
         fs::create_dir_all(dir)?;
-        let mut plan = self.header.plan.clone();
-        let total = self.header.payload.len();
+        let total = plan
+            .operations
+            .iter()
+            .filter(|op| matches!(op, Operation::InstallFile { .. }))
+            .count();
         let mut done = 0;
         for op in &mut plan.operations {
             let Operation::InstallFile { source, target, .. } = op else {
@@ -344,6 +363,16 @@ mod tests {
             .collect();
         assert_eq!(sources, [b"MZ app".to_vec(), b"theme".to_vec()]);
         assert_eq!(extracted.package, plan.package);
+
+        // a plan without the theme unpacks only the app.
+        let mut only_app = c.header.plan.clone();
+        only_app.operations.retain(|op| {
+            !matches!(op, Operation::InstallFile { target, .. } if target.to_string().contains("themes"))
+        });
+        let partial = dir.join("partial");
+        c.extract_plan(only_app, &partial, &mut |_, _, _| {})
+            .unwrap();
+        assert_eq!(fs::read_dir(&partial).unwrap().count(), 1);
 
         // flip one payload byte: extraction must refuse.
         let mut bytes = fs::read(&path).unwrap();
