@@ -259,6 +259,11 @@ fn window(
                 Scope::User => Scope::Machine,
             };
             let (here, folder_now) = place(host, plan, scope);
+            // an update or repair starts with what is installed ticked.
+            let kept = host
+                .and_then(|p| transaction::store(p, scope).ok())
+                .and_then(|store| store.read_receipt(&plan.package).ok().flatten())
+                .map(|r| plan.kept_choices(&r.components, &r.offered));
             let (there, folder_other) = place(host, plan, other_scope);
             // the elevated setup installs for everyone only.
             let open = plan.scope_open && !parsed.elevated;
@@ -301,7 +306,7 @@ fn window(
                     text: l.text.clone(),
                     accept: l.accept,
                 }),
-                components: window_components(&plan.choices),
+                components: window_components(plan, kept.as_deref()),
             };
             (info, c.header.setup.look, folder)
         }
@@ -382,11 +387,15 @@ fn window_brand(c: &mut Container) -> kago::gui::setup::Brand {
     }
 }
 
-/// the plan's choices as tick boxes. one for something this machine lacks
-/// starts unticked, unless it cannot be left out.
+/// the plan's choices as tick boxes, ticked as `kept` says for an update,
+/// else as the package says. one for something this machine lacks starts
+/// unticked, unless it cannot be left out.
 #[cfg(feature = "gui")]
-fn window_components(choices: &[kago::install::Choice]) -> Vec<kago::gui::setup::Component> {
-    choices
+fn window_components(
+    plan: &InstallPlan,
+    kept: Option<&[String]>,
+) -> Vec<kago::gui::setup::Component> {
+    plan.choices
         .iter()
         .map(|choice| {
             let missing = choice
@@ -397,7 +406,10 @@ fn window_components(choices: &[kago::install::Choice]) -> Vec<kago::gui::setup:
                 id: choice.id.clone(),
                 name: choice.name.clone(),
                 description: choice.description.clone(),
-                default: choice.required || (choice.default && missing.is_none()),
+                default: choice.required
+                    || kept.map_or(choice.default && missing.is_none(), |k| {
+                        k.contains(&choice.id)
+                    }),
                 required: choice.required,
                 depends: choice.depends.clone(),
                 size: choice.size,
@@ -523,9 +535,15 @@ fn install(
             kago::install::check_folder(dir, installed.as_deref())
                 .map_err(|e| format!("{}: {e}", dir.display()))?;
         }
-        let plan = match choice.components {
-            Some(chosen) => plan.select(chosen.iter().map(String::as_str)),
-            None => plan.with_defaults(),
+        // an update or repair keeps what is installed.
+        let previous = store.read_receipt(&plan.package).ok().flatten();
+        let plan = match (choice.components, previous) {
+            (Some(chosen), _) => plan.select(chosen.iter().map(String::as_str)),
+            (None, Some(r)) => {
+                let kept = plan.kept_choices(&r.components, &r.offered);
+                plan.select(kept.iter().map(String::as_str))
+            }
+            (None, None) => plan.with_defaults(),
         };
         let operations = plan.operations.len();
         #[allow(clippy::cast_precision_loss)]

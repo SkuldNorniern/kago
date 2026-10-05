@@ -24,6 +24,10 @@ pub struct Receipt {
     pub target: Target,
     pub scope: Scope,
     pub components: Vec<String>,
+    /// optional components there were to pick; those not in `components`
+    /// were left out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offered: Vec<String>,
     /// absolute location each used root had at install time.
     pub roots: BTreeMap<Root, PathBuf>,
     pub resources: Vec<Resource>,
@@ -118,6 +122,7 @@ mod tests {
             target: "windows-x86_64".parse().unwrap(),
             scope: Scope::User,
             components: vec!["core".into()],
+            offered: Vec::new(),
             roots: BTreeMap::from([(
                 Root::App,
                 PathBuf::from("C:/Users/x/AppData/Local/Programs/Ozone"),

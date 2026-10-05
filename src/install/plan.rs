@@ -53,6 +53,11 @@ pub struct InstallPlan {
     /// operations each brings. empty once [`InstallPlan::select`] ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
+    /// ids of the optional components there were to pick, still known
+    /// after [`InstallPlan::select`], so a receipt can tell a component
+    /// left out from one that is new.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub offered: Vec<String>,
     /// `{app}` somewhere other than the platform's default, chosen at
     /// install. upgrades keep the folder of the install they replace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -174,6 +179,7 @@ impl InstallPlan {
             downgrade: manifest.install.downgrade,
             operations,
             choices,
+            offered: Vec::new(),
             location: None,
             needs,
         };
@@ -242,10 +248,16 @@ impl InstallPlan {
             })
             .cloned()
             .collect();
+        let offered = if self.choices.is_empty() {
+            self.offered.clone()
+        } else {
+            self.choices.iter().map(|c| c.id.clone()).collect()
+        };
         Self {
             components,
             operations,
             choices: Vec::new(),
+            offered,
             ..self.clone()
         }
     }
@@ -286,6 +298,18 @@ impl InstallPlan {
             operations,
             ..self.clone()
         })
+    }
+
+    /// the optional components an update or repair keeps: those installed,
+    /// not those left out, and the defaults for ones that are new.
+    /// `installed` and `offered` come from the receipt.
+    #[must_use]
+    pub fn kept_choices(&self, installed: &[String], offered: &[String]) -> Vec<String> {
+        self.choices
+            .iter()
+            .filter(|c| installed.contains(&c.id) || (c.default && !offered.contains(&c.id)))
+            .map(|c| c.id.clone())
+            .collect()
     }
 
     /// the plan as the defaults would install it.
@@ -726,6 +750,38 @@ mod tests {
         };
         assert!(fixed.in_scope(Scope::Machine).is_none());
         assert!(fixed.in_scope(Scope::User).is_some());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn updates_keep_what_was_picked_and_default_new_parts() {
+        let choice = |id: &str, default| Choice {
+            id: id.into(),
+            name: id.into(),
+            description: None,
+            default,
+            required: false,
+            depends: Vec::new(),
+            operations: Vec::new(),
+            size: 0,
+            detect: None,
+        };
+        let dir = payload_dir("kept");
+        let mut p = plan(&dir).0.unwrap();
+        p.choices = vec![
+            choice("desktop", false),
+            choice("docs", true),
+            choice("new-on", true),
+            choice("new-off", false),
+        ];
+        let installed = ["desktop".to_owned()];
+        let offered = ["desktop".to_owned(), "docs".to_owned()];
+        assert_eq!(
+            p.kept_choices(&installed, &offered),
+            ["desktop", "new-on"],
+            "docs was left out"
+        );
+        assert_eq!(p.select(["desktop"]).offered.len(), 4);
         fs::remove_dir_all(dir).unwrap();
     }
 

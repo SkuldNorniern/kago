@@ -101,6 +101,7 @@ pub(super) fn install(
         target: plan.target,
         scope: plan.scope,
         components: plan.components.clone(),
+        offered: plan.offered.clone(),
         roots: roots.used(&used),
         resources,
     };
