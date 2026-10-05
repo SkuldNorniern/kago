@@ -10,6 +10,7 @@ use kago::manifest::Context;
 use kago::package::{Artifact, Os, Target};
 use kago::payload::Payload;
 use kago::sign::Signer;
+use kago::update::Feed;
 
 use super::args::Args;
 use super::check::targets;
@@ -96,7 +97,10 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         None => None,
     };
     let _ = fs::remove_dir_all(&scratch);
-    let (_, digest) = hash(&out).map_err(|e| e.to_string())?;
+    let (bytes, digest) = hash(&out).map_err(|e| e.to_string())?;
+    if loaded.manifest.update.is_some() {
+        write_feed(&out, &plan, target, (bytes, &digest.to_string()))?;
+    }
     println!("{}", out.display());
     println!("  {size} bytes, payload {} bytes", plan.payload_size());
     println!("  sha256 {digest}");
@@ -109,6 +113,45 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         }
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// writes `latest.json` next to the setup at `out`, merged into the one
+/// already there when that is for the same version, so one file lists the
+/// setup of every target.
+fn write_feed(
+    out: &Path,
+    plan: &kago::install::InstallPlan,
+    target: Target,
+    (size, sha256): (u64, &str),
+) -> Result<(), String> {
+    let path = out.with_file_name(kago::update::FEED);
+    let file = out.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let mut feed = Feed::new(
+        plan.package.clone(),
+        plan.version.clone(),
+        target,
+        kago::update::Setup {
+            file: file.to_owned(),
+            sha256: sha256.to_owned(),
+            size,
+        },
+    );
+    let path = path.as_path();
+    let old = fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Feed>(&t).ok());
+    if let Some(old) = old
+        && old.package == feed.package
+        && old.version == feed.version
+    {
+        for (target, setup) in old.setups {
+            feed.setups.entry(target).or_insert(setup);
+        }
+    }
+    let text = serde_json::to_string_pretty(&feed).map_err(|e| e.to_string())?;
+    fs::write(path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
+    println!("  {}: upload it with the setup", path.display());
+    Ok(())
 }
 
 /// how the setup window looks and what it asks.

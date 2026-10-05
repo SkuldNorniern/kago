@@ -64,6 +64,9 @@ pub struct InstallPlan {
     /// other vendors' installers to run first, when missing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prerequisites: Vec<Prerequisite>,
+    /// URL of the update feed, kept in the receipt for `kago update`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<String>,
     /// `{app}` somewhere other than the platform's default, chosen at
     /// install. upgrades keep the folder of the install they replace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,6 +238,7 @@ impl InstallPlan {
                 text: manifest.brand.text.clone(),
             }),
             prerequisites,
+            update: manifest.update.as_ref().map(|u| u.feed.clone()),
             location: None,
             needs,
         };

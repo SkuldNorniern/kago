@@ -31,6 +31,9 @@ pub struct Receipt {
     /// how the setup looked, for the uninstaller.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look: Option<crate::install::Look>,
+    /// where `kago update` looks for newer versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<String>,
     /// absolute location each used root had at install time.
     pub roots: BTreeMap<Root, PathBuf>,
     pub resources: Vec<Resource>,
@@ -139,6 +142,7 @@ mod tests {
             components: vec!["core".into()],
             offered: Vec::new(),
             look: None,
+            update: None,
             roots: BTreeMap::from([(
                 Root::App,
                 PathBuf::from("C:/Users/x/AppData/Local/Programs/Ozone"),
