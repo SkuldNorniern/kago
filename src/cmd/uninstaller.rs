@@ -82,14 +82,10 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
     if silent {
         command.arg("--silent");
     }
+    // hand off and exit at once: this file is part of what gets removed,
+    // and Windows cannot delete a running program. tools that need the
+    // real exit code run QuietUninstallString, which waits.
     match command.spawn() {
-        // silent runs wait, so deployment tools get the real exit code.
-        Ok(mut child) if silent => child
-            .wait()
-            .ok()
-            .and_then(|s| s.code())
-            .and_then(|c| u8::try_from(c).ok())
-            .map_or(ExitCode::FAILURE, ExitCode::from),
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("uninstall: {e}");
@@ -146,7 +142,7 @@ fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
             let platform = platform::host()?;
             let store =
                 transaction::store(platform.as_ref(), Scope::User).map_err(|e| e.to_string())?;
-            transaction::uninstall(&package, platform.as_ref(), &store)
+            uninstall_retrying(&package, platform.as_ref(), &store)
                 .map(|done| kago::gui::setup::Removed {
                     kept: done.kept,
                     failed: done.failed,
@@ -164,7 +160,7 @@ fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
         };
     }
     let _ = silent;
-    match transaction::uninstall(package, platform.as_ref(), &store) {
+    match uninstall_retrying(package, platform.as_ref(), &store) {
         Ok(done) if done.failed.is_empty() => ExitCode::SUCCESS,
         Ok(done) => {
             for failed in done.failed {
@@ -179,6 +175,29 @@ fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
     }
 }
 
+/// uninstalls, then tries again for a few seconds whatever was in use,
+/// such as the app folder's `uninstall.exe` that started this copy and is
+/// still closing.
+fn uninstall_retrying(
+    package: &PackageId,
+    platform: &dyn platform::Platform,
+    store: &transaction::Store,
+) -> Result<transaction::Uninstalled, transaction::Error> {
+    let mut done = transaction::uninstall(package, platform, store)?;
+    for _ in 0..20 {
+        if done.failed.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        match transaction::uninstall(package, platform, store) {
+            Ok(again) => done.failed = again.failed,
+            Err(transaction::Error::NotInstalled(_)) => done.failed.clear(),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(done)
+}
+
 /// the temp copy cannot delete itself while running; a hidden helper
 /// waits a moment and deletes it, the way NSIS cleans up its `Au_.exe`.
 fn delete_later(exe: &Path) {
@@ -187,9 +206,13 @@ fn delete_later(exe: &Path) {
         use std::os::windows::process::CommandExt;
         /// `CREATE_NO_WINDOW`.
         const NO_WINDOW: u32 = 0x0800_0000;
-        let script = format!("ping -n 3 127.0.0.1 >nul & del /f /q \"{}\"", exe.display());
+        // passed as written: Rust's own quoting (`\"`) is not what cmd reads.
+        let script = format!(
+            "/d /c ping -n 3 127.0.0.1 >nul & del /f /q \"{}\"",
+            exe.display()
+        );
         let _ = Command::new("cmd")
-            .args(["/d", "/c", &script])
+            .raw_arg(script)
             .creation_flags(NO_WINDOW)
             .spawn();
     }
