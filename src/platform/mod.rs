@@ -221,6 +221,41 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     }
 }
 
+/// held while this process is the only setup or uninstaller working on
+/// a package; let go on drop.
+pub struct Instance {
+    #[cfg(windows)]
+    _held: windows::instance::Instance,
+}
+
+/// claims `package` for this process, waiting up to `wait_ms` for another
+/// setup to finish. `None` while another one runs.
+#[must_use]
+pub fn claim(package: &str, wait_ms: u32) -> Option<Instance> {
+    #[cfg(windows)]
+    {
+        windows::instance::claim(&format!("kago-{package}"), wait_ms)
+            .map(|held| Instance { _held: held })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (package, wait_ms);
+        Some(Instance {})
+    }
+}
+
+/// shows `text` in a message box, for when there is no window yet.
+pub fn tell(title: &str, text: &str) {
+    #[cfg(windows)]
+    {
+        windows::instance::tell(title, text);
+    }
+    #[cfg(not(windows))]
+    {
+        eprintln!("{title}: {text}");
+    }
+}
+
 /// names of the programs that have any of `files` open, like the app an
 /// update would replace. empty where this OS cannot tell.
 ///

@@ -134,6 +134,20 @@ pub fn run_embedded() -> Option<ExitCode> {
             }
         });
     }
+    // one setup per package at a time. the one started with administrator
+    // rights waits a moment for the window that started it to close.
+    let wait = if parsed.elevated { 10_000 } else { 0 };
+    let Some(_instance) = platform::claim(plan.package.as_str(), wait) else {
+        if window {
+            #[cfg(feature = "gui")]
+            {
+                let (title, text) = kago::gui::setup::already_running(&plan.name);
+                platform::tell(&title, &text);
+            }
+        }
+        eprintln!("setup: {} is being installed or removed already", plan.name);
+        return Some(ExitCode::FAILURE);
+    };
     if window {
         #[cfg(feature = "gui")]
         return Some(self::window(exe, embedded, &plan, scope, &parsed));

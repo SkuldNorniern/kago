@@ -120,7 +120,10 @@ pub fn close_programs(files: &[PathBuf]) -> Result<(), String> {
     if settled(files)? {
         return Ok(());
     }
-    Err(format!("still running: {}", programs_using(files)?.join(", ")))
+    Err(format!(
+        "still running: {}",
+        programs_using(files)?.join(", ")
+    ))
 }
 
 /// whether every program let go of the files within a few seconds: a

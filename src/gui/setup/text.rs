@@ -44,6 +44,7 @@ pub enum Line {
     Everyone,
     JustMeNote,
     AdminDeclined,
+    AlreadyRunning,
     RunningTitle,
     RunningBody,
     RunningNote,
@@ -257,6 +258,10 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::AdminDeclined => [
             "Administrator rights were not given. Install only for you, or try again.",
             "관리자 권한을 받지 못했습니다. 현재 사용자용으로 설치하거나 다시 시도하세요.",
+        ],
+        Line::AlreadyRunning => [
+            "{name} is being installed or removed already. Wait for that to finish.",
+            "{name}을(를) 이미 설치하거나 제거하는 중입니다. 끝날 때까지 기다리세요.",
         ],
         Line::RunningTitle => ["Close Applications", "프로그램 닫기"],
         Line::RunningBody => [

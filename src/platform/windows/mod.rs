@@ -4,6 +4,7 @@
 pub mod elevation;
 mod environment;
 pub mod folder;
+pub mod instance;
 mod registry;
 pub mod resource;
 pub mod restart;

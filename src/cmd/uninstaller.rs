@@ -127,6 +127,17 @@ fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
     // started from the app folder, this process has it as its working
     // folder, and Windows does not delete a folder a process works in.
     let _ = std::env::set_current_dir(std::env::temp_dir());
+    // never alongside a setup for the same package.
+    let Some(_instance) = platform::claim(id, 10_000) else {
+        #[cfg(feature = "gui")]
+        if !silent {
+            let (title, text) = kago::gui::setup::already_running(id);
+            platform::tell(&title, &text);
+        }
+        eprintln!("uninstall: {id} is being installed or removed already");
+        delete_later(exe);
+        return ExitCode::FAILURE;
+    };
     let code = match PackageId::new(id) {
         Ok(package) => remove_package(&package, scope, silent),
         Err(e) => {

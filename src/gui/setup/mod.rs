@@ -197,6 +197,17 @@ pub struct Folder {
 /// whether a folder can take the install, for everyone (true) or not.
 pub type FolderCheck = Box<dyn Fn(&Path, bool) -> Result<(), LocationError>>;
 
+/// title and text saying another setup or uninstaller for `name` runs,
+/// in the person's language.
+#[must_use]
+pub fn already_running(name: &str) -> (String, String) {
+    let lang = Lang::detect();
+    (
+        lang.fill(Line::WindowTitle, &[("name", name)]),
+        lang.fill(Line::AlreadyRunning, &[("name", name)]),
+    )
+}
+
 /// names of the programs using the installed files, which installing
 /// closes first.
 pub type Running = Box<dyn Fn() -> Vec<String>>;
