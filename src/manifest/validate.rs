@@ -114,6 +114,7 @@ impl Validator<'_> {
             update,
             artifacts,
             sources: Vec::new(),
+            brand: super::Brand::default(),
         };
         self.references(&manifest, &raw);
         manifest

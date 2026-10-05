@@ -1,5 +1,6 @@
 //! the Kagofile: parsing, `when` selectors, sources and validation.
 
+mod brand;
 mod kagofile;
 mod path;
 mod policy;
@@ -12,6 +13,7 @@ mod validate;
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub use brand::{Brand, parse_color};
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
@@ -54,6 +56,8 @@ pub struct Manifest {
     pub artifacts: BTreeMap<Os, Vec<Artifact>>,
     /// where `name:path` file sources come from.
     pub sources: Vec<Source>,
+    /// how the setup looks beyond the defaults.
+    pub brand: Brand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +120,7 @@ impl Manifest {
         diagnostics.extend(more.0);
         let manifest = manifest.map(|mut m| {
             m.sources = lowered.sources;
+            m.brand = lowered.brand;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -259,6 +264,43 @@ target linux setup appimage
         );
         let (_, codes) = check(&with(
             "steamvr a b
+",
+        ));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
+    fn brand_block_reads_every_field() {
+        let (m, codes) = check(&with(
+            "brand
+  text Eira Installer
+  accent 6667ab
+  logo brand/logo.png
+  header brand/header.png
+  side brand/side.png
+  welcome Thanks for choosing Aurea.
+  finish Aurea is ready.
+  link \"Read the guide\" https://example.com/guide
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let b = m.unwrap().brand;
+        assert_eq!(b.text.as_deref(), Some("Eira Installer"));
+        assert_eq!(b.accent, Some([0x66, 0x67, 0xab]));
+        assert_eq!(b.side.as_deref(), Some("brand/side.png"));
+        assert_eq!(
+            b.link,
+            Some(("Read the guide".into(), "https://example.com/guide".into()))
+        );
+        let (_, codes) = check(&with(
+            "brand
+  accent purple
+",
+        ));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+        let (_, codes) = check(&with(
+            "brand
+  sparkle on
 ",
         ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);

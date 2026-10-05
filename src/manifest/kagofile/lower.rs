@@ -16,12 +16,14 @@ use crate::manifest::schema::{
     RawTargets, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
+use crate::manifest::{Brand, parse_color};
 use crate::package::{Arch, Artifact, Libc, Os};
 
 /// what one Kagofile lowers to.
 pub struct Lowered {
     pub raw: RawManifest,
     pub sources: Vec<Source>,
+    pub brand: Brand,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -62,6 +64,7 @@ pub fn lower(
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
         pending: Vec::new(),
+        brand: Brand::default(),
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -120,6 +123,7 @@ struct Lower<'a> {
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
     pending: Vec<Pending>,
+    brand: Brand,
 }
 
 fn spanned(word: &Word) -> Spanned<String> {
@@ -165,6 +169,7 @@ impl Lower<'_> {
             "package" => self.package_block(node),
             "target" => self.target(node),
             "license" => self.license(node),
+            "brand" => self.brand_block(node),
             _ => self.item(node, &Scope::default()),
         }
     }
@@ -744,6 +749,61 @@ impl Lower<'_> {
             .extend(artifacts.iter().map(spanned));
     }
 
+    /// `brand` with `text`, `accent`, `logo`, `header`, `side`, `welcome`,
+    /// `finish` and `link` lines. colors go without `#`, which starts a
+    /// comment: `accent 6667ab`.
+    fn brand_block(&mut self, node: &Node) {
+        if !node.args().is_empty() {
+            self.syntax(
+                node.at(),
+                "`brand` takes its settings on the lines under it",
+            );
+        }
+        for child in &node.children {
+            self.no_children(child);
+            let args = child.args();
+            if args.is_empty() {
+                self.syntax(child.at(), format!("`{}` needs a value", child.keyword()));
+                continue;
+            }
+            let image = |l: &mut Self| {
+                if let [file] = args {
+                    Some(l.reference(file).into_inner())
+                } else {
+                    l.syntax(
+                        child.at(),
+                        format!("`{}` takes one PNG file", child.keyword()),
+                    );
+                    None
+                }
+            };
+            match child.keyword() {
+                "text" => self.brand.text = Some(rest(args)),
+                "welcome" => self.brand.welcome = Some(rest(args)),
+                "finish" => self.brand.finish = Some(rest(args)),
+                "accent" => match parse_color(&args[0].text) {
+                    Ok(rgb) => self.brand.accent = Some(rgb),
+                    Err(e) => self.error(diagnostic::MANIFEST_VALUE, args[0].at, e),
+                },
+                "logo" => self.brand.logo = image(self),
+                "header" => self.brand.header = image(self),
+                "side" => self.brand.side = image(self),
+                "link" => match args {
+                    [label, url] => {
+                        self.brand.link = Some((label.text.clone(), url.text.clone()));
+                    }
+                    _ => self.syntax(child.at(), "expected `link \"Label\" <url>`"),
+                },
+                other => self.syntax(
+                    child.at(),
+                    format!(
+                        "unknown brand field `{other}`; expected text, accent, logo, header, side, welcome, finish or link"
+                    ),
+                ),
+            }
+        }
+    }
+
     fn license(&mut self, node: &Node) {
         self.no_children(node);
         match node.args() {
@@ -928,6 +988,7 @@ impl Lower<'_> {
         let lowered = Lowered {
             raw,
             sources: self.sources,
+            brand: self.brand,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),
