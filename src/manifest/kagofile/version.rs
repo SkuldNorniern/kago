@@ -1,5 +1,8 @@
-//! `version 1.2.0`, `version from cargo [file]`, `version from file <file>`,
-//! `version from git`.
+//! `version 1.2.0`, or read from the project: `version from toml <file>
+//! <key>` (like `pyproject.toml project.version`), `version from json
+//! <file> <key>` (like `package.json version`), `version from file
+//! <file>`, `version from git`, and `version from cargo [file]` for a
+//! Cargo.toml.
 
 use std::path::Path;
 use std::process::Command;
@@ -20,8 +23,13 @@ pub fn read(args: &[Word], base: &Path) -> Result<String, String> {
                 .map(|s| s.trim().to_owned())
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))
         }
+        ["from", "toml", file, key] => toml(&base.join(file), key),
+        ["from", "json", file, key] => json(&base.join(file), key),
         ["from", "git"] => git(base),
-        _ => Err("expected `version <x.y.z>` or `version from cargo|file <path>|git`".to_owned()),
+        _ => Err(
+            "expected `version <x.y.z>` or `version from toml <file> <key>|json <file> <key>|file <file>|git|cargo`"
+                .to_owned(),
+        ),
     }
 }
 
@@ -57,6 +65,65 @@ fn cargo(path: &Path) -> Result<String, String> {
         "no `version` in the [package] of {}",
         path.display()
     ))
+}
+
+/// the text at a dotted `key` like `project.version` in a TOML file: a
+/// `key = "text"` line under its `[table]` header. enough for the project
+/// files versions live in, without a TOML parser.
+fn toml(path: &Path, key: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let mut table = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(header) = line.strip_prefix('[') {
+            header
+                .trim_start_matches('[')
+                .split(']')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .clone_into(&mut table);
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim().trim_matches('"');
+        let full = if table.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{table}.{name}")
+        };
+        if full != key {
+            continue;
+        }
+        let value = value.trim();
+        let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'');
+        if let Some(q) = quote
+            && let Some(end) = value[1..].find(q)
+        {
+            return Ok(value[1..=end].to_owned());
+        }
+        return Err(format!(
+            "`{key}` in {} is not text in quotes",
+            path.display()
+        ));
+    }
+    Err(format!("no `{key}` in {}", path.display()))
+}
+
+/// the text at a dotted `key` like `version` in a JSON file.
+fn json(path: &Path, key: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    key.split('.')
+        .try_fold(&value, |at, name| at.get(name))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| format!("no text at `{key}` in {}", path.display()))
 }
 
 /// newest tag, without a leading `v`.
@@ -109,6 +176,24 @@ mod tests {
             "2.0.0"
         );
         assert!(read(&w(&["from", "nowhere"]), &dir).is_err());
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[build-system]\nversion = \"0\"\n[project]\nname = \"x\"\nversion = '3.1.0'\n[tool.poetry]\nversion = \"9\"\n",
+        )
+        .unwrap();
+        let toml = |key: &str| read(&w(&["from", "toml", "pyproject.toml", key]), &dir);
+        assert_eq!(toml("project.version").unwrap(), "3.1.0");
+        assert_eq!(toml("tool.poetry.version").unwrap(), "9");
+        assert!(toml("project.nope").is_err());
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{"name":"x","version":"4.0.1","engines":{"node":"20"}}"#,
+        )
+        .unwrap();
+        let json = |key: &str| read(&w(&["from", "json", "package.json", key]), &dir);
+        assert_eq!(json("version").unwrap(), "4.0.1");
+        assert_eq!(json("engines.node").unwrap(), "20");
+        assert!(json("engines").is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
