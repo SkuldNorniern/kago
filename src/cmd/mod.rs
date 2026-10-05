@@ -27,8 +27,9 @@ commands:
        [--components <a,b>]
                 print what an install would do, without doing it
   build [manifest] [--target <target>] [--scope user|machine]
-        [--components <a,b>] [--out <dir>]
-                build the setup executable (default out: dist)
+        [--components <a,b>] [--out <dir>] [--no-sign]
+                build the setup executable (default out: dist), signed
+                when the Kagofile has a `sign` block
   install [manifest] [--scope user|machine] [--components <a,b>] [--location <dir>]
                 install the manifest on this machine
   uninstall <package-id> [--scope user|machine]

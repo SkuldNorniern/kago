@@ -204,13 +204,37 @@ brand
 
 Images are PNG. They are stored in the setup and scaled for the screen's DPI when the window opens.
 
+### sign
+
+Signs the setup with Authenticode, so UAC shows your name instead of "Unknown publisher" and SmartScreen can build up trust in it. It needs signtool from the Windows SDK; set `KAGO_SIGNTOOL` if it is somewhere unusual.
+
+```
+sign
+  certificate 1A2B3C...                   # thumbprint of a certificate in your Windows store, or on a USB token
+  # certificate env KAGO_CERT             # the same, from an environment variable (CI)
+  # pfx certs/code.pfx env KAGO_PFX_PASS  # a .pfx file; its password only ever comes from the environment
+  # azure metadata.json dlib C:/tools/Azure.CodeSigning.Dlib.dll   # Azure Trusted Signing
+  timestamp http://timestamp.digicert.com # the default
+  programs off                            # leave your own .exe and .dll files unsigned
+```
+
+What gets signed:
+
+- the setup
+- the uninstaller and the runtime it installs
+- your own `.exe` and `.dll` files that are not signed yet
+
+Your files are signed as copies inside the setup; the ones in your build folder stay as they are. `kago build --no-sign` skips signing, for quick test builds.
+
+[Docs/authenticode](../Docs/authenticode) has the background: keys on hardware, timestamps, why a setup is signed last.
+
 ## Commands
 
 ```
 kago init [dir] [--id <package-id>] [--force]   starter Kagofile
 kago check [--target <t>]...                    validate and resolve
 kago plan [--components a,b]                    what an install would do, without doing it
-kago build [--out <dir>] [--components a,b]     the setup exe (default: every component offered)
+kago build [--out <dir>] [--components a,b] [--no-sign]   the setup exe (default: every component offered)
 kago install [--components a,b] [--location <dir>]   install straight from the Kagofile
 kago uninstall <package-id>
 kago verify <package-id>                        compare installed files with the receipt
@@ -241,11 +265,14 @@ The setup says what it will do before it starts:
 - moving the app between per-user and Program Files, removing the other copy
 - refusing to replace a newer version, unless the package has `downgrade allow`
 
+When the app is running, the setup lists it and closes it before replacing its files, like Inno Setup; a silent setup closes it without asking. Only one setup or uninstaller per package runs at a time, and the folder page shows the space needed and free.
+
 An update or repair keeps the components that are installed. A component that is new in this version starts as the package says.
 
 Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 
 - it asks first, then removes everything the install put there, and lists what it kept, like your changed settings
+- a running app is closed first; what stays in use is removed when Windows restarts (for installs for everyone)
 - it looks like the setup did: modern with the brand's accent and the app icon, or native
 - Settings › Apps runs it
 - `uninstall.exe /S` removes the app silently
@@ -254,7 +281,6 @@ Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 ## Not supported yet
 
 - `service` for everyone (a Windows service); per-user sign-in services work
-- code signing; setups are unsigned, so SmartScreen may warn on first run
 - Linux and macOS setups, and MSI, DMG, AppImage, DEB, RPM outputs; `target` lines for them only check the Kagofile
 - building a setup for another OS or architecture than the machine running `kago build`
 - updates from a server (the `update` part of a package)
