@@ -306,6 +306,10 @@ fn runtime_warnings(plan: &kago::install::InstallPlan) -> Vec<String> {
         })
         .collect();
     let shipped: Vec<&str> = files.iter().map(|(_, name)| name.as_str()).collect();
+    // the library's `vcredist` action installs the runtime first.
+    if plan.prerequisites.iter().any(|p| p.id == "vcredist") {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for (source, name) in &files {
         let program = Path::new(name)
@@ -324,7 +328,7 @@ fn runtime_warnings(plan: &kago::install::InstallPlan) -> Vec<String> {
             .collect();
         if !missing.is_empty() {
             out.push(format!(
-                "{name} needs {}, the Visual C++ runtime, which a fresh Windows does not have; build it with `-C target-feature=+crt-static` (in .cargo/config.toml) or ship the DLL next to it",
+                "{name} needs {}, the Visual C++ runtime, which a fresh Windows does not have; link the runtime in (Rust: `-C target-feature=+crt-static` in .cargo/config.toml, C++: `/MT`), ship the DLL next to it, or add `vcredist <vc_redist.x64.exe>` to install it first",
                 missing.join(", ")
             ));
         }
