@@ -513,6 +513,29 @@ impl Run<'_> {
         write(dest)
     }
 
+    /// `{app}/uninstall.exe`: the runtime as a window program, like NSIS's
+    /// uninstaller. owned like any other file, so updates replace it and
+    /// uninstall removes it.
+    fn uninstaller(&mut self) -> Result<PathBuf, Error> {
+        let path: SemanticPath = format!("{{app}}/uninstall{}", std::env::consts::EXE_SUFFIX)
+            .parse()
+            .map_err(|e: crate::manifest::PathError| Error::Other(e.to_string()))?;
+        let dest = self.resolve(&path)?;
+        let mut bytes = fs::read(self.runtime).map_err(|e| Error::io(self.runtime, &e))?;
+        crate::format::setup::make_windowed(&mut bytes);
+        self.place(&dest, |dest| {
+            fs::write(dest, &bytes).map_err(|e| Error::io(dest, &e))
+        })?;
+        let (size, sha256) = hash(&dest).map_err(|e| Error::io(&dest, &e))?;
+        self.resources.push(Resource::File {
+            path,
+            size,
+            sha256,
+            ownership: Ownership::Owned,
+        });
+        Ok(dest)
+    }
+
     fn register(
         &mut self,
         display_name: &str,
@@ -521,6 +544,7 @@ impl Run<'_> {
     ) -> Result<(), Error> {
         let runtime = self.store.runtime_path();
         copy_runtime(self.runtime, &runtime)?;
+        let uninstaller = self.uninstaller()?;
         let scope: Scope = self.plan.scope;
         let registration = Registration {
             package: self.plan.package.clone(),
@@ -534,6 +558,7 @@ impl Run<'_> {
                 runtime.display(),
                 self.plan.package
             ),
+            uninstaller: Some(uninstaller),
             size: self.plan.payload_size(),
         };
         let key = self

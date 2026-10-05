@@ -22,8 +22,10 @@ pub struct Registration {
     pub publisher: Option<String>,
     pub install_location: PathBuf,
     pub icon: Option<PathBuf>,
-    /// full command line that uninstalls this package.
+    /// full command line that uninstalls this package without asking.
     pub uninstall: String,
+    /// the package's own uninstaller, which asks first; what Settings runs.
+    pub uninstaller: Option<PathBuf>,
     pub size: u64,
 }
 

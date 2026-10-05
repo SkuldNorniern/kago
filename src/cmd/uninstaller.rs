@@ -1,0 +1,200 @@
+//! uninstaller mode: kago's runtime saved as `{app}/uninstall.exe`, what
+//! Settings › Apps runs. it finds its package by the folder it sits in,
+//! moves itself to a temp copy (a running program cannot delete itself),
+//! then asks, removes and reports, like an NSIS uninstaller.
+
+use std::path::Path;
+use std::process::{Command, ExitCode};
+
+use kago::install::Scope;
+use kago::manifest::Root;
+use kago::package::PackageId;
+use kago::platform;
+use kago::transaction;
+
+/// the file name the installer gives it.
+fn file_name() -> String {
+    format!("uninstall{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// runs as the uninstaller when started as one. `None` means not one.
+pub fn run() -> Option<ExitCode> {
+    let exe = std::env::current_exe().ok()?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // the temp copy, started by the uninstaller in the app folder.
+    if let [flag, id, rest @ ..] = args.as_slice()
+        && flag == "--uninstall"
+    {
+        let silent = rest.iter().any(|a| is_silent(a));
+        return Some(remove(id, silent, &exe));
+    }
+    let named = exe
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case(&file_name()));
+    let silent = match args.as_slice() {
+        [] => false,
+        [flag] if is_silent(flag) => true,
+        _ => return None,
+    };
+    if !named {
+        return None;
+    }
+    Some(start(&exe, silent))
+}
+
+fn is_silent(arg: &str) -> bool {
+    matches!(arg, "/S" | "/s" | "--silent")
+}
+
+/// finds the package installed in this folder and starts the temp copy.
+fn start(exe: &Path, silent: bool) -> ExitCode {
+    let found = (|| -> Result<PackageId, String> {
+        let platform = platform::host()?;
+        let store =
+            transaction::store(platform.as_ref(), Scope::User).map_err(|e| e.to_string())?;
+        let dir = exe.parent().ok_or("the uninstaller has no folder")?;
+        store
+            .receipts()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|r| r.roots.get(&Root::App).is_some_and(|app| app == dir))
+            .map(|r| r.package)
+            .ok_or_else(|| format!("nothing kago installed lives in {}", dir.display()))
+    })();
+    let package = match found {
+        Ok(package) => package,
+        Err(e) => {
+            eprintln!("uninstall: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let copy = std::env::temp_dir().join(format!(
+        "{package}-uninstall{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    if let Err(e) = std::fs::copy(exe, &copy) {
+        eprintln!("uninstall: cannot prepare {}: {e}", copy.display());
+        return ExitCode::FAILURE;
+    }
+    let mut command = Command::new(&copy);
+    command.arg("--uninstall").arg(package.as_str());
+    if silent {
+        command.arg("--silent");
+    }
+    match command.spawn() {
+        // silent runs wait, so deployment tools get the real exit code.
+        Ok(mut child) if silent => child
+            .wait()
+            .ok()
+            .and_then(|s| s.code())
+            .and_then(|c| u8::try_from(c).ok())
+            .map_or(ExitCode::FAILURE, ExitCode::from),
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("uninstall: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// the temp copy: asks (unless silent), removes, then deletes itself.
+fn remove(id: &str, silent: bool, exe: &Path) -> ExitCode {
+    let code = match PackageId::new(id) {
+        Ok(package) => remove_package(&package, silent),
+        Err(e) => {
+            eprintln!("uninstall: {e}");
+            ExitCode::FAILURE
+        }
+    };
+    delete_later(exe);
+    code
+}
+
+fn remove_package(package: &PackageId, silent: bool) -> ExitCode {
+    let opened = platform::host().and_then(|p| {
+        let store = transaction::store(p.as_ref(), Scope::User).map_err(|e| e.to_string())?;
+        Ok((p, store))
+    });
+    let (platform, store) = match opened {
+        Ok(opened) => opened,
+        Err(e) => {
+            eprintln!("uninstall: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    #[cfg(feature = "gui")]
+    if !silent {
+        let receipt = match store.read_receipt(package) {
+            Ok(Some(receipt)) => receipt,
+            Ok(None) => {
+                eprintln!("uninstall: {package} is not installed");
+                return ExitCode::FAILURE;
+            }
+            Err(e) => {
+                eprintln!("uninstall: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let info = kago::gui::setup::Removing {
+            name: receipt.name.clone(),
+            version: receipt.version.to_string(),
+            location: receipt.roots.get(&Root::App).cloned(),
+        };
+        let package = package.clone();
+        let work = move || {
+            let platform = platform::host()?;
+            let store =
+                transaction::store(platform.as_ref(), Scope::User).map_err(|e| e.to_string())?;
+            transaction::uninstall(&package, platform.as_ref(), &store)
+                .map(|done| kago::gui::setup::Removed {
+                    kept: done.kept,
+                    failed: done.failed,
+                })
+                .map_err(|e| e.to_string())
+        };
+        drop((platform, store));
+        return match kago::gui::setup::run_uninstall(&info, work) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => {
+                eprintln!("uninstall: cannot open the window: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let _ = silent;
+    match transaction::uninstall(package, platform.as_ref(), &store) {
+        Ok(done) if done.failed.is_empty() => ExitCode::SUCCESS,
+        Ok(done) => {
+            for failed in done.failed {
+                eprintln!("could not remove {failed}");
+            }
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("uninstall: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// the temp copy cannot delete itself while running; a hidden helper
+/// waits a moment and deletes it, the way NSIS cleans up its `Au_.exe`.
+fn delete_later(exe: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        /// `CREATE_NO_WINDOW`.
+        const NO_WINDOW: u32 = 0x0800_0000;
+        let script = format!("ping -n 3 127.0.0.1 >nul & del /f /q \"{}\"", exe.display());
+        let _ = Command::new("cmd")
+            .args(["/d", "/c", &script])
+            .creation_flags(NO_WINDOW)
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::fs::remove_file(exe);
+    }
+}

@@ -212,6 +212,10 @@ fn install_then_uninstall_leaves_nothing() {
     let w = World::new("roundtrip");
     let receipt = w.install(MANIFEST).unwrap();
     assert_eq!(fs::read(w.app().join("app.exe")).unwrap(), b"v1");
+    let uninstaller = w
+        .app()
+        .join(format!("uninstall{}", std::env::consts::EXE_SUFFIX));
+    assert_eq!(fs::read(&uninstaller).unwrap(), b"runtime", "the runtime, as the uninstaller");
     assert!(w.app().join("themes/dark.toml").is_file());
     assert!(w.dir.join("machine/start/App.lnk").is_file());
     assert!(w.fake.path.borrow().contains(&w.app()));

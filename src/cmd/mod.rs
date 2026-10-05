@@ -5,6 +5,7 @@ mod init;
 mod lifecycle;
 mod plan;
 pub mod setup;
+pub mod uninstaller;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

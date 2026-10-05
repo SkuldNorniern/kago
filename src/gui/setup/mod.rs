@@ -6,7 +6,10 @@
 mod modern;
 mod native;
 mod text;
+mod uninstall;
 mod wizard;
+
+pub use uninstall::{Removed, Removing, run as run_uninstall};
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};

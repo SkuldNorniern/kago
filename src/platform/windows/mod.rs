@@ -172,7 +172,11 @@ impl Platform for Windows {
         if let Some(icon) = &r.icon {
             key.set_text("DisplayIcon", &icon.display().to_string(), false)?;
         }
-        key.set_text("UninstallString", &r.uninstall, false)?;
+        let asking = r
+            .uninstaller
+            .as_ref()
+            .map_or_else(|| r.uninstall.clone(), |u| format!("\"{}\"", u.display()));
+        key.set_text("UninstallString", &asking, false)?;
         key.set_text("QuietUninstallString", &r.uninstall, false)?;
         key.set_dword("NoModify", 1)?;
         key.set_dword("NoRepair", 1)?;
