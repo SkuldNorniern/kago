@@ -197,6 +197,10 @@ pub struct Folder {
 /// whether a folder can take the install, for everyone (true) or not.
 pub type FolderCheck = Box<dyn Fn(&Path, bool) -> Result<(), LocationError>>;
 
+/// names of the programs using the installed files, which installing
+/// closes first.
+pub type Running = Box<dyn Fn() -> Vec<String>>;
+
 /// starts the setup again with administrator rights, to install for
 /// everyone what the person picked. `Ok` once it runs; the window closes.
 pub type Elevate = Box<dyn Fn(&Picked) -> Result<(), crate::platform::ElevationError>>;
@@ -281,7 +285,7 @@ pub fn run<F>(
     look: SetupLook,
     info: &Info,
     folder: Option<Folder>,
-    elevate: Option<Elevate>,
+    (elevate, running): (Option<Elevate>, Option<Running>),
     install: F,
 ) -> AureaResult<bool>
 where
@@ -290,6 +294,7 @@ where
     let lang = Lang::detect();
     let mut session = Session::new(info, folder, install);
     session.elevate = elevate;
+    session.running = running;
     session.lang = lang;
     if let Some(picked) = &info.picked {
         session.resume(picked);
@@ -312,6 +317,8 @@ struct Session {
     install: Option<Work>,
     /// hands an install for everyone to an elevated setup.
     elevate: Option<Elevate>,
+    /// programs using the installed files, which installing closes.
+    running: Option<Running>,
     /// the install went to the elevated setup.
     handed_off: bool,
     lang: Lang,
@@ -341,6 +348,7 @@ impl Session {
             app_folder: crate::install::folder_name(&info.name),
             install: Some(Box::new(install)),
             elevate: None,
+            running: None,
             handed_off: false,
             lang: Lang::En,
             tx,
@@ -352,6 +360,8 @@ impl Session {
     /// and starts installing.
     fn resume(&mut self, picked: &Picked) {
         self.wizard.accepted = true;
+        // the window that asked for administrator rights asked this too.
+        self.wizard.close_ok = true;
         self.wizard.pick(&picked.components);
         if let Some(dir) = &picked.location {
             self.set_location(dir);
@@ -378,6 +388,15 @@ impl Session {
                     location: self.wizard.chosen_location(),
                     for_everyone: self.wizard.for_everyone,
                 };
+                if !self.wizard.close_ok
+                    && let Some(running) = &self.running
+                {
+                    let programs = running();
+                    if !programs.is_empty() {
+                        self.wizard.must_close(programs);
+                        return false;
+                    }
+                }
                 if picked.for_everyone
                     && let Some(elevate) = &self.elevate
                 {

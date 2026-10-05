@@ -14,6 +14,8 @@ pub enum Page {
     Scope,
     Components,
     Directory,
+    /// programs use the installed files; installing closes them.
+    Running,
     Installing,
     Done,
     Failed,
@@ -90,6 +92,10 @@ pub struct Wizard {
     pub notice: Option<String>,
     /// the page installing started from, to go back to when it cannot.
     before: Page,
+    /// programs using the installed files, shown on the running page.
+    pub running: Vec<String>,
+    /// the person agreed to close them.
+    pub close_ok: bool,
     /// why `location` cannot be used, if it cannot.
     pub folder_error: Option<LocationError>,
     /// a newer version is installed that this one may not replace.
@@ -133,6 +139,8 @@ impl Wizard {
             other: None,
             notice: None,
             before: Page::Welcome,
+            running: Vec::new(),
+            close_ok: false,
             folder_error: None,
             fraction: 0.0,
             log: Vec::new(),
@@ -281,6 +289,11 @@ impl Wizard {
                 self.next()
             }
             (Page::License, Action::Next) if !self.can_go_on() => Outcome::Stay,
+            (Page::Running, Action::Next) => {
+                self.close_ok = true;
+                self.start()
+            }
+            (Page::Running, Action::Back) => self.show(self.before),
             (_, Action::Next) if choosing => self.next(),
             (_, Action::Back) if choosing => self.back(),
             (Page::Welcome | Page::License, Action::Install) => {
@@ -382,7 +395,9 @@ impl Wizard {
         if self.folder_error.is_some() || self.blocked {
             return Outcome::Stay;
         }
-        self.before = self.page;
+        if self.page != Page::Running {
+            self.before = self.page;
+        }
         self.notice = None;
         self.page = Page::Installing;
         Outcome::Start
@@ -398,6 +413,12 @@ impl Wizard {
         for i in 0..self.offers.len() {
             self.chosen[i] = self.locked(i) || components.contains(&self.offers[i].id);
         }
+    }
+
+    /// installing has to close `programs` first: asks on the running page.
+    pub fn must_close(&mut self, programs: Vec<String>) {
+        self.running = programs;
+        self.page = Page::Running;
     }
 
     /// installing could not start after all: back where it started from,
@@ -636,6 +657,23 @@ mod tests {
         w.act(Action::SetEveryone(true));
         assert_eq!(w.location, Some(PathBuf::from("/pf/Ozone")));
         assert!(w.folder_open && w.notice.is_none());
+    }
+
+    #[test]
+    fn running_programs_are_closed_only_once_agreed() {
+        let mut w = plain(Some(false));
+        w.act(Action::Next);
+        assert_eq!(w.act(Action::Next), Outcome::Start);
+        w.must_close(vec!["Ozone".into()]);
+        assert_eq!(w.page, Page::Running);
+        w.act(Action::Back);
+        assert_eq!(w.page, Page::License, "back where installing started");
+        assert_eq!(w.act(Action::Next), Outcome::Start);
+        w.must_close(vec!["Ozone".into()]);
+        assert_eq!(w.act(Action::Next), Outcome::Start);
+        assert!(w.close_ok);
+        w.not_started("no".into());
+        assert_eq!(w.page, Page::License);
     }
 
     #[test]

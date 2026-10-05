@@ -292,6 +292,15 @@ fn ask(
             color::TEXT,
         )?;
     }
+    if let Some(note) = s.info.running_note(lang) {
+        let y = body.y + used + 14.0 + if s.info.location.is_some() { 76.0 } else { 0.0 };
+        pen.wrapped(
+            &note,
+            Area::new(body.x, y, body.w, 40.0),
+            &pen.font(13.0),
+            color::WARN,
+        )?;
+    }
     buttons(
         pen,
         frame,

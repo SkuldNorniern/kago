@@ -149,8 +149,10 @@ impl State {
         let action = match (wizard.page, hit) {
             (Page::Welcome | Page::License, Hit::Primary) => Action::Install,
             (Page::Welcome, Hit::Secondary) | (Page::Failed, _) => Action::Cancel,
-            (Page::Welcome, Hit::License) | (Page::Done, Hit::Primary) => Action::Next,
-            (Page::License, Hit::Secondary) => Action::Back,
+            (Page::Welcome, Hit::License) | (Page::Done | Page::Running, Hit::Primary) => {
+                Action::Next
+            }
+            (Page::License | Page::Running, Hit::Secondary) => Action::Back,
             (_, Hit::Accept) => Action::ToggleAccept,
             (_, Hit::Browse) => {
                 self.want_browse = true;
@@ -397,6 +399,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
             welcome(&mut pen, &mut frame, s, body, footer)?;
         }
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
+        Page::Running => running(&mut pen, &mut frame, s, body, footer)?,
         Page::Installing => installing(&mut pen, &mut frame, s, body)?,
         Page::Done => done(&mut pen, &mut frame, s, body, footer)?,
         Page::Failed => failed(&mut pen, &mut frame, s, body, footer)?,
@@ -949,6 +952,63 @@ fn license(
         frame,
         footer,
         (lang.line(wizard.existing.verb()), wizard.can_go_on()),
+        Some(lang.line(Line::Return)),
+    )
+}
+
+/// the programs installing has to close, and a word to save first.
+fn running(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    s: &State,
+    body: Area,
+    footer: Area,
+) -> AureaResult<()> {
+    let lang = s.lang;
+    let wizard = &s.session.wizard;
+    pen.text(
+        lang.line(Line::RunningTitle),
+        body.x,
+        body.y,
+        &pen.bold(18.0),
+        color::TEXT,
+    )?;
+    let used = pen.wrapped(
+        lang.line(Line::RunningBody),
+        Area::new(body.x, body.y + 32.0, body.w, 40.0),
+        &pen.font(14.0),
+        color::DIM,
+    )?;
+    let top = body.y + 40.0 + used;
+    let well = Area::new(body.x, top, body.w, (body.bottom() - top - 30.0).max(40.0));
+    panel(pen, well)?;
+    let font = pen.font(14.0);
+    let inner = well.inset(14.0);
+    for (i, name) in wizard.running.iter().enumerate() {
+        #[allow(clippy::cast_precision_loss)]
+        let y = inner.y + i as f32 * 22.0;
+        if y + 22.0 > inner.bottom() {
+            break;
+        }
+        pen.circle(inner.x + 4.0, y + 10.0, 3.0, color::WARN)?;
+        pen.clipped(
+            name,
+            Area::new(inner.x + 16.0, y, inner.w - 16.0, 20.0),
+            &font,
+            color::TEXT,
+        )?;
+    }
+    pen.clipped(
+        lang.line(Line::RunningNote),
+        Area::new(body.x, well.bottom() + 8.0, body.w, 18.0),
+        &pen.font(12.0),
+        color::WARN,
+    )?;
+    buttons(
+        pen,
+        frame,
+        footer,
+        (lang.line(wizard.existing.verb()), true),
         Some(lang.line(Line::Return)),
     )
 }

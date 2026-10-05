@@ -86,6 +86,18 @@ impl Receipt {
         Some(out)
     }
 
+    /// where every installed file is, for finding programs that use them.
+    #[must_use]
+    pub fn files(&self) -> Vec<PathBuf> {
+        self.resources
+            .iter()
+            .filter_map(|r| match r {
+                Resource::File { path, .. } => self.absolute(path),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// pretty JSON, stable field order.
     ///
     /// # Panics

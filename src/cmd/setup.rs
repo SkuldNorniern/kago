@@ -334,7 +334,8 @@ fn window(
             launch: done.launch,
         })
     };
-    match run(look, &info, folder, elevate, work) {
+    let running = running_check(plan.package.clone());
+    match run(look, &info, folder, (elevate, Some(running)), work) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -454,6 +455,32 @@ enum Stage<'a> {
     Apply(&'a Operation),
 }
 
+/// the programs using what `package` installed, for the window to ask
+/// before closing them.
+#[cfg(feature = "gui")]
+fn running_check(package: kago::package::PackageId) -> kago::gui::setup::Running {
+    Box::new(move || {
+        platform::host()
+            .ok()
+            .map(|p| installed_files(p.as_ref(), &package))
+            .and_then(|files| platform::programs_using(&files).ok())
+            .unwrap_or_default()
+    })
+}
+
+/// every file the package has installed, for everyone or just this user.
+fn installed_files(
+    platform: &dyn kago::platform::Platform,
+    package: &kago::package::PackageId,
+) -> Vec<PathBuf> {
+    [Scope::User, Scope::Machine]
+        .into_iter()
+        .filter_map(|scope| transaction::store(platform, scope).ok())
+        .filter_map(|store| store.read_receipt(package).ok().flatten())
+        .flat_map(|receipt| receipt.files())
+        .collect()
+}
+
 /// the same package installed in the other scope, with that scope's store.
 fn other_install(
     platform: &dyn kago::platform::Platform,
@@ -561,6 +588,11 @@ fn install(
         };
         let runtime = staging.join(format!("kago{}", std::env::consts::EXE_SUFFIX));
         setup::extract_stub(exe, embedded, &runtime).map_err(|e| e.to_string())?;
+        // the installed app, or anything else using its files, is closed:
+        // the window asked first; a silent install closes it like Inno's
+        // CloseApplications.
+        platform::close_programs(&installed_files(platform.as_ref(), &plan.package))
+            .map_err(|e| format!("cannot close the programs using {}: {e}", plan.name))?;
         // the same package installed the other way (just for this user, or
         // for everyone) goes first, so there are never two. what ownership
         // keeps, like user data, stays.

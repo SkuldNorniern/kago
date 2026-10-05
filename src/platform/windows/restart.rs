@@ -111,14 +111,27 @@ pub fn close_programs(files: &[PathBuf]) -> Result<(), String> {
     }
     // SAFETY: a live session; no status callback.
     let asked = unsafe { RmShutdown(session.0, 0, None) };
-    if asked == ERROR_SUCCESS && session.programs()?.is_empty() {
+    if asked == ERROR_SUCCESS && settled(files)? {
         return Ok(());
     }
     // SAFETY: as above.
     let forced = unsafe { RmShutdown(session.0, RmForceShutdown.0.cast_unsigned(), None) };
     check(forced, "close programs")?;
-    match session.programs()?.as_slice() {
-        [] => Ok(()),
-        left => Err(format!("still running: {}", left.join(", "))),
+    if settled(files)? {
+        return Ok(());
     }
+    Err(format!("still running: {}", programs_using(files)?.join(", ")))
+}
+
+/// whether every program let go of the files within a few seconds: a
+/// closing program takes a moment to exit. a new session each time, as
+/// the one that closed them keeps listing them as stopped.
+fn settled(files: &[PathBuf]) -> Result<bool, String> {
+    for _ in 0..30 {
+        if programs_using(files)?.is_empty() {
+            return Ok(true);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Ok(false)
 }

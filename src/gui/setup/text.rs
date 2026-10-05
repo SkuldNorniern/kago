@@ -44,6 +44,10 @@ pub enum Line {
     Everyone,
     JustMeNote,
     AdminDeclined,
+    RunningTitle,
+    RunningBody,
+    RunningNote,
+    UninstallRunning,
     ComponentsTitle,
     ComponentsBody,
     Components,
@@ -253,6 +257,19 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::AdminDeclined => [
             "Administrator rights were not given. Install only for you, or try again.",
             "관리자 권한을 받지 못했습니다. 현재 사용자용으로 설치하거나 다시 시도하세요.",
+        ],
+        Line::RunningTitle => ["Close Applications", "프로그램 닫기"],
+        Line::RunningBody => [
+            "These programs use files Setup has to replace.",
+            "설치 프로그램이 바꿔야 하는 파일을 다음 프로그램이 사용하고 있습니다.",
+        ],
+        Line::RunningNote => [
+            "Setup will close them. Save your work in them first.",
+            "설치 프로그램이 이 프로그램들을 닫습니다. 먼저 작업을 저장하세요.",
+        ],
+        Line::UninstallRunning => [
+            "These programs will be closed: {item}",
+            "다음 프로그램을 닫습니다: {item}",
         ],
         Line::ComponentsTitle => ["Choose Components", "구성 요소 선택"],
         Line::ComponentsBody => [

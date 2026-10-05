@@ -398,6 +398,16 @@ fn render(
             buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
+        Page::Running => {
+            window.add(header(Line::RunningTitle, Line::RunningBody)?)?;
+            window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
+            let list = wizard.running.join("\n");
+            body.add_weighted(TextView::with_content(false, &list)?, 1.0)?;
+            body.add(Label::new(lang.line(Line::RunningNote))?)?;
+            buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
+            buttons.add(button(lang.line(wizard.existing.verb()), tx, Action::Next)?)?;
+            buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
+        }
         Page::Installing => {
             window.add(header(Line::InstallingTitle, Line::InstallingBody)?)?;
             window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;

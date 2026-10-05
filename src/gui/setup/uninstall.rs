@@ -34,6 +34,8 @@ pub struct Removing {
     pub text: Option<String>,
     /// the app's icon, for the modern look.
     pub logo: Option<Rgba>,
+    /// programs using its files, which removing closes.
+    pub running: Vec<String>,
 }
 
 /// what an uninstall left behind.
@@ -43,6 +45,18 @@ pub struct Removed {
     pub kept: Vec<String>,
     /// files that could not be removed, like one still in use.
     pub failed: Vec<String>,
+}
+
+impl Removing {
+    /// which programs removing closes, when any run.
+    pub(super) fn running_note(&self, lang: Lang) -> Option<String> {
+        (!self.running.is_empty()).then(|| {
+            lang.fill(
+                Line::UninstallRunning,
+                &[("item", &self.running.join(", "))],
+            )
+        })
+    }
 }
 
 impl Removed {
@@ -209,6 +223,9 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
             body.add(Label::new(&fill(Line::UninstallAsk))?)?;
             if let Some(location) = &info.location {
                 body.add(Label::new(&format!("    {}", location.display()))?)?;
+            }
+            if let Some(note) = info.running_note(lang) {
+                body.add(Label::new(&note)?)?;
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Uninstall), tx, || Message::Remove)?)?;

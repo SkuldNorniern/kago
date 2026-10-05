@@ -175,6 +175,7 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
             accent: look.as_ref().and_then(|l| l.accent),
             text: look.and_then(|l| l.text),
             logo: installed_icon(&receipt),
+            running: platform::programs_using(&receipt.files()).unwrap_or_default(),
         };
         let package = package.clone();
         let work = move || {
@@ -237,6 +238,11 @@ fn uninstall_retrying(
     platform: &dyn platform::Platform,
     store: &transaction::Store,
 ) -> Result<transaction::Uninstalled, transaction::Error> {
+    // what still runs from the app folder goes first; what cannot be
+    // closed shows up as not removed.
+    if let Ok(Some(receipt)) = store.read_receipt(package) {
+        let _ = platform::close_programs(&receipt.files());
+    }
     let mut done = transaction::uninstall(package, platform, store)?;
     for _ in 0..20 {
         if done.failed.is_empty() {
