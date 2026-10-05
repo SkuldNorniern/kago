@@ -2,4 +2,5 @@
 
 pub mod ico;
 pub mod image;
+pub mod pe;
 pub mod setup;

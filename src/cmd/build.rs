@@ -31,6 +31,9 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     let Some((loaded, plan)) = plan::build(args, target, true)? else {
         return Ok(ExitCode::FAILURE);
     };
+    for warning in runtime_warnings(&plan) {
+        eprintln!("warning: {warning}");
+    }
     let out_dir = PathBuf::from(args.value("--out").unwrap_or("dist"));
     fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let name = folder_name(&plan.name).replace(' ', "-");
@@ -73,6 +76,54 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     println!("  sha256 {digest}");
     println!("  unsigned");
     Ok(ExitCode::SUCCESS)
+}
+
+/// programs in the payload that need the Visual C++ runtime, which a fresh
+/// Windows does not have, unless the payload ships that DLL itself.
+fn runtime_warnings(plan: &kago::install::InstallPlan) -> Vec<String> {
+    use kago::format::pe;
+    use kago::install::Operation;
+
+    let files: Vec<(&Path, String)> = plan
+        .operations
+        .iter()
+        .filter_map(|op| match op {
+            Operation::InstallFile { source, target, .. } => {
+                let name = target
+                    .segments()
+                    .last()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                Some((source.as_path(), name))
+            }
+            _ => None,
+        })
+        .collect();
+    let shipped: Vec<&str> = files.iter().map(|(_, name)| name.as_str()).collect();
+    let mut out = Vec::new();
+    for (source, name) in &files {
+        let program = Path::new(name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("dll"));
+        if !program {
+            continue;
+        }
+        let Ok(bytes) = fs::read(source) else {
+            continue;
+        };
+        let imports = pe::imports(&bytes);
+        let missing: Vec<&str> = pe::needs_vc_runtime(&imports)
+            .into_iter()
+            .filter(|dll| !shipped.contains(dll))
+            .collect();
+        if !missing.is_empty() {
+            out.push(format!(
+                "{name} needs {}, the Visual C++ runtime, which a fresh Windows does not have; build it with `-C target-feature=+crt-static` (in .cargo/config.toml) or ship the DLL next to it",
+                missing.join(", ")
+            ));
+        }
+    }
+    out
 }
 
 /// the brand's PNGs as setup assets, each checked to decode. without a
