@@ -96,7 +96,9 @@ The first block. Only the id and `version` are required.
 | `setup modern` / `setup native` | the look; modern by default |
 | `folder choose` / `folder fixed` | whether people may pick the install folder; choose by default |
 | `downgrade deny` / `downgrade allow` | whether an older version may replace a newer one; deny by default |
-| `scope machine` / `scope user` | for everyone in Program Files (the default; the setup asks for administrator rights), or just for the current user in `%LOCALAPPDATA%\Programs`, with no prompt |
+| `scope machine` / `scope user` / `scope choose` | for everyone in Program Files (the default; the setup asks for administrator rights), just for the current user in `%LOCALAPPDATA%\Programs` with no prompt, or let the person installing pick |
+
+With `scope choose` the setup shows "Install for: Everyone / Only for me", starting on everyone, or on wherever it is installed already. The window opens without administrator rights. Only when the person picks everyone and clicks Install does Windows ask, and the setup carries on as administrator. PATH entries follow the pick. A `service` needs `scope user` under it.
 
 ### files
 
@@ -225,6 +227,7 @@ For rollouts with Intune, SCCM, a script or similar:
 <setup>.exe                                   the window
 <setup>.exe --silent                          no window, defaults (also /S, like NSIS)
 <setup>.exe --silent --components steamvr,docs --location D:\Apps\Aira
+<setup>.exe --silent --scope user             with scope choose: just this user
 <setup>.exe --help
 ```
 
@@ -238,9 +241,12 @@ The setup says what it will do before it starts:
 - moving the app between per-user and Program Files, removing the other copy
 - refusing to replace a newer version, unless the package has `downgrade allow`
 
+An update or repair keeps the components that are installed. A component that is new in this version starts as the package says.
+
 Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 
 - it asks first, then removes everything the install put there, and lists what it kept, like your changed settings
+- it looks like the setup did: modern with the brand's accent and the app icon, or native
 - Settings › Apps runs it
 - `uninstall.exe /S` removes the app silently
 - `QuietUninstallString` (the command-line runtime) gives tools a real exit code
