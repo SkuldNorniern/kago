@@ -2,21 +2,8 @@
 //! machine first, like the Visual C++ runtime. it ships inside the setup
 //! and runs only when its check says it is missing.
 
-use super::Detect;
+use super::Check;
 use crate::diagnostic::Location;
-
-/// how to tell whether something is on the machine already.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum Check {
-    /// a registry key, like `HKLM\SOFTWARE\...`, and optionally a value in
-    /// it that has to be there and not 0 or empty.
-    Registry { key: String, value: Option<String> },
-    /// a file, with `%VARIABLES%` like `%ProgramFiles%` expanded.
-    File { path: String },
-    /// something kago knows how to look for, like SteamVR.
-    Known { detect: Detect },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prerequisite {

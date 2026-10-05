@@ -148,7 +148,7 @@ fn unmet(plan: &InstallPlan, platform: &dyn Platform) -> Vec<String> {
                             .os_version()
                             .is_some_and(|have| at_least(&have, minimum))
                 }
-                Need::Software { detect } => platform.has(*detect),
+                Need::Software { detect } => platform.satisfied(&detect.check),
             };
             (!met).then(|| need.to_string())
         })

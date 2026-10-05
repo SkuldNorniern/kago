@@ -78,7 +78,7 @@ pub struct RawComponent {
     pub required: Option<bool>,
     pub default: Option<bool>,
     pub depends: Vec<Spanned<String>>,
-    pub detect: Option<Spanned<String>>,
+    pub detect: Option<super::Detect>,
 }
 
 #[derive(Debug)]
@@ -148,6 +148,7 @@ pub struct RawRequirement {
     pub policy: Option<Spanned<String>>,
     pub version: Option<String>,
     pub minimum: Option<String>,
+    pub detect: Option<super::Detect>,
     pub when: Option<RawWhen>,
 }
 

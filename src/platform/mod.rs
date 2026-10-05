@@ -219,8 +219,10 @@ pub trait Platform {
     /// this OS's version as dotted numbers, like `10.0.22631`.
     fn os_version(&self) -> Option<String>;
 
-    /// whether what `detect` names is on this machine.
-    fn has(&self, detect: crate::manifest::Detect) -> bool;
+    /// whether `check` finds what it looks for on this machine.
+    fn satisfied(&self, check: &crate::manifest::Check) -> bool {
+        satisfied(check)
+    }
 
     /// # Errors
     ///
@@ -283,29 +285,23 @@ pub fn host() -> Result<Box<dyn Platform>, String> {
     }
 }
 
-/// whether what a component's `detect` names is on this machine. unknown
-/// off Windows for now, which counts as present: nothing is unticked on a
-/// guess.
-#[must_use]
-pub fn detect(detect: crate::manifest::Detect) -> bool {
-    #[cfg(windows)]
-    {
-        windows::detect(detect)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = detect;
-        true
-    }
-}
-
 /// whether `check` finds what it looks for on this machine.
 #[must_use]
 pub fn satisfied(check: &crate::manifest::Check) -> bool {
     use crate::manifest::Check;
     match check {
-        Check::Known { detect: d } => detect(*d),
         Check::File { path } => Path::new(&expand_env(path)).exists(),
+        Check::Json { file, key } => json::value(Path::new(&expand_env(file)), key)
+            .ok()
+            .flatten()
+            .is_some_and(|v| match v {
+                serde_json::Value::Null | serde_json::Value::Bool(false) => false,
+                serde_json::Value::Number(n) => n.as_f64() != Some(0.0),
+                serde_json::Value::String(s) => !s.is_empty(),
+                serde_json::Value::Array(a) => !a.is_empty(),
+                serde_json::Value::Object(o) => !o.is_empty(),
+                serde_json::Value::Bool(true) => true,
+            }),
         Check::Registry { key, value } => {
             #[cfg(windows)]
             {
@@ -569,6 +565,29 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[test]
+    fn json_checks_want_something_there() {
+        let dir = std::env::temp_dir().join(format!("kago-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("paths.json");
+        std::fs::write(
+            &file,
+            r#"{"runtime":["C:\\SteamVR"],"empty":[],"off":false}"#,
+        )
+        .unwrap();
+        let check = |key: &str| {
+            satisfied(&crate::manifest::Check::Json {
+                file: file.display().to_string(),
+                key: vec![key.to_owned()],
+            })
+        };
+        assert!(check("runtime"));
+        assert!(!check("empty"));
+        assert!(!check("off"));
+        assert!(!check("missing"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn a_missing_service_reads_as_none() {
         assert_eq!(

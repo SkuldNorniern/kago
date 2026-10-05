@@ -417,8 +417,9 @@ fn window_components(
         .map(|choice| {
             let missing = choice
                 .detect
-                .filter(|d| !platform::detect(*d))
-                .map(|d| d.name().to_owned());
+                .as_ref()
+                .filter(|d| !platform::satisfied(&d.check))
+                .map(|d| d.name.clone());
             kago::gui::setup::Component {
                 id: choice.id.clone(),
                 name: choice.name.clone(),

@@ -789,7 +789,7 @@ fn choices(
                     })
                     .sum(),
                 operations,
-                detect: c.detect,
+                detect: c.detect.clone(),
             })
         })
         .collect()

@@ -2,6 +2,7 @@
 
 mod brand;
 mod change;
+mod check;
 mod firewall;
 mod kagofile;
 mod path;
@@ -19,14 +20,15 @@ use std::path::Path;
 
 pub use brand::{Brand, parse_color};
 pub use change::{Change, Edit, Place, Value};
+pub use check::{Check, Detect};
 pub use firewall::FirewallRule;
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
-    AppKind, Detect, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
+    AppKind, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
     ScopeConflict, SetupLook, Upgrade,
 };
-pub use prerequisite::{Check, Prerequisite, preset};
+pub use prerequisite::{Prerequisite, preset};
 pub use resource::{
     Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
     PathSource, Requirement, RequirementKind, RequirementPolicy, ResourceScope, Service,
@@ -394,7 +396,9 @@ require steamvr
         let m = m.unwrap();
         let c = m.component("steamvr").unwrap();
         assert_eq!(c.description.as_deref(), Some("Shows trackers in SteamVR"));
-        assert_eq!(c.detect, Some(Detect::SteamVr));
+        let detect = c.detect.clone().unwrap();
+        assert_eq!(detect.name, "SteamVR", "from the library");
+        assert!(matches!(detect.check, Check::Json { .. }));
         assert_eq!(
             m.files.last().unwrap().component.as_deref(),
             Some("steamvr")
@@ -404,7 +408,24 @@ require steamvr
   detect unicorn
 ",
         ));
-        assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+        assert_eq!(codes, vec![diagnostic::MANIFEST_REFERENCE]);
+    }
+
+    #[test]
+    fn checks_are_written_in_the_kagofile() {
+        let (m, codes) = check(&with(
+            "check python \"Python 3.12\"\n  registry HKLM\\SOFTWARE\\Python\\PythonCore\\3.12\ncheck steamvr \"My SteamVR\" file %ProgramFiles%/Steam/steam.exe\nrequire python\ncomponent vr VR\n  detect steamvr\n  copy driver\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let m = m.unwrap();
+        let python = m.requirements.iter().find(|r| r.id == "python").unwrap();
+        assert_eq!(python.detect.as_ref().unwrap().name, "Python 3.12");
+        let vr = m.component("vr").unwrap().detect.clone().unwrap();
+        assert_eq!(vr.name, "My SteamVR", "the Kagofile replaces the library's");
+        let (_, codes) = check(&with("check a file x\ncheck a file y\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_DUPLICATE]);
+        let (_, codes) = check(&with("check a \"A\"\n"));
+        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
     }
 
     #[test]

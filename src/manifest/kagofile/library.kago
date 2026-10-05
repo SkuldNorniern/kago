@@ -1,0 +1,7 @@
+# kago's own checks and actions, in the same Kagofile syntax anyone can
+# write. a Kagofile can use them by name, or define its own with the same
+# name to replace them.
+
+# SteamVR writes the runtime folder here once it has run.
+check steamvr "SteamVR"
+  json %LOCALAPPDATA%/openvr/openvrpaths.vrpath runtime

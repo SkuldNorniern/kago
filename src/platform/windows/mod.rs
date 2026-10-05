@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Platform, Registration};
 use crate::install::{Roots, Scope, Slot, folder_name};
-use crate::manifest::{Detect, Root, Value};
+use crate::manifest::{Root, Value};
 use registry::Key;
 
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -66,22 +66,6 @@ pub fn registry_has(key: &str, value: Option<&str>) -> bool {
             .ok()
             .flatten()
             .is_some_and(|t| !t.value.is_empty()),
-    }
-}
-
-pub fn detect(detect: Detect) -> bool {
-    match detect {
-        Detect::SteamVr => openvr_paths().is_ok_and(|f| {
-            super::json::value(&f, &["runtime".to_owned()])
-                .ok()
-                .flatten()
-                .and_then(|r| r.as_array().cloned())
-                .is_some_and(|r| {
-                    r.iter()
-                        .filter_map(serde_json::Value::as_str)
-                        .any(|p| Path::new(p).is_dir())
-                })
-        }),
     }
 }
 
@@ -291,10 +275,6 @@ impl Platform for Windows {
         let minor = key.dword("CurrentMinorVersionNumber").ok()??;
         let build = key.text("CurrentBuildNumber").ok()??.value;
         Some(format!("{major}.{minor}.{build}"))
-    }
-
-    fn has(&self, what: Detect) -> bool {
-        detect(what)
     }
 
     fn create_shortcut(

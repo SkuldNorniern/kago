@@ -20,7 +20,7 @@ impl fmt::Display for Need {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Os { os, minimum } => write!(f, "{} {minimum} or newer", os_name(*os)),
-            Self::Software { detect } => f.write_str(detect.name()),
+            Self::Software { detect } => f.write_str(&detect.name),
         }
     }
 }
@@ -67,11 +67,11 @@ impl Need {
                 }
                 Ok(Self::Os { os, minimum })
             }
-            RequirementKind::Runtime => {
-                r.id.parse::<Detect>()
-                    .map(|detect| Self::Software { detect })
-                    .map_err(|e| unsupported(format!("cannot check for `{}` yet: {e}", r.id)))
-            }
+            RequirementKind::Runtime => r
+                .detect
+                .clone()
+                .map(|detect| Self::Software { detect })
+                .ok_or_else(|| unsupported(format!("no `check {}` to look for it with", r.id))),
             RequirementKind::SystemPackage => Err(unsupported(format!(
                 "system package `{}` cannot be checked yet",
                 r.id
@@ -119,7 +119,10 @@ mod tests {
         };
         assert_eq!(os.to_string(), "Windows 10.0.19041 or newer");
         let vr = Need::Software {
-            detect: Detect::SteamVr,
+            detect: Detect {
+                name: "SteamVR".into(),
+                check: crate::manifest::Check::File { path: "x".into() },
+            },
         };
         assert_eq!(vr.to_string(), "SteamVR");
     }

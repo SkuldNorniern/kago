@@ -2,7 +2,7 @@
 //! keeps the span of the word it came from, so later errors point into the
 //! Kagofile.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde_spanned::Spanned;
@@ -21,6 +21,9 @@ use crate::manifest::{
     TIMESTAMP, Value, parse_color, preset,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
+
+/// kago's own checks and actions, written in Kagofile syntax.
+const LIBRARY: &str = include_str!("library.kago");
 
 /// what one Kagofile lowers to.
 pub struct Lowered {
@@ -77,10 +80,22 @@ pub fn lower(
         update: None,
         firewall: Vec::new(),
         changes: Vec::new(),
+        checks: BTreeMap::new(),
+        library_checks: BTreeSet::new(),
     };
-    // sources first, so references to them work in any order.
+    // sources and checks first, so references to them work in any
+    // order. the library's checks come before the Kagofile's own, which
+    // may replace them.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
         l.source_block(node);
+    }
+    let library = super::tree::parse("kago library", LIBRARY).expect("the library parses");
+    for node in library.iter().filter(|n| n.keyword() == "check") {
+        l.check_block(node);
+    }
+    l.library_checks = l.checks.keys().cloned().collect();
+    for node in nodes.iter().filter(|n| n.keyword() == "check") {
+        l.check_block(node);
     }
     for node in nodes {
         l.top(node);
@@ -141,6 +156,11 @@ struct Lower<'a> {
     update: Option<RawUpdate>,
     firewall: Vec<FirewallRule>,
     changes: Vec<Change>,
+    /// `check` definitions by id.
+    checks: BTreeMap<String, Detect>,
+    /// ids of the checks that came from the library, which a Kagofile may
+    /// define again.
+    library_checks: BTreeSet<String>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -203,7 +223,7 @@ impl Lower<'_> {
 
     fn top(&mut self, node: &Node) {
         match node.keyword() {
-            "source" => {}
+            "source" | "check" => {}
             "package" => self.package_block(node),
             "target" => self.target(node),
             "license" => self.license(node),
@@ -742,6 +762,93 @@ impl Lower<'_> {
         }
     }
 
+    /// `check <id> ["Name"] <test>`, the test on the same line or indented
+    /// under it: `registry <key> [value]`, `file <path>` or `json <file>
+    /// <key.path>`.
+    fn check_block(&mut self, node: &Node) {
+        let usage = "expected `check <id> [\"Name\"]` and `registry <key> [value]`, `file <path>` or `json <file> <key.path>`";
+        let [id, rest_words @ ..] = node.args() else {
+            self.syntax(node.at(), usage);
+            return;
+        };
+        let (name, inline) = match rest_words {
+            [name, rest @ ..] if name.quoted => (name.text.clone(), rest),
+            rest => (id.text.clone(), rest),
+        };
+        let test: &[Word] = match (inline, node.children.as_slice()) {
+            ([_, ..], []) => inline,
+            ([], [child]) => &child.words,
+            _ => {
+                self.syntax(node.at(), usage);
+                return;
+            }
+        };
+        let Some(check) = self.test(test, node.at()) else {
+            return;
+        };
+        if self.checks.contains_key(&id.text) && !self.library_checks.remove(&id.text) {
+            self.error(
+                diagnostic::MANIFEST_DUPLICATE,
+                id.at,
+                format!("check `{}` is declared twice", id.text),
+            );
+            return;
+        }
+        self.checks.insert(id.text.clone(), Detect { name, check });
+    }
+
+    /// a test written out, or the id of a `check`.
+    fn detect(&mut self, words: &[Word], at: usize) -> Option<Detect> {
+        if let [id] = words
+            && !matches!(id.text.as_str(), "registry" | "file" | "json")
+        {
+            let found = self.checks.get(&id.text).cloned();
+            if found.is_none() {
+                self.error(
+                    diagnostic::MANIFEST_REFERENCE,
+                    id.at,
+                    format!(
+                        "no check `{}`; define one with `check {} \"Name\"` and a test under it",
+                        id.text, id.text
+                    ),
+                );
+            }
+            return found;
+        }
+        let check = self.test(words, at)?;
+        let name = words.get(1).map_or_else(String::new, |w| w.text.clone());
+        Some(Detect { name, check })
+    }
+
+    /// `registry <key> [value]`, `file <path>` or `json <file> <key.path>`.
+    fn test(&mut self, words: &[Word], at: usize) -> Option<Check> {
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        match texts.as_slice() {
+            ["registry", key] => Some(Check::Registry {
+                key: (*key).to_owned(),
+                value: None,
+            }),
+            ["registry", key, value] => Some(Check::Registry {
+                key: (*key).to_owned(),
+                value: Some((*value).to_owned()),
+            }),
+            ["file", _, ..] => Some(Check::File {
+                path: rest(&words[1..]),
+            }),
+            ["json", file, key] => Some(Check::Json {
+                file: (*file).to_owned(),
+                key: key.split('.').map(str::to_owned).collect(),
+            }),
+            _ => {
+                self.syntax(
+                    words.first().map_or(at, |w| w.at),
+                    "expected `registry <key> [value]`, `file <path>` or `json <file> <key.path>`",
+                );
+                None
+            }
+        }
+    }
+
     /// `hook <phase> <app> [arguments...]`: runs one of the package's own
     /// programs at an install phase.
     fn hook(&mut self, node: &Node, scope: &Scope) {
@@ -767,7 +874,7 @@ impl Lower<'_> {
     /// `install-if-missing` to ask for more than a check.
     fn require(&mut self, node: &Node, scope: &Scope) {
         self.no_children(node);
-        let usage = "expected `require windows 10.0.19041` or `require steamvr`";
+        let usage = "expected `require windows 10.0.19041` or `require <check>`";
         let mut words: Vec<&Word> = node.args().iter().collect();
         let policy = match words.last() {
             Some(w) if w.text == "install-if-missing" && !w.quoted => words.pop().map(spanned),
@@ -793,12 +900,21 @@ impl Lower<'_> {
             self.when(scope, &[])
         };
         let kind = if is_os { "os" } else { "runtime" };
+        let detect = if is_os {
+            None
+        } else {
+            let Some(d) = self.detect(std::slice::from_ref(*what), what.at) else {
+                return;
+            };
+            Some(d)
+        };
         self.requirements.push(RawRequirement {
             id: spanned(what),
             kind: spanned_text(what, kind.to_owned()),
             policy,
             version: None,
             minimum,
+            detect,
             when,
         });
     }
@@ -934,7 +1050,7 @@ impl Lower<'_> {
                 "about" => description = Some(rest(child.args())),
                 "detect" => {
                     self.no_children(child);
-                    detect = self.one(child);
+                    detect = self.detect(child.args(), child.at());
                 }
                 _ => self.item(child, &inner),
             }
@@ -1129,31 +1245,14 @@ impl Lower<'_> {
                 ("file", [_]) => file = Some(self.reference(&args[0]).into_inner()),
                 ("arguments", _) => arguments = words.iter().map(|w| (*w).to_owned()).collect(),
                 ("admin", []) => admin = true,
-                ("detect", ["registry", key]) => {
-                    check = Some(Check::Registry {
-                        key: (*key).to_owned(),
-                        value: None,
-                    });
+                ("detect", _) => {
+                    if let Some(d) = self.detect(args, child.at()) {
+                        check = Some(d.check);
+                    }
                 }
-                ("detect", ["registry", key, value]) => {
-                    check = Some(Check::Registry {
-                        key: (*key).to_owned(),
-                        value: Some((*value).to_owned()),
-                    });
+                ("file" | "admin", _) => {
+                    self.syntax(child.at(), "expected `file <installer>` or `admin`");
                 }
-                ("detect", ["file", ..]) => {
-                    check = Some(Check::File {
-                        path: rest(&args[1..]),
-                    });
-                }
-                ("detect", [known]) => match known.parse::<Detect>() {
-                    Ok(detect) => check = Some(Check::Known { detect }),
-                    Err(e) => self.error(diagnostic::MANIFEST_VALUE, args[0].at, e),
-                },
-                ("file" | "detect" | "admin", _) => self.syntax(
-                    child.at(),
-                    "expected `file <installer>`, `detect registry <key> [value]`, `detect file <path>`, `detect steamvr` or `admin`",
-                ),
                 (other, _) => self.syntax(
                     child.at(),
                     format!(

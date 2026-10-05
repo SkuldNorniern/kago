@@ -93,22 +93,6 @@ keywords! {
     FolderChoice { Choose => "choose", Fixed => "fixed" }
 }
 
-keywords! {
-    /// `detect` in a component: something on the machine the component is
-    /// for. when it is missing, the setup starts with the component off.
-    Detect { SteamVr => "steamvr" }
-}
-
-impl Detect {
-    /// what people call it.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::SteamVr => "SteamVR",
-        }
-    }
-}
-
 /// `[install]` after defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallPolicy {

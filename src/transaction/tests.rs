@@ -106,8 +106,8 @@ impl Platform for Fake {
         Some("10.0.19045".into())
     }
 
-    fn has(&self, detect: crate::manifest::Detect) -> bool {
-        detect == crate::manifest::Detect::SteamVr && self.has_steamvr
+    fn satisfied(&self, _: &crate::manifest::Check) -> bool {
+        self.has_steamvr
     }
 
     fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {

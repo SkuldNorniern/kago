@@ -1,7 +1,8 @@
 //! checked manifest items that become installed resources.
 
+use super::check::Detect;
 use super::path::SemanticPath;
-use super::policy::{Detect, keywords};
+use super::policy::keywords;
 use super::selector::Selector;
 use crate::diagnostic::Location;
 
@@ -161,6 +162,8 @@ pub struct Requirement {
     pub policy: RequirementPolicy,
     pub version: Option<String>,
     pub minimum: Option<String>,
+    /// for software: how to find it.
+    pub detect: Option<Detect>,
     pub when: Selector,
 }
 
