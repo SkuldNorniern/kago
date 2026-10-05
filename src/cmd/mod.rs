@@ -35,6 +35,7 @@ commands:
                 list installed packages
   recover [--scope user|machine]
                 finish or roll back installs a crash left behind
+  version       print kago's version
 
 manifest is a Kagofile or the directory holding one (default: .)
 targets look like windows-x86_64, macos-aarch64, linux-x86_64-musl
@@ -61,6 +62,10 @@ pub fn run() -> ExitCode {
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
         "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),
         "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
+        "version" | "--version" | "-V" => {
+            println!("kago {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
         "help" | "--help" | "-h" => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
