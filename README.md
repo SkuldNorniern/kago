@@ -225,7 +225,7 @@ Installed apps then update with the kago runtime that the setup puts in place:
 %LOCALAPPDATA%\Kago\bin\kago.exe update dev.eira.aira-studio --silent   # no window
 ```
 
-For installs for everyone the runtime is `%ProgramData%\Kago\bin\kago.exe`, and the setup asks for administrator rights. Your app can run these itself, for example from an "Check for updates" menu. A download is only run when its sha256 matches `latest.json`. The update closes the app if it is still running, so quit it first if you want to restart it afterwards.
+For installs for everyone the runtime is `%ProgramData%\Kago\bin\kago.exe`, and the setup asks for administrator rights. Your app can run these itself, for example from a "Check for updates" menu. A download is only run when its sha256 matches `latest.json`. The update closes the app if it is still running, so quit it first if you want to restart it afterwards.
 
 ### license
 
