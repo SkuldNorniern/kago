@@ -59,8 +59,12 @@ pub fn run() -> ExitCode {
         "plan" => {
             Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
         }
-        "build" => Args::parse(rest, &["--target", "--scope", "--components", "--out"])
-            .and_then(|a| build::run(&a)),
+        "build" => Args::parse_with(
+            rest,
+            &["--target", "--scope", "--components", "--out"],
+            &["--no-sign"],
+        )
+        .and_then(|a| build::run(&a)),
         "install" => Args::parse(rest, &["--scope", "--components", "--location"])
             .and_then(|a| lifecycle::install(&a)),
         "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),

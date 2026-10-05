@@ -19,6 +19,9 @@ use std::path::Path;
 pub use journal::{Entry, Undo};
 pub use recovery::Recovered;
 pub use store::Store;
+
+/// file name of a ready, signed uninstaller staged next to the runtime.
+pub const UNINSTALLER: &str = "uninstall-signed.exe";
 pub use verify::{Verified, verify};
 
 use crate::install::{InstallPlan, Operation, Scope, hash};

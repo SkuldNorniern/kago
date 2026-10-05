@@ -9,6 +9,7 @@ use kago::install::{Sources, folder_name, hash};
 use kago::manifest::Context;
 use kago::package::{Artifact, Os, Target};
 use kago::payload::Payload;
+use kago::sign::Signer;
 
 use super::args::Args;
 use super::check::targets;
@@ -28,8 +29,14 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
             "a {target} setup needs a kago built for {target} as its runtime; build on that machine for now"
         ));
     }
-    let Some((loaded, plan)) = plan::build(args, target, true)? else {
+    let Some((loaded, mut plan)) = plan::build(args, target, true)? else {
         return Ok(ExitCode::FAILURE);
+    };
+    let signer = match &loaded.manifest.sign {
+        Some(sign) if !args.flag("--no-sign") => {
+            Some((Signer::new(sign, &loaded.base)?, sign.programs))
+        }
+        _ => None,
     };
     if let Some(warning) = icon_warning(&loaded, &plan) {
         eprintln!("warning: {warning}");
@@ -54,6 +61,12 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         None => &me,
     };
     let icon = icon(&loaded, target)?;
+    let scratch = out_dir.join(".kago-sign");
+    if let Some((signer, true)) = &signer {
+        sign_programs(signer, &mut plan, &scratch)?;
+    }
+    let stub_bytes = setup::prepare_stub(stub, icon.as_ref(), &out.with_extension("stub"))
+        .map_err(|e| format!("{}: {e}", out.display()))?;
     let brand = &loaded.manifest.brand;
     let presentation = Setup {
         look: loaded.manifest.install.look,
@@ -67,18 +80,117 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
             link: brand.link.clone(),
         },
     };
-    let assets = brand_images(&loaded, target, icon.as_ref())?;
-    let size = setup::build(stub, &plan, &presentation, &assets, icon.as_ref(), &out)
+    let mut assets = brand_images(&loaded, target, icon.as_ref())?;
+    let homepage = loaded.manifest.package.homepage.as_deref();
+    if let Some((signer, _)) = &signer {
+        assets.extend(signed_runtimes(
+            signer,
+            &stub_bytes,
+            &plan.name,
+            homepage,
+            &scratch,
+        )?);
+    }
+    let size = setup::build(&stub_bytes, &plan, &presentation, &assets, &out)
         .map_err(|e| format!("{}: {e}", out.display()))?;
     if stub != me {
         let _ = fs::remove_file(stub);
     }
+    let signature = match &signer {
+        Some((signer, _)) => {
+            signer.sign(&out, &format!("{} Setup", plan.name), homepage)?;
+            Some(signer.trusted(&out))
+        }
+        None => None,
+    };
+    let _ = fs::remove_dir_all(&scratch);
     let (_, digest) = hash(&out).map_err(|e| e.to_string())?;
     println!("{}", out.display());
     println!("  {size} bytes, payload {} bytes", plan.payload_size());
     println!("  sha256 {digest}");
-    println!("  unsigned");
+    println!(
+        "  {}",
+        match signature {
+            None => "unsigned",
+            Some(true) => "signed",
+            Some(false) => "signed, but Windows does not trust the certificate (a test one?)",
+        }
+    );
     Ok(ExitCode::SUCCESS)
+}
+
+/// signs the package's own `.exe` and `.dll` files that are not signed
+/// yet. copies are signed, under `scratch`: the build's files stay as
+/// they are.
+fn sign_programs(
+    signer: &Signer,
+    plan: &mut kago::install::InstallPlan,
+    scratch: &Path,
+) -> Result<(), String> {
+    let name = plan.name.clone();
+    for (i, op) in plan.operations.iter_mut().enumerate() {
+        let kago::install::Operation::InstallFile {
+            source,
+            size,
+            sha256,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        let program = source
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("exe") || e.eq_ignore_ascii_case("dll"));
+        if !program {
+            continue;
+        }
+        let bytes = fs::read(&*source).map_err(|e| format!("{}: {e}", source.display()))?;
+        if kago::format::pe::is_signed(&bytes) {
+            continue;
+        }
+        let file = source.file_name().unwrap_or_default();
+        let copy = scratch.join(i.to_string()).join(file);
+        fs::create_dir_all(copy.parent().unwrap_or(scratch))
+            .and_then(|()| fs::write(&copy, &bytes))
+            .map_err(|e| format!("{}: {e}", copy.display()))?;
+        signer.sign(&copy, &name, None)?;
+        (*size, *sha256) = hash(&copy).map_err(|e| e.to_string())?;
+        println!("  signed {}", source.display());
+        *source = copy;
+    }
+    Ok(())
+}
+
+/// the runtime signed twice over, as a console program for
+/// `QuietUninstallString` and as the windowed `uninstall.exe`: a signed
+/// file cannot be patched later, so the install takes these as they are.
+fn signed_runtimes(
+    signer: &Signer,
+    stub: &[u8],
+    name: &str,
+    homepage: Option<&str>,
+    scratch: &Path,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    fs::create_dir_all(scratch).map_err(|e| format!("{}: {e}", scratch.display()))?;
+    let mut out = Vec::new();
+    for (asset, windowed) in [
+        (setup::RUNTIME_ASSET, false),
+        (setup::UNINSTALLER_ASSET, true),
+    ] {
+        let mut bytes = stub.to_vec();
+        if windowed {
+            setup::make_windowed(&mut bytes);
+        } else {
+            setup::make_console(&mut bytes);
+        }
+        let file = scratch.join(format!("{asset}.exe"));
+        fs::write(&file, &bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+        signer.sign(&file, &format!("{name} Uninstall"), homepage)?;
+        let signed_bytes = fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        out.push((asset.to_owned(), signed_bytes));
+    }
+    Ok(out)
 }
 
 /// the main program shows a blank icon in the Start menu, the taskbar and

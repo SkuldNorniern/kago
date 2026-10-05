@@ -663,7 +663,16 @@ fn install(
             None => plan,
         };
         let runtime = staging.join(format!("kago{}", std::env::consts::EXE_SUFFIX));
-        setup::extract_stub(exe, embedded, &runtime).map_err(|e| e.to_string())?;
+        // a signed setup carries its runtime signed, ready to use as is.
+        match container.asset(setup::RUNTIME_ASSET) {
+            Ok(Some(signed)) => fs::write(&runtime, signed),
+            _ => setup::extract_stub(exe, embedded, &runtime),
+        }
+        .map_err(|e| e.to_string())?;
+        if let Ok(Some(signed)) = container.asset(setup::UNINSTALLER_ASSET) {
+            let uninstaller = runtime.with_file_name(transaction::UNINSTALLER);
+            fs::write(&uninstaller, signed).map_err(|e| e.to_string())?;
+        }
         // the installed app, or anything else using its files, is closed:
         // the window asked first; a silent install closes it like Inno's
         // CloseApplications.

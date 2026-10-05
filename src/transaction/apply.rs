@@ -523,7 +523,14 @@ impl Run<'_> {
             .parse()
             .map_err(|e: crate::manifest::PathError| Error::Other(e.to_string()))?;
         let dest = self.resolve(&path)?;
-        let mut bytes = fs::read(self.runtime).map_err(|e| Error::io(self.runtime, &e))?;
+        // a signed uninstaller staged next to the runtime goes in as it
+        // is: patching a signed file would break its signature.
+        let signed = self.runtime.with_file_name(super::UNINSTALLER);
+        let mut bytes = if signed.is_file() {
+            fs::read(&signed).map_err(|e| Error::io(&signed, &e))?
+        } else {
+            fs::read(self.runtime).map_err(|e| Error::io(self.runtime, &e))?
+        };
         crate::format::setup::make_windowed(&mut bytes);
         self.place(&dest, |dest| {
             fs::write(dest, &bytes).map_err(|e| Error::io(dest, &e))
