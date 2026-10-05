@@ -67,20 +67,12 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     }
     let stub_bytes = setup::prepare_stub(stub, icon.as_ref(), &out.with_extension("stub"))
         .map_err(|e| format!("{}: {e}", out.display()))?;
-    let brand = &loaded.manifest.brand;
-    let presentation = Setup {
-        look: loaded.manifest.install.look,
-        license: license(&loaded, target)?,
-        folder: loaded.manifest.install.folder,
-        brand: SetupBrand {
-            text: brand.text.clone(),
-            accent: brand.accent,
-            welcome: brand.welcome.clone(),
-            finish: brand.finish.clone(),
-            link: brand.link.clone(),
-        },
-    };
+    let presentation = presentation(&loaded, target)?;
     let mut assets = brand_images(&loaded, target, icon.as_ref())?;
+    for p in &plan.prerequisites {
+        let bytes = fs::read(&p.source).map_err(|e| format!("{}: {e}", p.source.display()))?;
+        assets.push((p.asset(), bytes));
+    }
     let homepage = loaded.manifest.package.homepage.as_deref();
     if let Some((signer, _)) = &signer {
         assets.extend(signed_runtimes(
@@ -117,6 +109,23 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         }
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// how the setup window looks and what it asks.
+fn presentation(loaded: &Loaded, target: Target) -> Result<Setup, String> {
+    let brand = &loaded.manifest.brand;
+    Ok(Setup {
+        look: loaded.manifest.install.look,
+        license: license(loaded, target)?,
+        folder: loaded.manifest.install.folder,
+        brand: SetupBrand {
+            text: brand.text.clone(),
+            accent: brand.accent,
+            welcome: brand.welcome.clone(),
+            finish: brand.finish.clone(),
+            link: brand.link.clone(),
+        },
+    })
 }
 
 /// signs the package's own `.exe` and `.dll` files that are not signed

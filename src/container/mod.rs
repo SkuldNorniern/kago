@@ -116,6 +116,10 @@ pub fn write(
     out: &mut impl Write,
 ) -> io::Result<u64> {
     let mut plan = plan.clone();
+    // their installers go in as assets; build paths stay out.
+    for p in &mut plan.prerequisites {
+        p.source = PathBuf::new();
+    }
     let mut packed = Vec::new();
     let mut payload = Vec::new();
     let mut offset = 0;

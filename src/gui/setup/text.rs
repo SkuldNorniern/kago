@@ -98,6 +98,7 @@ pub enum Line {
     Register,
     Hook,
     Service,
+    Prerequisite,
 }
 
 impl Lang {
@@ -388,6 +389,7 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Hook => ["Run: {item}", "실행: {item}"],
         Line::Register => ["Register {item}", "{item} 등록"],
         Line::Service => ["Start at sign-in: {item}", "로그인 시 시작: {item}"],
+        Line::Prerequisite => ["Install first: {item}", "먼저 설치: {item}"],
     }
 }
 

@@ -9,7 +9,7 @@ mod scope;
 
 pub use need::{Need, at_least};
 pub use operation::{Digest, Operation};
-pub use plan::{Choice, InstallPlan, Look, Sources, hash};
+pub use plan::{Choice, InstallPlan, Look, Prerequisite, Sources, hash};
 pub use resolve::{
     Resolved, ResolvedHook, ResolvedPath, ResolvedService, ResolvedShortcut, Selection, resolve,
 };

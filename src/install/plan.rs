@@ -11,7 +11,7 @@ use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
-    Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, ResourceScope, ScopeChoice,
+    Check, Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, ResourceScope, ScopeChoice,
     SemanticPath, SetupLook,
 };
 use crate::package::{PackageId, Target, Version};
@@ -61,6 +61,9 @@ pub struct InstallPlan {
     /// how the setup looked, so the uninstaller looks the same.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub look: Option<Look>,
+    /// other vendors' installers to run first, when missing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prerequisites: Vec<Prerequisite>,
     /// `{app}` somewhere other than the platform's default, chosen at
     /// install. upgrades keep the folder of the install they replace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,6 +83,36 @@ pub struct Look {
     /// the brand's small text at the bottom left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+}
+
+/// another vendor's installer the install runs first when its check
+/// fails. inside a setup the installer is the asset
+/// [`Prerequisite::asset`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Prerequisite {
+    pub id: String,
+    pub name: String,
+    /// build-side installer; empty inside a setup.
+    #[serde(default, skip_serializing_if = "is_empty_path")]
+    pub source: PathBuf,
+    /// what to call it when it runs: some installers read their own name.
+    pub file_name: String,
+    pub arguments: Vec<String>,
+    pub check: Check,
+    /// its installer needs administrator rights.
+    pub admin: bool,
+}
+
+impl Prerequisite {
+    /// the setup asset holding its installer.
+    #[must_use]
+    pub fn asset(&self) -> String {
+        format!("prerequisite:{}", self.id)
+    }
+}
+
+fn is_empty_path(path: &Path) -> bool {
+    path.as_os_str().is_empty()
 }
 
 /// an optional component the setup can offer as a tick box.
@@ -177,6 +210,7 @@ impl InstallPlan {
             steps.push(op, None);
         }
         let needs = needs(resolved, &mut diagnostics);
+        let prerequisites = prerequisites(manifest, target, sources, &mut diagnostics);
         if diagnostics.has_errors() {
             return (None, diagnostics);
         }
@@ -200,6 +234,7 @@ impl InstallPlan {
                 accent: manifest.brand.accent,
                 text: manifest.brand.text.clone(),
             }),
+            prerequisites,
             location: None,
             needs,
         };
@@ -487,6 +522,63 @@ fn fixed_with_open_scope(resolved: &Resolved, diagnostics: &mut Diagnostics) {
             );
         }
     }
+}
+
+/// the manifest's prerequisites with their installers found. Windows only
+/// for now: elsewhere they are left out with a warning.
+fn prerequisites<S: Sources + ?Sized>(
+    manifest: &Manifest,
+    target: Target,
+    sources: &S,
+    diagnostics: &mut Diagnostics,
+) -> Vec<Prerequisite> {
+    if manifest.prerequisites.is_empty() {
+        return Vec::new();
+    }
+    if target.os() != crate::package::Os::Windows {
+        diagnostics.push(Diagnostic::warning(
+            diagnostic::TARGET_CAPABILITY,
+            format!("prerequisites run on Windows only; left out for {target}"),
+        ));
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for p in &manifest.prerequisites {
+        match sources.locate(&p.file) {
+            Ok(source) if source.is_file() => out.push(Prerequisite {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                file_name: source
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("setup.exe")
+                    .to_owned(),
+                source,
+                arguments: p.arguments.clone(),
+                check: p.check.clone(),
+                admin: p.admin,
+            }),
+            Ok(source) => diagnostics.push(
+                Diagnostic::error(
+                    diagnostic::MANIFEST_REFERENCE,
+                    format!(
+                        "prerequisite `{}`: {} does not exist",
+                        p.id,
+                        source.display()
+                    ),
+                )
+                .at(p.at.clone()),
+            ),
+            Err(e) => diagnostics.push(
+                Diagnostic::error(
+                    diagnostic::MANIFEST_REFERENCE,
+                    format!("prerequisite `{}`: {e}", p.id),
+                )
+                .at(p.at.clone()),
+            ),
+        }
+    }
+    out
 }
 
 /// the resolved hooks kago can run, with a diagnostic for each it cannot.

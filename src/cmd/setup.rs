@@ -442,6 +442,7 @@ fn window_step(stage: &Stage<'_>) -> kago::gui::setup::Step {
     use kago::gui::setup::Step;
     match stage {
         Stage::Unpack(path) => Step::Unpack(path.to_string()),
+        Stage::Prerequisite(name) => Step::Prerequisite((*name).to_owned()),
         Stage::Apply(op) => match op {
             Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
             Operation::InstallFile { target, .. } => Step::File(target.to_string()),
@@ -468,6 +469,8 @@ struct Done {
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 enum Stage<'a> {
     Unpack(&'a SemanticPath),
+    /// another vendor's installer, by its name.
+    Prerequisite(&'a str),
     Apply(&'a Operation),
 }
 
@@ -539,6 +542,65 @@ fn chosen(
         check_space(plan.payload_size(), staging, &app)?;
     }
     Ok(plan)
+}
+
+/// installs each prerequisite whose check fails, from the setup's own
+/// copy, with the UAC prompt when it needs administrator rights and this
+/// setup has none. `started` hears each one's name.
+fn run_prerequisites(
+    container: &mut Container,
+    plan: &InstallPlan,
+    staging: &Path,
+    started: &mut dyn FnMut(&str),
+) -> Result<(), String> {
+    for p in &plan.prerequisites {
+        if platform::satisfied(&p.check) {
+            continue;
+        }
+        started(&p.name);
+        let bytes = container
+            .asset(&p.asset())
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("this setup lacks its copy of {}", p.name))?;
+        let dir = staging.join("prerequisites").join(&p.id);
+        let file = dir.join(&p.file_name);
+        fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(&file, bytes))
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+        // an .msi goes through Windows Installer.
+        let msi = Path::new(&p.file_name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("msi"));
+        let (program, mut arguments) = if msi {
+            (
+                PathBuf::from("msiexec"),
+                vec!["/i".to_owned(), file.display().to_string()],
+            )
+        } else {
+            (file.clone(), Vec::new())
+        };
+        arguments.extend(p.arguments.iter().cloned());
+        let code = if p.admin && !platform::is_elevated() {
+            platform::run_elevated(&program, &arguments, true).map_err(|e| e.to_string())?
+        } else {
+            let status = std::process::Command::new(&program)
+                .args(&arguments)
+                .status()
+                .map_err(|e| format!("cannot run {}: {e}", program.display()))?;
+            status.code().map_or(1, i32::cast_unsigned)
+        };
+        // 3010 and 1641: done, restart later; 1638: a newer one is there.
+        if !matches!(code, 0 | 3010 | 1641 | 1638) {
+            return Err(format!("{} did not install (exit code {code})", p.name));
+        }
+        if !platform::satisfied(&p.check) {
+            return Err(format!(
+                "{} said it installed, but it still cannot be found",
+                p.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// refuses when a drive lacks room. the payload is unpacked into
@@ -678,6 +740,10 @@ fn install(
         // CloseApplications.
         platform::close_programs(&installed_files(platform.as_ref(), &plan.package))
             .map_err(|e| format!("cannot close the programs using {}: {e}", plan.name))?;
+        let before = share(files, files + operations);
+        run_prerequisites(&mut container, &plan, &staging, &mut |name| {
+            progress(before, Stage::Prerequisite(name));
+        })?;
         // the same package installed the other way (just for this user, or
         // for everyone) goes first, so there are never two. what ownership
         // keeps, like user data, stays.

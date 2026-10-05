@@ -252,6 +252,7 @@ pub enum Step {
     Register(String),
     Hook(String),
     Service(String),
+    Prerequisite(String),
 }
 
 impl Step {
@@ -266,6 +267,7 @@ impl Step {
             Self::Register(s) => (Line::Register, s),
             Self::Hook(s) => (Line::Hook, s),
             Self::Service(s) => (Line::Service, s),
+            Self::Prerequisite(s) => (Line::Prerequisite, s),
         };
         lang.fill(line, &[("item", item)])
     }
