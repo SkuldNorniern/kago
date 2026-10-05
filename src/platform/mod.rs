@@ -104,6 +104,27 @@ pub trait Platform {
         Err("firewall rules are Windows-only for now".to_owned())
     }
 
+    /// the Windows service called `name` as it is set up now.
+    ///
+    /// # Errors
+    ///
+    /// when services cannot be read here.
+    fn service(&self, name: &str) -> Result<Option<WindowsService>, String> {
+        let _ = name;
+        Err("services for everyone are Windows-only for now".to_owned())
+    }
+
+    /// creates or changes the service `name` and starts it when it starts
+    /// automatically; `None` stops and deletes it.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, or when it does not start.
+    fn set_service(&self, name: &str, service: Option<&WindowsService>) -> Result<(), String> {
+        let _ = (name, service);
+        Err("services for everyone are Windows-only for now".to_owned())
+    }
+
     /// has the file or empty folder at `path` deleted when the computer
     /// next starts, for one still in use now.
     ///
@@ -302,6 +323,18 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     }
 }
 
+/// a Windows service: runs for everyone, as the `LocalSystem` account, without anyone
+/// signed in.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WindowsService {
+    pub display_name: String,
+    /// the program, quoted, and its arguments.
+    pub command_line: String,
+    /// starts with Windows; otherwise only when asked.
+    pub automatic: bool,
+    pub restart_on_failure: bool,
+}
+
 /// a firewall rule letting a program accept connections: on private and
 /// work networks, and on public ones when `public`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -441,6 +474,17 @@ mod tests {
         assert_eq!(expand_env("%PATH%;x"), format!("{path};x"));
         assert_eq!(expand_env(r"%KAGO_NO_SUCH%\a"), r"%KAGO_NO_SUCH%\a");
         assert_eq!(expand_env("50%"), "50%");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_missing_service_reads_as_none() {
+        assert_eq!(
+            windows::service::service("kago-test-no-such-service"),
+            Ok(None)
+        );
+        let spooler = windows::service::service("Spooler").unwrap();
+        assert!(spooler.is_some_and(|s| s.command_line.to_ascii_lowercase().contains("spoolsv")));
     }
 
     #[cfg(windows)]

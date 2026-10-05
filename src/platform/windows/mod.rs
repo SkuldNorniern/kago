@@ -9,6 +9,7 @@ pub mod instance;
 mod registry;
 pub mod resource;
 pub mod restart;
+pub mod service;
 mod shortcut;
 
 use std::collections::BTreeMap;
@@ -158,6 +159,18 @@ impl Platform for Windows {
         rule: Option<&super::Firewall>,
     ) -> Result<(), String> {
         firewall::set_rule(name, group, rule)
+    }
+
+    fn service(&self, name: &str) -> Result<Option<super::WindowsService>, String> {
+        service::service(name)
+    }
+
+    fn set_service(
+        &self,
+        name: &str,
+        wanted: Option<&super::WindowsService>,
+    ) -> Result<(), String> {
+        service::set_service(name, wanted)
     }
 
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
