@@ -1,19 +1,37 @@
-# goes at the aira-studio repo root. build first: cargo build --release,
-# and the SteamVR driver in ../aira-motion/aira-openvr/driver with CMake.
+# goes at the aira-studio repo root. build first: cargo build --release here
+# and in ../aira-motion, and the SteamVR driver and client in
+# ../aira-motion/aira-openvr with CMake.
 package dev.eira.aira-studio
   name Aira Studio
   version from cargo
   publisher Eira
   description Set up and watch Aira trackers
 
+license LICENSE
+
 source motion
   dir ../aira-motion
+
+require windows 10.0.17763
 
 app aira-studio
   windows target/release/aira-studio.exe
 
 shortcut
 
-component steamvr "SteamVR driver" on
+component steamvr "SteamVR support" on
+  about Shows Aira trackers in SteamVR and reads the headset
+  detect steamvr
   when windows
     steamvr motion:aira-openvr/driver/build/aira
+    copy motion:aira-openvr/client/build/out/aira_openvr_client.dll
+    copy motion:aira-openvr/client/build/out/openvr_api.dll
+
+component motion "Motion in the background" off
+  about Runs tracking from sign-in without Studio open
+  app aira-motion
+    windows motion:target/release/aira-motion.exe
+  service aira-motion
+
+component desktop "Desktop shortcut" off
+  shortcut desktop

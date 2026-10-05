@@ -1,11 +1,29 @@
 # goes at the lykil-studio repo root. build first: cargo build --release
+# here and in ../lykil.
 package dev.eira.lykil-studio
   name Lykil Studio
   version from cargo
   publisher Eira
   description Manage Lykil keyboards
 
+license LICENSE
+
+source lykil
+  dir ../lykil
+
+require windows 10.0.17763
+
 app lykil-studio
   windows target/release/lykil-studio.exe
 
 shortcut
+
+component cli "Command-line tool" off
+  about lykil, for scripts and terminals
+  app lykil
+    to {app}/bin
+    windows lykil:target/release/lykil.exe
+  path -> lykil
+
+component desktop "Desktop shortcut" off
+  shortcut desktop

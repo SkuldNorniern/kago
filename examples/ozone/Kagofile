@@ -13,3 +13,6 @@ app ozone
 
 shortcut
 path optional "Add ozone to PATH"
+
+component desktop "Desktop shortcut" off
+  shortcut desktop
