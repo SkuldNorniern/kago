@@ -6,6 +6,8 @@ package dev.eira.aira-studio
   version from cargo
   publisher Eira
   description Set up and watch Aira trackers
+  # the setup asks: for everyone, or only for me
+  scope choose
 
 license LICENSE
 
