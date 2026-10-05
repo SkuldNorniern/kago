@@ -16,7 +16,9 @@ use crate::manifest::schema::{
     RawTargets, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
-use crate::manifest::{Brand, Setting, Sign, SignKey, TIMESTAMP, parse_color};
+use crate::manifest::{
+    Brand, Check, Detect, Prerequisite, Setting, Sign, SignKey, TIMESTAMP, parse_color, preset,
+};
 use crate::package::{Arch, Artifact, Libc, Os};
 
 /// what one Kagofile lowers to.
@@ -25,6 +27,7 @@ pub struct Lowered {
     pub sources: Vec<Source>,
     pub brand: Brand,
     pub sign: Option<Sign>,
+    pub prerequisites: Vec<Prerequisite>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -67,6 +70,7 @@ pub fn lower(
         pending: Vec::new(),
         brand: Brand::default(),
         sign: None,
+        prerequisites: Vec::new(),
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -127,6 +131,7 @@ struct Lower<'a> {
     pending: Vec<Pending>,
     brand: Brand,
     sign: Option<Sign>,
+    prerequisites: Vec<Prerequisite>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -195,6 +200,7 @@ impl Lower<'_> {
             "license" => self.license(node),
             "brand" => self.brand_block(node),
             "sign" => self.sign_block(node),
+            "prerequisite" => self.prerequisite(node),
             _ => self.item(node, &Scope::default()),
         }
     }
@@ -224,7 +230,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand or sign"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign or prerequisite"
                 ),
             ),
         }
@@ -927,6 +933,90 @@ impl Lower<'_> {
         }
     }
 
+    /// `prerequisite <id> ["Name"]` with `file`, and `arguments`, `detect`
+    /// and `admin` unless kago knows the id.
+    fn prerequisite(&mut self, node: &Node) {
+        let (id, name) = match node.args() {
+            [id] => (id, None),
+            [id, name] => (id, Some(name.text.clone())),
+            _ => {
+                self.syntax(node.at(), "expected `prerequisite <id> [\"Name\"]`");
+                return;
+            }
+        };
+        let known = preset(&id.text);
+        let mut file = None;
+        let mut arguments = known.as_ref().map(|k| k.1.clone()).unwrap_or_default();
+        let mut check = known.as_ref().map(|k| k.2.clone());
+        let mut admin = known.as_ref().is_some_and(|k| k.3);
+        for child in &node.children {
+            self.no_children(child);
+            let args = child.args();
+            let words: Vec<&str> = args.iter().map(|w| w.text.as_str()).collect();
+            match (child.keyword(), words.as_slice()) {
+                ("file", [_]) => file = Some(self.reference(&args[0]).into_inner()),
+                ("arguments", _) => arguments = words.iter().map(|w| (*w).to_owned()).collect(),
+                ("admin", []) => admin = true,
+                ("detect", ["registry", key]) => {
+                    check = Some(Check::Registry {
+                        key: (*key).to_owned(),
+                        value: None,
+                    });
+                }
+                ("detect", ["registry", key, value]) => {
+                    check = Some(Check::Registry {
+                        key: (*key).to_owned(),
+                        value: Some((*value).to_owned()),
+                    });
+                }
+                ("detect", ["file", ..]) => {
+                    check = Some(Check::File {
+                        path: rest(&args[1..]),
+                    });
+                }
+                ("detect", [known]) => match known.parse::<Detect>() {
+                    Ok(detect) => check = Some(Check::Known { detect }),
+                    Err(e) => self.error(diagnostic::MANIFEST_VALUE, args[0].at, e),
+                },
+                ("file" | "detect" | "admin", _) => self.syntax(
+                    child.at(),
+                    "expected `file <installer>`, `detect registry <key> [value]`, `detect file <path>`, `detect steamvr` or `admin`",
+                ),
+                (other, _) => self.syntax(
+                    child.at(),
+                    format!(
+                        "unknown prerequisite field `{other}`; expected file, arguments, detect or admin"
+                    ),
+                ),
+            }
+        }
+        let Some(file) = file else {
+            self.syntax(
+                node.at(),
+                "a prerequisite needs `file <installer>`, like `file vcredist:vc_redist.x64.exe` from a pinned `source`",
+            );
+            return;
+        };
+        let Some(check) = check else {
+            self.syntax(
+                node.at(),
+                "a prerequisite needs `detect ...` to tell whether it is installed already",
+            );
+            return;
+        };
+        self.prerequisites.push(Prerequisite {
+            name: name
+                .or_else(|| known.map(|k| k.0.to_owned()))
+                .unwrap_or_else(|| id.text.clone()),
+            id: id.text.clone(),
+            file,
+            arguments,
+            check,
+            admin,
+            at: Location::at(self.file, self.source, node.at()),
+        });
+    }
+
     fn license(&mut self, node: &Node) {
         self.no_children(node);
         match node.args() {
@@ -1113,6 +1203,7 @@ impl Lower<'_> {
             sources: self.sources,
             brand: self.brand,
             sign: self.sign,
+            prerequisites: self.prerequisites,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

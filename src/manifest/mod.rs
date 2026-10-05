@@ -4,6 +4,7 @@ mod brand;
 mod kagofile;
 mod path;
 mod policy;
+mod prerequisite;
 mod resource;
 mod schema;
 mod selector;
@@ -21,6 +22,7 @@ pub use policy::{
     AppKind, Detect, Downgrade, Elevation, FolderChoice, InstallPolicy, LicenseFormat, ScopeChoice,
     ScopeConflict, SetupLook, Upgrade,
 };
+pub use prerequisite::{Check, Prerequisite, preset};
 pub use resource::{
     Component, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
     PathSource, Requirement, RequirementKind, RequirementPolicy, ResourceScope, Service,
@@ -62,6 +64,8 @@ pub struct Manifest {
     pub brand: Brand,
     /// how `kago build` signs; unsigned without it.
     pub sign: Option<Sign>,
+    /// other vendors' installers to run first when their check fails.
+    pub prerequisites: Vec<Prerequisite>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +132,7 @@ impl Manifest {
             m.sources = lowered.sources;
             m.brand = lowered.brand;
             m.sign = lowered.sign;
+            m.prerequisites = lowered.prerequisites;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -422,6 +427,40 @@ require steamvr
             "one key"
         );
         assert!(parse("").0.unwrap().sign.is_none());
+    }
+
+    #[test]
+    fn prerequisites_take_presets_and_their_own_checks() {
+        let head = "package dev.x.y\n  version 1.0.0\nsource vc\n  dir deps\n";
+        let parse = |p: &str| Manifest::parse("Kagofile", &format!("{head}{p}"));
+        let m = parse("prerequisite vcredist\n  file vc:vc_redist.x64.exe\n")
+            .0
+            .unwrap();
+        let vc = &m.prerequisites[0];
+        assert_eq!(vc.name, "Microsoft Visual C++ Runtime");
+        assert!(vc.admin);
+        assert_eq!(vc.arguments, ["/install", "/quiet", "/norestart"]);
+        let m = parse(
+            "prerequisite tool \"Tool Runtime\"\n  file vc:tool.msi\n  arguments /qn\n  detect file %ProgramFiles%\\Tool\\tool.exe\n",
+        )
+        .0
+        .unwrap();
+        let tool = &m.prerequisites[0];
+        assert_eq!(
+            tool.check,
+            Check::File {
+                path: "%ProgramFiles%\\Tool\\tool.exe".into()
+            }
+        );
+        assert!(!tool.admin);
+        assert!(
+            parse("prerequisite tool\n  file vc:t.exe\n").0.is_none(),
+            "needs a check"
+        );
+        assert!(
+            parse("prerequisite vcredist\n").0.is_none(),
+            "needs its file"
+        );
     }
 
     #[test]
