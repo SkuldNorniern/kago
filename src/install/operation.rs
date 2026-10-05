@@ -33,11 +33,17 @@ pub enum Operation {
         target: SemanticPath,
         location: ShortcutLocation,
         arguments: Vec<String>,
+        /// an installed `.ico` to show; the target's own icon otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<SemanticPath>,
     },
     /// uninstall entry, start menu / desktop file metadata.
     RegisterApplication {
         display_name: String,
         entrypoint: Option<SemanticPath>,
+        /// an installed `.ico` for the uninstall entry.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<SemanticPath>,
     },
     /// runs the package's own `command`: now for `post-install`, at
     /// uninstall for `pre-uninstall`.

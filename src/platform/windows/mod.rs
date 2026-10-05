@@ -151,8 +151,9 @@ impl Platform for Windows {
         link: &Path,
         target: &Path,
         arguments: &[String],
+        icon: Option<&Path>,
     ) -> Result<(), String> {
-        shortcut::create(link, target, arguments)
+        shortcut::create(link, target, arguments, icon)
     }
 
     fn register(&self, scope: Scope, r: &Registration) -> Result<String, String> {

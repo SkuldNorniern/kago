@@ -113,7 +113,13 @@ impl Platform for Fake {
         Ok(())
     }
 
-    fn create_shortcut(&self, link: &Path, target: &Path, _: &[String]) -> Result<(), String> {
+    fn create_shortcut(
+        &self,
+        link: &Path,
+        target: &Path,
+        _: &[String],
+        _: Option<&Path>,
+    ) -> Result<(), String> {
         fs::write(link, target.display().to_string()).map_err(|e| e.to_string())
     }
 

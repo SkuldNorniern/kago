@@ -118,6 +118,7 @@ pub trait Platform {
         link: &Path,
         target: &Path,
         arguments: &[String],
+        icon: Option<&Path>,
     ) -> Result<(), String>;
 
     /// registers the install, returns the key to unregister it with.

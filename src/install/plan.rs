@@ -119,7 +119,16 @@ impl InstallPlan {
             };
             steps.push(op, f.component);
         }
-        steps.resources(resolved, scope, &mut diagnostics);
+        // the main app's installed .ico, when it has one.
+        let icon = manifest.application.entrypoint.as_ref().and_then(|id| {
+            let icon_id = format!("{id}-icon");
+            resolved
+                .files
+                .iter()
+                .find(|f| f.logical_id.as_deref() == Some(icon_id.as_str()))
+                .map(|f| f.target.clone())
+        });
+        steps.resources(resolved, scope, icon.as_ref(), manifest, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
                 .files
@@ -130,6 +139,7 @@ impl InstallPlan {
         let register = Operation::RegisterApplication {
             display_name: manifest.application.display_name.clone(),
             entrypoint,
+            icon,
         };
         steps.push(register, None);
         for op in hooks(resolved, &mut diagnostics) {
@@ -292,7 +302,14 @@ impl Steps {
     }
 
     /// PATH entries, SteamVR drivers, shortcuts and services.
-    fn resources(&mut self, resolved: &Resolved, scope: Scope, diagnostics: &mut Diagnostics) {
+    fn resources(
+        &mut self,
+        resolved: &Resolved,
+        scope: Scope,
+        icon: Option<&SemanticPath>,
+        manifest: &Manifest,
+        diagnostics: &mut Diagnostics,
+    ) {
         for p in &resolved.paths {
             let op = Operation::AddPathEntry {
                 directory: p.directory.clone(),
@@ -310,11 +327,15 @@ impl Steps {
             self.push(op, driver.component.clone());
         }
         for s in &resolved.shortcuts {
+            // the main app's icon goes on shortcuts to the main app.
+            let main =
+                manifest.application.entrypoint.as_deref() == Some(s.shortcut.target.as_str());
             let op = Operation::CreateShortcut {
                 name: s.shortcut.name.clone(),
                 target: s.target.clone(),
                 location: s.shortcut.location,
                 arguments: s.shortcut.arguments.clone(),
+                icon: icon.filter(|_| main).cloned(),
             };
             self.push(op, s.shortcut.component.clone());
         }
@@ -691,6 +712,45 @@ component docs Documentation off
             d.iter().map(|d| d.code).collect::<Vec<_>>(),
             [diagnostic::TARGET_CAPABILITY]
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_app_icon_is_installed_for_shortcuts_and_the_uninstall_entry() {
+        let dir = std::env::temp_dir().join(format!("kago-plan-icon-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("tool.exe"), b"MZ").unwrap();
+        fs::write(dir.join("tool.ico"), b"ico").unwrap();
+        let src = "package dev.x.tool
+  version 1.0.0
+app tool
+  windows tool.exe
+  icon windows tool.ico
+shortcut
+";
+        let m = Manifest::parse("Kagofile", src).0.unwrap();
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+            .0
+            .unwrap();
+        let p = InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+            .0
+            .unwrap();
+        let icon: SemanticPath = "{app}/tool.ico".parse().unwrap();
+        assert!(
+            p.operations
+                .iter()
+                .any(|op| matches!(op, Operation::InstallFile { target, .. } if *target == icon))
+        );
+        assert!(
+            p.operations.iter().any(
+                |op| matches!(op, Operation::CreateShortcut { icon: Some(i), .. } if *i == icon)
+            )
+        );
+        assert!(p.operations.iter().any(
+            |op| matches!(op, Operation::RegisterApplication { icon: Some(i), .. } if *i == icon)
+        ));
         fs::remove_dir_all(dir).unwrap();
     }
 

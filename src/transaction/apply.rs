@@ -288,7 +288,9 @@ impl Run<'_> {
                 target,
                 location,
                 arguments,
+                icon,
             } => {
+                let icon = icon.as_ref().map(|i| self.resolve(i)).transpose()?;
                 let root = match location {
                     ShortcutLocation::Applications => Root::Applications,
                     ShortcutLocation::Desktop => Root::Desktop,
@@ -300,7 +302,7 @@ impl Run<'_> {
                 let platform = self.platform;
                 self.place(&link, |link| {
                     platform
-                        .create_shortcut(link, &target, arguments)
+                        .create_shortcut(link, &target, arguments, icon.as_deref())
                         .map_err(Error::Other)
                 })?;
                 self.resources.push(Resource::Shortcut { path: link });
@@ -309,7 +311,8 @@ impl Run<'_> {
             Operation::RegisterApplication {
                 display_name,
                 entrypoint,
-            } => self.register(display_name, entrypoint.as_ref()),
+                icon,
+            } => self.register(display_name, entrypoint.as_ref(), icon.as_ref()),
             Operation::InstallService {
                 id,
                 command,
@@ -514,6 +517,7 @@ impl Run<'_> {
         &mut self,
         display_name: &str,
         entrypoint: Option<&SemanticPath>,
+        icon: Option<&SemanticPath>,
     ) -> Result<(), Error> {
         let runtime = self.store.runtime_path();
         copy_runtime(self.runtime, &runtime)?;
@@ -524,7 +528,7 @@ impl Run<'_> {
             version: self.plan.version.clone(),
             publisher: self.plan.publisher.clone(),
             install_location: self.resolve(&SemanticPath::from(Root::App))?,
-            icon: entrypoint.map(|e| self.resolve(e)).transpose()?,
+            icon: icon.or(entrypoint).map(|e| self.resolve(e)).transpose()?,
             uninstall: format!(
                 "\"{}\" uninstall {} --scope {scope}",
                 runtime.display(),

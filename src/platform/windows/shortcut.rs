@@ -9,7 +9,12 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 use windows::core::{HSTRING, Interface};
 
-pub fn create(link: &Path, target: &Path, arguments: &[String]) -> Result<(), String> {
+pub fn create(
+    link: &Path,
+    target: &Path,
+    arguments: &[String],
+    icon: Option<&Path>,
+) -> Result<(), String> {
     let err = |e: windows::core::Error| format!("cannot create shortcut {}: {e}", link.display());
     // SAFETY: COM is initialized for this thread and released below; every
     // string passed lives across its call.
@@ -24,7 +29,7 @@ pub fn create(link: &Path, target: &Path, arguments: &[String]) -> Result<(), St
             if !arguments.is_empty() {
                 shell.SetArguments(&HSTRING::from(join_arguments(arguments)))?;
             }
-            shell.SetIconLocation(&HSTRING::from(target), 0)?;
+            shell.SetIconLocation(&HSTRING::from(icon.unwrap_or(target)), 0)?;
             let file: IPersistFile = shell.cast()?;
             file.Save(&HSTRING::from(link), true)
         })();

@@ -391,6 +391,23 @@ impl Lower<'_> {
                     [os, path] => {
                         let when = self.when(scope, std::slice::from_ref(os));
                         let source = self.reference(path);
+                        // an .ico is installed too: shortcuts and the
+                        // uninstall entry show it, even for an exe built
+                        // without an icon of its own.
+                        if path.text.to_ascii_lowercase().ends_with(".ico") {
+                            let file_when = self.when(scope, std::slice::from_ref(os));
+                            self.files.push(RawFile {
+                                logical_id: Some(spanned_text(path, format!("{}-icon", id.text))),
+                                component: scope.component.clone(),
+                                source: source.clone(),
+                                target: spanned_text(
+                                    path,
+                                    format!("{{app}}/{}", basename(&path.text)),
+                                ),
+                                ownership: None,
+                                when: file_when,
+                            });
+                        }
                         self.icons.push(RawIcon {
                             source,
                             size: None,
