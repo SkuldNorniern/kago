@@ -94,9 +94,7 @@ impl Validator<'_> {
         let requirements = self.requirements(&raw);
         let artifacts = self.targets(raw.targets.take());
         let update = raw.update.take().map(|u| Update {
-            enabled: u.enabled.unwrap_or(false),
-            channel: u.channel.unwrap_or_else(|| "stable".to_owned()),
-            repository: u.repository.map(Spanned::into_inner),
+            feed: u.feed.into_inner(),
         });
         let manifest = Manifest {
             package,

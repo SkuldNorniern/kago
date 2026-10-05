@@ -153,9 +153,8 @@ pub struct RawRequirement {
 
 #[derive(Debug)]
 pub struct RawUpdate {
-    pub enabled: Option<bool>,
-    pub channel: Option<String>,
-    pub repository: Option<Spanned<String>>,
+    /// where the update feed is: a `latest.json` written by `kago build`.
+    pub feed: Spanned<String>,
 }
 
 #[derive(Debug)]

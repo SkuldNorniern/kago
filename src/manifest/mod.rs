@@ -99,9 +99,20 @@ pub struct License {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Update {
-    pub enabled: bool,
-    pub channel: String,
-    pub repository: Option<String>,
+    /// URL of the `latest.json` that `kago build` writes next to the
+    /// setup, wherever the releases are published.
+    pub feed: String,
+}
+
+impl Update {
+    /// the feed of a GitHub repository's newest release: GitHub redirects
+    /// `releases/latest/download/<file>` to that release's file.
+    #[must_use]
+    pub fn github(repository: &str) -> Self {
+        Self {
+            feed: format!("https://github.com/{repository}/releases/latest/download/latest.json"),
+        }
+    }
 }
 
 impl Manifest {
@@ -461,6 +472,33 @@ require steamvr
             parse("prerequisite vcredist\n").0.is_none(),
             "needs its file"
         );
+    }
+
+    #[test]
+    fn update_from_github_or_a_feed() {
+        let head = "package dev.x.y\n  version 1.0.0\n";
+        let parse = |u: &str| Manifest::parse("Kagofile", &format!("{head}{u}"));
+        let m = parse("update github SkuldNorniern/aira-studio\n")
+            .0
+            .unwrap();
+        assert_eq!(
+            m.update.unwrap().feed,
+            "https://github.com/SkuldNorniern/aira-studio/releases/latest/download/latest.json"
+        );
+        let m = parse("update feed https://example.com/aira/latest.json\n")
+            .0
+            .unwrap();
+        assert_eq!(
+            m.update.unwrap().feed,
+            "https://example.com/aira/latest.json"
+        );
+        assert!(
+            parse("update feed http://example.com/latest.json\n")
+                .0
+                .is_none(),
+            "https only"
+        );
+        assert!(parse("update github not-a-repo\n").0.is_none());
     }
 
     #[test]

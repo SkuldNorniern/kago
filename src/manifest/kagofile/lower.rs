@@ -13,7 +13,7 @@ use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
     RawApplication, RawComponent, RawFile, RawHook, RawIcon, RawInstall, RawLicense, RawManifest,
     RawPackage, RawPath, RawRequirement, RawService, RawShortcut, RawSteamVrDriver, RawTarget,
-    RawTargets, RawWhen,
+    RawTargets, RawUpdate, RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
@@ -71,6 +71,7 @@ pub fn lower(
         brand: Brand::default(),
         sign: None,
         prerequisites: Vec::new(),
+        update: None,
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -132,6 +133,7 @@ struct Lower<'a> {
     brand: Brand,
     sign: Option<Sign>,
     prerequisites: Vec<Prerequisite>,
+    update: Option<RawUpdate>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -201,6 +203,7 @@ impl Lower<'_> {
             "brand" => self.brand_block(node),
             "sign" => self.sign_block(node),
             "prerequisite" => self.prerequisite(node),
+            "update" => self.update(node),
             _ => self.item(node, &Scope::default()),
         }
     }
@@ -230,7 +233,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign or prerequisite"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite or update"
                 ),
             ),
         }
@@ -1017,6 +1020,47 @@ impl Lower<'_> {
         });
     }
 
+    /// `update github <owner>/<repo>` or `update feed <https url>`.
+    fn update(&mut self, node: &Node) {
+        self.no_children(node);
+        let feed = match node.args() {
+            [kind, repo] if kind.text == "github" => {
+                let parts: Vec<&str> = repo.text.split('/').collect();
+                if parts.len() != 2 || parts.iter().any(|p| p.is_empty()) {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        repo.at,
+                        "expected the repository as `owner/name`",
+                    );
+                    return;
+                }
+                spanned_text(repo, crate::manifest::Update::github(&repo.text).feed)
+            }
+            [kind, url] if kind.text == "feed" => {
+                if !url.text.starts_with("https://") && !url.text.starts_with("file://") {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        url.at,
+                        "an update feed has to be https, so nobody can swap it on the way",
+                    );
+                    return;
+                }
+                spanned(url)
+            }
+            _ => {
+                self.syntax(
+                    node.at(),
+                    "expected `update github <owner>/<repo>` or `update feed <https url>`",
+                );
+                return;
+            }
+        };
+        if self.update.is_some() {
+            self.syntax(node.at(), "only one `update` line");
+        }
+        self.update = Some(RawUpdate { feed });
+    }
+
     fn license(&mut self, node: &Node) {
         self.no_children(node);
         match node.args() {
@@ -1191,7 +1235,7 @@ impl Lower<'_> {
             services: self.services,
             hooks: self.hooks,
             requirements: self.requirements,
-            update: None,
+            update: self.update,
             targets: Some(RawTargets {
                 windows: target(self.targets.remove(&Os::Windows)),
                 macos: target(self.targets.remove(&Os::Macos)),
