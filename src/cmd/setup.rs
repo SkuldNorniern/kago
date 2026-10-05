@@ -43,12 +43,13 @@ pub fn run_embedded() -> Option<ExitCode> {
 
 #[cfg(feature = "gui")]
 fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
-    use kago::gui::setup::{Component, Folder, Info, Installed, License, Picked, Step, run};
+    use kago::gui::setup::{Folder, Info, Installed, License, Picked, run};
     use kago::install::check_folder;
     use kago::manifest::{FolderChoice, Root};
 
     let (info, look, folder) = match Container::open(&exe, embedded.offset) {
-        Ok(c) => {
+        Ok(mut c) => {
+            let brand = window_brand(&mut c);
             let plan = &c.header.plan;
             let host = platform::host().ok();
             // where the installed version is, if there is one.
@@ -74,32 +75,12 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                 publisher: plan.publisher.clone(),
                 upgrade: installed.is_some(),
                 location: installed.or(default),
+                brand,
                 license: c.header.setup.license.as_ref().map(|l| License {
                     text: l.text.clone(),
                     accept: l.accept,
                 }),
-                components: plan
-                    .choices
-                    .iter()
-                    .map(|choice| {
-                        let missing = choice
-                            .detect
-                            .filter(|d| !platform::detect(*d))
-                            .map(|d| d.name().to_owned());
-                        Component {
-                            id: choice.id.clone(),
-                            name: choice.name.clone(),
-                            description: choice.description.clone(),
-                            // not ticked for something this machine lacks,
-                            // unless it cannot be left out.
-                            default: choice.required || (choice.default && missing.is_none()),
-                            required: choice.required,
-                            depends: choice.depends.clone(),
-                            size: choice.size,
-                            missing,
-                        }
-                    })
-                    .collect(),
+                components: window_components(&plan.choices),
             };
             (info, c.header.setup.look, folder)
         }
@@ -109,26 +90,8 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
         }
     };
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
-        let mut report = |fraction, stage: Stage<'_>| {
-            let step = match stage {
-                Stage::Unpack(path) => Step::Unpack(path.to_string()),
-                Stage::Apply(op) => match op {
-                    Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
-                    Operation::InstallFile { target, .. } => Step::File(target.to_string()),
-                    Operation::AddPathEntry { directory, .. } => Step::Path(directory.to_string()),
-                    Operation::RegisterSteamVrDriver { directory } => {
-                        Step::SteamVr(directory.to_string())
-                    }
-                    Operation::CreateShortcut { name, .. } => Step::Shortcut(name.clone()),
-                    Operation::RegisterApplication { display_name, .. } => {
-                        Step::Register(display_name.clone())
-                    }
-                    Operation::RunHook { command, .. } => Step::Hook(command.to_string()),
-                    Operation::InstallService { id, .. } => Step::Service(id.clone()),
-                },
-            };
-            reporter.report(fraction, step);
-        };
+        let mut report =
+            |fraction, stage: Stage<'_>| reporter.report(fraction, window_step(&stage));
         let choice = Choice {
             components: Some(&picked.components),
             location: picked.location.as_deref(),
@@ -144,6 +107,76 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             eprintln!("cannot open the setup window: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// the setup's brand with its images decoded. an image that does not
+/// decode is left out rather than stopping the setup.
+#[cfg(feature = "gui")]
+fn window_brand(c: &mut Container) -> kago::gui::setup::Brand {
+    let mut image = |name: &str| {
+        c.asset(name)
+            .ok()
+            .flatten()
+            .and_then(|png| kago::format::image::decode_png(&png).ok())
+    };
+    let (logo, header, side) = (image("logo"), image("header"), image("side"));
+    let brand = &c.header.setup.brand;
+    kago::gui::setup::Brand {
+        text: brand.text.clone(),
+        accent: brand.accent,
+        welcome: brand.welcome.clone(),
+        finish: brand.finish.clone(),
+        link: brand.link.clone(),
+        logo,
+        header,
+        side,
+    }
+}
+
+/// the plan's choices as tick boxes. one for something this machine lacks
+/// starts unticked, unless it cannot be left out.
+#[cfg(feature = "gui")]
+fn window_components(choices: &[kago::install::Choice]) -> Vec<kago::gui::setup::Component> {
+    choices
+        .iter()
+        .map(|choice| {
+            let missing = choice
+                .detect
+                .filter(|d| !platform::detect(*d))
+                .map(|d| d.name().to_owned());
+            kago::gui::setup::Component {
+                id: choice.id.clone(),
+                name: choice.name.clone(),
+                description: choice.description.clone(),
+                default: choice.required || (choice.default && missing.is_none()),
+                required: choice.required,
+                depends: choice.depends.clone(),
+                size: choice.size,
+                missing,
+            }
+        })
+        .collect()
+}
+
+/// a line for the details list.
+#[cfg(feature = "gui")]
+fn window_step(stage: &Stage<'_>) -> kago::gui::setup::Step {
+    use kago::gui::setup::Step;
+    match stage {
+        Stage::Unpack(path) => Step::Unpack(path.to_string()),
+        Stage::Apply(op) => match op {
+            Operation::CreateDirectory { path } => Step::Folder(path.to_string()),
+            Operation::InstallFile { target, .. } => Step::File(target.to_string()),
+            Operation::AddPathEntry { directory, .. } => Step::Path(directory.to_string()),
+            Operation::RegisterSteamVrDriver { directory } => Step::SteamVr(directory.to_string()),
+            Operation::CreateShortcut { name, .. } => Step::Shortcut(name.clone()),
+            Operation::RegisterApplication { display_name, .. } => {
+                Step::Register(display_name.clone())
+            }
+            Operation::RunHook { command, .. } => Step::Hook(command.to_string()),
+            Operation::InstallService { id, .. } => Step::Service(id.clone()),
+        },
     }
 }
 

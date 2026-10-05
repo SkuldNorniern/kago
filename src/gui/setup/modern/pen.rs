@@ -129,6 +129,21 @@ pub fn smooth(t: f32) -> f32 {
 pub struct Pen<'a> {
     pub ctx: &'a mut dyn DrawingContext,
     pub lang: Lang,
+    /// the main color: kago's, or the package's brand accent.
+    pub accent: Color,
+    /// text and marks drawn on `accent`.
+    pub on_accent: Color,
+}
+
+/// dark text on a light accent, light text on a dark one.
+pub fn on(accent: Color) -> Color {
+    let luma =
+        0.2126 * f32::from(accent.r) + 0.7152 * f32::from(accent.g) + 0.0722 * f32::from(accent.b);
+    if luma > 140.0 {
+        color::ACCENT_TEXT
+    } else {
+        color::TEXT
+    }
 }
 
 impl Pen<'_> {

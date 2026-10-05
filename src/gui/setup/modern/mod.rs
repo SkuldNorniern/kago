@@ -16,6 +16,7 @@ use aurea::{AureaResult, KeyCode, MouseButton, Window, WindowEvent};
 use super::text::{Lang, Line};
 use super::wizard::{Action, Page};
 use super::{Info, Session};
+use aurea::render::{Color, Image};
 use pen::{Anim, Area, Pen, color, smooth};
 
 const WIDTH: u32 = 640;
@@ -40,6 +41,7 @@ mod key {
             super::Hit::Accept => 102,
             super::Hit::License => 103,
             super::Hit::Browse => 104,
+            super::Hit::Link => 105,
             super::Hit::Component(i) => 200 + i,
         }
     }
@@ -59,6 +61,8 @@ enum Hit {
     Component(u32),
     /// change the install folder.
     Browse,
+    /// the brand link on the finish page.
+    Link,
 }
 
 struct State {
@@ -76,6 +80,75 @@ struct State {
     close: bool,
     /// the folder dialog was asked for; the loop opens it.
     want_browse: bool,
+    art: Art,
+}
+
+/// the brand's images, scaled once for the display they are shown on.
+#[derive(Default)]
+struct Art {
+    logo: Option<Image>,
+    header: Option<Image>,
+    /// already cropped to fill the side panel.
+    side: Option<Image>,
+    accent: Option<Color>,
+}
+
+/// width of the side panel when the brand has a side image.
+const SIDE_W: f32 = 180.0;
+
+impl Art {
+    fn new(brand: &super::Brand, height: f32, scale: f32) -> Self {
+        let px = |v: f32| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let px = (v * scale).round().max(1.0) as u32;
+            px
+        };
+        let image =
+            |rgba: crate::format::image::Rgba| Image::new(rgba.width, rgba.height, rgba.pixels);
+        Self {
+            logo: brand
+                .logo
+                .as_ref()
+                .map(|l| image(l.fit(px(52.0), px(52.0)))),
+            header: brand
+                .header
+                .as_ref()
+                .map(|h| image(h.fit(px(150.0), px(57.0)))),
+            side: brand
+                .side
+                .as_ref()
+                .map(|s| image(cover(s, px(SIDE_W), px(height)))),
+            accent: brand.accent.map(|[r, g, b]| Color::rgb(r, g, b)),
+        }
+    }
+}
+
+/// `image` scaled to fill `width` x `height`, cut evenly at the sides
+/// that stick out.
+fn cover(
+    image: &crate::format::image::Rgba,
+    width: u32,
+    height: u32,
+) -> crate::format::image::Rgba {
+    let scale = (f64::from(width) / f64::from(image.width.max(1)))
+        .max(f64::from(height) / f64::from(image.height.max(1)));
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (sw, sh) = (
+        ((f64::from(image.width) * scale).ceil() as u32).max(width),
+        ((f64::from(image.height) * scale).ceil() as u32).max(height),
+    );
+    let big = image.resize(sw, sh);
+    let (x0, y0) = ((sw - width) / 2, (sh - height) / 2);
+    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height {
+        let start = (((y + y0) * sw + x0) * 4) as usize;
+        pixels.extend_from_slice(&big.pixels[start..start + (width * 4) as usize]);
+    }
+    crate::format::image::Rgba {
+        width,
+        height,
+        pixels,
+    }
 }
 
 impl State {
@@ -98,6 +171,12 @@ impl State {
             (_, Hit::Accept) => Action::ToggleAccept,
             (_, Hit::Browse) => {
                 self.want_browse = true;
+                return;
+            }
+            (_, Hit::Link) => {
+                if let Some((_, url)) = &self.info.brand.link {
+                    Session::open_link(url);
+                }
                 return;
             }
             (_, Hit::Component(i)) => {
@@ -187,12 +266,20 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
     } else {
         HEIGHT + (COMPONENTS_CAPTION + COMPONENT_ROW * info.components.len() as f32).ceil() as u32
     };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let width = if info.brand.side.is_some() {
+        WIDTH + SIDE_W as u32
+    } else {
+        WIDTH
+    };
     let mut window = Window::new(
         &lang.fill(Line::WindowTitle, &[("name", &info.name)]),
-        WIDTH.cast_signed(),
+        width.cast_signed(),
         height.cast_signed(),
     )?;
-    let canvas = Canvas::new(WIDTH, height, RendererBackend::Cpu)?;
+    let canvas = Canvas::new(width, height, RendererBackend::Cpu)?;
+    #[allow(clippy::cast_precision_loss)]
+    let art = Art::new(&info.brand, height as f32, window.scale_factor().max(1.0));
     canvas.set_background_color(color::BACKGROUND);
     let state = Rc::new(RefCell::new(State {
         info: info.clone(),
@@ -207,6 +294,7 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
         scroll_max: 0.0,
         close: false,
         want_browse: false,
+        art,
     }));
     let drawn = Rc::clone(&state);
     canvas.set_draw_callback(move |ctx| draw(ctx, &mut drawn.borrow_mut()))?;
@@ -271,7 +359,13 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         s.shown = Some(page);
         s.scroll = 0.0;
     }
-    let mut pen = Pen { ctx, lang: s.lang };
+    let accent = s.art.accent.unwrap_or(color::ACCENT);
+    let mut pen = Pen {
+        ctx,
+        lang: s.lang,
+        accent,
+        on_accent: pen::on(accent),
+    };
     let mut frame = Frame {
         hits: Vec::new(),
         hovered: s.hovered(),
@@ -279,22 +373,35 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         anim: &mut anim,
     };
     pen.fill(Area::new(0.0, 0.0, w, h), color::BACKGROUND)?;
-    header(&mut pen, &s.info, w)?;
+    // the side panel, like NSIS's welcome bitmap, takes the left edge.
+    let left = if let Some(side) = &s.art.side {
+        pen.ctx
+            .draw_image_rect(side, aurea::render::Rect::new(0.0, 0.0, SIDE_W, h))?;
+        SIDE_W
+    } else {
+        0.0
+    };
+    header(&mut pen, s, left, w)?;
 
     let arrived = smooth(frame.anim.to(key::PAGE, 1.0, 10.0));
     let rise = 12.0 * (1.0 - arrived);
+    let inner = w - left - 2.0 * MARGIN;
     let body = Area::new(
-        MARGIN,
+        left + MARGIN,
         112.0 + rise,
-        w - 2.0 * MARGIN,
+        inner,
         h - 112.0 - MARGIN - BUTTON_H - 20.0,
     );
-    let footer = Area::new(
-        MARGIN,
-        h - MARGIN - BUTTON_H + rise,
-        w - 2.0 * MARGIN,
-        BUTTON_H,
-    );
+    let footer = Area::new(left + MARGIN, h - MARGIN - BUTTON_H + rise, inner, BUTTON_H);
+    if let Some(text) = &s.info.brand.text {
+        // NSIS's branding text, quiet at the bottom left.
+        pen.clipped(
+            text,
+            Area::new(footer.x, footer.y, (footer.w - 280.0).max(0.0), footer.h),
+            &pen.font(12.0),
+            color::FAINT,
+        )?;
+    }
     match page {
         Page::Welcome | Page::Components | Page::Directory => {
             welcome(&mut pen, &mut frame, s, body, footer)?;
@@ -306,7 +413,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
     }
     if arrived < 1.0 {
         pen.veil(
-            Area::new(0.0, 100.0, w, h - 100.0),
+            Area::new(left, 100.0, w - left, h - 100.0),
             color::BACKGROUND,
             1.0 - arrived,
         )?;
@@ -335,19 +442,47 @@ impl Frame<'_> {
     }
 }
 
-/// the app's mark, name and version, the same on every page.
-fn header(pen: &mut Pen<'_>, info: &Info, w: f32) -> AureaResult<()> {
-    let mark = Area::new(MARGIN, MARGIN, 52.0, 52.0);
-    pen.round(mark, 14.0, color::ACCENT)?;
-    let initial: String = info.name.chars().take(1).collect();
-    pen.centred(
-        &initial.to_uppercase(),
-        mark,
-        &pen.bold(24.0),
-        color::ACCENT_TEXT,
-    )?;
+/// the app's mark, name and version, the same on every page. the mark is
+/// the brand logo or app icon when there is one, else the first letter.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "image sides are a few hundred pixels"
+)]
+fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
+    let info = &s.info;
+    let mark = Area::new(left + MARGIN, MARGIN, 52.0, 52.0);
+    if let Some(logo) = &s.art.logo {
+        // fitted in 52x52 keeping its shape: center the shorter side.
+        let scale = 52.0 / logo.width.max(logo.height) as f32;
+        let (lw, lh) = (logo.width as f32 * scale, logo.height as f32 * scale);
+        let at = aurea::render::Rect::new(
+            mark.x + (52.0 - lw) / 2.0,
+            mark.y + (52.0 - lh) / 2.0,
+            lw,
+            lh,
+        );
+        pen.ctx.draw_image_rect(logo, at)?;
+    } else {
+        pen.round(mark, 14.0, pen.accent)?;
+        let initial: String = info.name.chars().take(1).collect();
+        pen.centred(
+            &initial.to_uppercase(),
+            mark,
+            &pen.bold(24.0),
+            pen.on_accent,
+        )?;
+    }
+    let mut right = w - MARGIN;
+    if let Some(image) = &s.art.header {
+        let scale = (150.0 / image.width as f32).min(57.0 / image.height as f32);
+        let (iw, ih) = (image.width as f32 * scale, image.height as f32 * scale);
+        right -= iw;
+        let at = aurea::render::Rect::new(right, MARGIN + (52.0 - ih) / 2.0, iw, ih);
+        pen.ctx.draw_image_rect(image, at)?;
+        right -= 16.0;
+    }
     let x = mark.right() + 16.0;
-    let text_w = w - x - MARGIN;
+    let text_w = (right - x).max(0.0);
     pen.clipped(
         &info.name,
         Area::new(x, MARGIN + 2.0, text_w, 28.0),
@@ -387,10 +522,7 @@ fn pill(
         frame.hover(hit)
     };
     let (bg, fg) = match tone {
-        Tone::Main => (
-            color::mix(color::ACCENT, color::TEXT, t * 0.18),
-            color::ACCENT_TEXT,
-        ),
+        Tone::Main => (color::mix(pen.accent, color::TEXT, t * 0.18), pen.on_accent),
         Tone::Quiet => (
             color::mix(color::RAISED, color::HOVER, t),
             color::mix(color::DIM, color::TEXT, t),
@@ -458,9 +590,9 @@ fn tick(
     // no hit: locked, ticked and quieter.
     let t = hit.map_or(0.0, |hit| frame.hover(hit));
     let fill = if hit.is_some() {
-        color::ACCENT
+        pen.accent
     } else {
-        color::mix(color::ACCENT, color::SURFACE, 0.45)
+        color::mix(pen.accent, color::SURFACE, 0.45)
     };
     let boxed = Area::new(a.x, a.y + 2.0, 20.0, 20.0);
     pen.round(
@@ -470,7 +602,7 @@ fn tick(
     )?;
     pen.outline(boxed, 6.0, 1.0, color::mix(color::BORDER, fill, on))?;
     if on > 0.05 {
-        let c = color::mix(color::RAISED, color::ACCENT_TEXT, on);
+        let c = color::mix(color::RAISED, pen.on_accent, on);
         pen.line(
             (boxed.x + 5.0, boxed.y + 10.5),
             (boxed.x + 8.5, boxed.y + 14.0),
@@ -566,8 +698,14 @@ fn welcome(
         )
     };
     let font = pen.font(14.0);
+    let intro = s
+        .info
+        .brand
+        .welcome
+        .clone()
+        .unwrap_or_else(|| fill(Line::WelcomeBody));
     let used = pen.wrapped(
-        &fill(Line::WelcomeBody),
+        &intro,
         Area::new(body.x, body.y, body.w, 44.0),
         &font,
         color::TEXT,
@@ -625,7 +763,7 @@ fn welcome(
         let link_w = pen.width(link, &link_font);
         let link_area = Area::new(left, y, link_w, 24.0);
         let hover = frame.hover(Hit::License);
-        let tone = color::mix(color::ACCENT, color::TEXT, hover * 0.5);
+        let tone = color::mix(pen.accent, color::TEXT, hover * 0.5);
         pen.clipped(link, link_area, &link_font, tone)?;
         frame.hits.push((link_area, Hit::License));
     }
@@ -717,7 +855,7 @@ fn installing(pen: &mut Pen<'_>, frame: &mut Frame<'_>, s: &State, body: Area) -
         pen.round(
             Area::new(track.x, track.y, (track.w * shown).max(8.0), track.h),
             4.0,
-            color::ACCENT,
+            pen.accent,
         )?;
     }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -806,12 +944,32 @@ fn done(
         &pen.bold(18.0),
         color::TEXT,
     )?;
-    pen.wrapped(
-        &lang.fill(Line::DoneBody, &[("name", name)]),
-        Area::new(x, body.y + 38.0, body.w - 60.0, 44.0),
+    let outro = s
+        .info
+        .brand
+        .finish
+        .clone()
+        .unwrap_or_else(|| lang.fill(Line::DoneBody, &[("name", name)]));
+    let used = pen.wrapped(
+        &outro,
+        Area::new(x, body.y + 38.0, body.w - 60.0, 66.0),
         &pen.font(14.0),
         color::DIM,
     )?;
+    if let Some((label, _)) = &s.info.brand.link {
+        let font = pen.bold(14.0);
+        let link = Area::new(x, body.y + 46.0 + used, pen.width(label, &font), 22.0);
+        let hover = frame.hover(Hit::Link);
+        let tone = color::mix(pen.accent, color::TEXT, hover * 0.5);
+        pen.clipped(label, link, &font, tone)?;
+        pen.line(
+            (link.x, link.bottom() - 2.0),
+            (link.right(), link.bottom() - 2.0),
+            1.0,
+            color::mix(color::BACKGROUND, tone, 0.3 + hover * 0.7),
+        )?;
+        frame.hits.push((link, Hit::Link));
+    }
     if s.session.wizard.launch.is_some() {
         buttons(
             pen,

@@ -14,6 +14,7 @@ use std::thread;
 
 use aurea::AureaResult;
 
+use crate::format::image::Rgba;
 use crate::install::LocationError;
 use crate::manifest::SetupLook;
 use text::{Lang, Line};
@@ -33,6 +34,25 @@ pub struct Info {
     pub license: Option<License>,
     /// optional parts the person can tick or untick.
     pub components: Vec<Component>,
+    pub brand: Brand,
+}
+
+/// how the package dresses its setup. everything is optional.
+#[derive(Debug, Clone, Default)]
+pub struct Brand {
+    /// small text at the bottom left, like NSIS's `BrandingText`.
+    pub text: Option<String>,
+    pub accent: Option<[u8; 3]>,
+    pub welcome: Option<String>,
+    pub finish: Option<String>,
+    /// label and URL of a link on the finish page.
+    pub link: Option<(String, String)>,
+    /// the app's mark; the app icon unless the package gave one.
+    pub logo: Option<Rgba>,
+    /// top right of the classic look's inner pages.
+    pub header: Option<Rgba>,
+    /// along the left of the welcome and finish pages.
+    pub side: Option<Rgba>,
 }
 
 /// an optional part of the package.
@@ -300,6 +320,21 @@ impl Session {
         changed
     }
 
+    /// opens the brand link in the browser.
+    fn open_link(url: &str) {
+        let opener = if cfg!(windows) {
+            "explorer"
+        } else if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        // only web links; nothing else gets handed to the shell.
+        if url.starts_with("https://") || url.starts_with("http://") {
+            let _ = std::process::Command::new(opener).arg(url).spawn();
+        }
+    }
+
     /// whether the install has finished, for the exit code.
     fn installed(&self) -> bool {
         self.wizard.page == wizard::Page::Done
@@ -323,6 +358,7 @@ mod tests {
             upgrade: false,
             license: None,
             components: Vec::new(),
+            brand: Brand::default(),
         }
     }
 
