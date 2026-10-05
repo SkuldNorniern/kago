@@ -82,6 +82,32 @@ impl Rgba {
         self.resize(w, h)
     }
 
+    /// scaled to fill `width` x `height`, cut evenly at the sides that
+    /// stick out, like a side banner.
+    #[must_use]
+    pub fn cover(&self, width: u32, height: u32) -> Self {
+        let scale = (f64::from(width) / f64::from(self.width.max(1)))
+            .max(f64::from(height) / f64::from(self.height.max(1)));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let (sw, sh) = (
+            ((f64::from(self.width) * scale).ceil() as u32).max(width),
+            ((f64::from(self.height) * scale).ceil() as u32).max(height),
+        );
+        let big = self.resize(sw, sh);
+        let (x0, y0) = ((sw - width) / 2, (sh - height) / 2);
+        let row = width as usize * 4;
+        let mut pixels = Vec::with_capacity(row * height as usize);
+        for y in 0..height {
+            let start = ((y + y0) as usize * sw as usize + x0 as usize) * 4;
+            pixels.extend_from_slice(&big.pixels[start..start + row]);
+        }
+        Self {
+            width,
+            height,
+            pixels,
+        }
+    }
+
     /// scaled to exactly `width` x `height`, alpha-weighted so transparent
     /// edges do not turn dark.
     #[must_use]
@@ -166,6 +192,25 @@ mod tests {
         };
         let one = image.resize(1, 1);
         assert_eq!(one.pixels, [255, 255, 255, 127]);
+    }
+
+    #[test]
+    fn cover_fills_and_crops_the_middle() {
+        // 4x1: red, green, green, blue. covering 1x1 keeps the middle.
+        let image = Rgba {
+            width: 4,
+            height: 1,
+            pixels: [
+                [255, 0, 0, 255],
+                [0, 255, 0, 255],
+                [0, 255, 0, 255],
+                [0, 0, 255, 255],
+            ]
+            .concat(),
+        };
+        let square = image.cover(2, 2);
+        assert_eq!((square.width, square.height), (2, 2));
+        assert_eq!(&square.pixels[..4], &[0, 255, 0, 255]);
     }
 
     #[test]

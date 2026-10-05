@@ -117,37 +117,9 @@ impl Art {
             side: brand
                 .side
                 .as_ref()
-                .map(|s| image(cover(s, px(SIDE_W), px(height)))),
+                .map(|s| image(s.cover(px(SIDE_W), px(height)))),
             accent: brand.accent.map(|[r, g, b]| Color::rgb(r, g, b)),
         }
-    }
-}
-
-/// `image` scaled to fill `width` x `height`, cut evenly at the sides
-/// that stick out.
-fn cover(
-    image: &crate::format::image::Rgba,
-    width: u32,
-    height: u32,
-) -> crate::format::image::Rgba {
-    let scale = (f64::from(width) / f64::from(image.width.max(1)))
-        .max(f64::from(height) / f64::from(image.height.max(1)));
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let (sw, sh) = (
-        ((f64::from(image.width) * scale).ceil() as u32).max(width),
-        ((f64::from(image.height) * scale).ceil() as u32).max(height),
-    );
-    let big = image.resize(sw, sh);
-    let (x0, y0) = ((sw - width) / 2, (sh - height) / 2);
-    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        let start = (((y + y0) * sw + x0) * 4) as usize;
-        pixels.extend_from_slice(&big.pixels[start..start + (width * 4) as usize]);
-    }
-    crate::format::image::Rgba {
-        width,
-        height,
-        pixels,
     }
 }
 
