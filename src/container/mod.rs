@@ -39,6 +39,7 @@ pub struct Asset {
     pub name: String,
     /// from the start of the payload.
     pub offset: u64,
+    /// bytes in the container, zstd compressed.
     pub size: u64,
 }
 
@@ -140,13 +141,16 @@ pub fn write(
         }
     }
     let mut stored = Vec::new();
+    let mut packed_assets = Vec::new();
     for (name, bytes) in assets {
+        let bytes = zstd::encode_all(bytes.as_slice(), LEVEL)?;
         stored.push(Asset {
             name: name.clone(),
             offset,
             size: bytes.len() as u64,
         });
         offset += bytes.len() as u64;
+        packed_assets.push(bytes);
     }
     let header = serde_json::to_vec(&Header {
         format: FORMAT,
@@ -162,7 +166,7 @@ pub fn write(
     for bytes in &packed {
         out.write_all(bytes)?;
     }
-    for (_, bytes) in assets {
+    for bytes in &packed_assets {
         out.write_all(bytes)?;
     }
     Ok(16 + header.len() as u64 + offset)
@@ -190,7 +194,7 @@ impl Container {
         self.file
             .seek(SeekFrom::Start(self.payload_start + asset.offset))?;
         self.file.read_exact(&mut bytes)?;
-        Ok(Some(bytes))
+        zstd::decode_all(bytes.as_slice()).map(Some)
     }
 
     /// reads the container that starts at `offset` in `path`.
@@ -377,7 +381,8 @@ mod tests {
         // flip one payload byte: extraction must refuse.
         let mut bytes = fs::read(&path).unwrap();
         // the last payload byte; the asset comes after it.
-        let last = bytes.len() - 1 - b"png bytes".len();
+        let asset = zstd::encode_all(&b"png bytes"[..], LEVEL).unwrap().len();
+        let last = bytes.len() - 1 - asset;
         bytes[last] ^= 0xff;
         fs::write(&path, bytes).unwrap();
         let mut c = Container::open(&path, 4).unwrap();
