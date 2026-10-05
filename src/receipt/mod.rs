@@ -64,6 +64,10 @@ pub enum Resource {
     LoginItem {
         name: String,
     },
+    /// a Windows service.
+    Service {
+        name: String,
+    },
     /// a Windows Firewall rule, in the package's group.
     FirewallRule {
         name: String,

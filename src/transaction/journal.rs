@@ -40,6 +40,11 @@ pub enum Undo {
         name: String,
         previous: Option<String>,
     },
+    /// puts a Windows service back as it was, removing it for `None`.
+    RestoreService {
+        name: String,
+        previous: Option<crate::platform::WindowsService>,
+    },
     /// puts a firewall rule back as it was, removing it for `None`.
     RestoreFirewallRule {
         name: String,

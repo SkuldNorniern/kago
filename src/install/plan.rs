@@ -528,17 +528,18 @@ impl Steps {
             self.push(op, s.shortcut.component.clone());
         }
         for s in &resolved.services {
-            if scope.of(s.service.scope) == Scope::Machine {
+            // a Windows service needs an install for everyone.
+            if scope == Scope::User && scope.of(s.service.scope) == Scope::Machine {
                 diagnostics.push(
                     Diagnostic::error(
                         diagnostic::TARGET_CAPABILITY,
                         format!(
-                            "service `{}` for every user needs the elevation helper, which is not done yet",
+                            "service `{}` for everyone needs an install for everyone",
                             s.service.id
                         ),
                     )
                     .at(s.service.at.clone())
-                    .help("add `scope user` under it: it starts when the person installing signs in"),
+                    .help("use `scope machine` in the package, or `scope user` under the service to start it at sign-in"),
                 );
                 continue;
             }
@@ -547,6 +548,9 @@ impl Steps {
                 command: s.command.clone(),
                 arguments: s.service.arguments.clone(),
                 scope: scope.of(s.service.scope),
+                name: s.service.name.clone(),
+                manual: s.service.start == crate::manifest::ServiceStart::Manual,
+                restart: s.service.restart != crate::manifest::ServiceRestart::Never,
             };
             self.push(op, s.service.component.clone());
         }
@@ -554,7 +558,7 @@ impl Steps {
 }
 
 /// with `scope choose`, PATH entries follow the pick, and a service has
-/// to say it is per-user: one for everyone is not done yet.
+/// to be a per-user sign-in item.
 fn fixed_with_open_scope(resolved: &Resolved, diagnostics: &mut Diagnostics) {
     for p in &resolved.paths {
         if p.scope != ResourceScope::ResolvedInstall {
@@ -567,18 +571,21 @@ fn fixed_with_open_scope(resolved: &Resolved, diagnostics: &mut Diagnostics) {
             ));
         }
     }
+    // a service is a sign-in item or a Windows service, two different
+    // things, so it cannot follow the pick; and a Windows service cannot
+    // be installed just for one person.
     for s in &resolved.services {
-        if s.service.scope == ResourceScope::ResolvedInstall {
+        if s.service.scope != ResourceScope::User {
             diagnostics.push(
                 Diagnostic::error(
                     diagnostic::INSTALL_SCOPE,
                     format!(
-                        "service `{}` would run for everyone when the person picks that, which is not done yet",
+                        "service `{}` cannot follow `scope choose`",
                         s.service.id
                     ),
                 )
                 .at(s.service.at.clone())
-                .help("add `scope user` under it: it starts when the person installing signs in"),
+                .help("add `scope user` under it to start it at sign-in, or use `scope machine` in the package for a Windows service"),
             );
         }
     }

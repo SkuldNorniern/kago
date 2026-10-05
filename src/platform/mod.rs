@@ -323,6 +323,29 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     }
 }
 
+/// `exe` and `arguments` as one Windows command line, each quoted the way
+/// programs read them back.
+#[must_use]
+pub fn command_line(exe: &Path, arguments: &[String]) -> String {
+    #[cfg(windows)]
+    {
+        let mut command = windows::quote(&exe.display().to_string());
+        let rest = windows::join_arguments(arguments);
+        if !rest.is_empty() {
+            command.push(' ');
+            command.push_str(&rest);
+        }
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        std::iter::once(exe.display().to_string())
+            .chain(arguments.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
 /// a Windows service: runs for everyone, as the `LocalSystem` account, without anyone
 /// signed in.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

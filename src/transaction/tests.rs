@@ -21,6 +21,7 @@ struct Fake {
     /// what was left for the next restart, in order.
     at_restart: RefCell<Vec<PathBuf>>,
     firewall: RefCell<BTreeMap<String, crate::platform::Firewall>>,
+    services: RefCell<BTreeMap<String, crate::platform::WindowsService>>,
 }
 
 impl Fake {
@@ -35,6 +36,7 @@ impl Fake {
             login: RefCell::new(BTreeMap::new()),
             at_restart: RefCell::new(Vec::new()),
             firewall: RefCell::new(BTreeMap::new()),
+            services: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -115,6 +117,23 @@ impl Platform for Fake {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         self.steamvr.borrow_mut().retain(|d| d != directory);
+        Ok(())
+    }
+
+    fn service(&self, name: &str) -> Result<Option<crate::platform::WindowsService>, String> {
+        Ok(self.services.borrow().get(name).cloned())
+    }
+
+    fn set_service(
+        &self,
+        name: &str,
+        service: Option<&crate::platform::WindowsService>,
+    ) -> Result<(), String> {
+        let mut services = self.services.borrow_mut();
+        match service {
+            Some(service) => services.insert(name.to_owned(), service.clone()),
+            None => services.remove(name),
+        };
         Ok(())
     }
 
@@ -201,12 +220,16 @@ impl World {
     }
 
     fn plan(&self, manifest: &str) -> InstallPlan {
+        self.plan_in(manifest, Scope::User)
+    }
+
+    fn plan_in(&self, manifest: &str, scope: Scope) -> InstallPlan {
         let m = Manifest::parse("Kagofile", manifest).0.unwrap();
         let target = "windows-x86_64".parse().unwrap();
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0
             .unwrap();
-        InstallPlan::build(&m, &r, target, Scope::User, self.dir.as_path())
+        InstallPlan::build(&m, &r, target, scope, self.dir.as_path())
             .0
             .unwrap()
     }
@@ -309,6 +332,35 @@ fn firewall_rules_come_and_go_with_installs_for_everyone() {
     plan.scope = Scope::User;
     install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
     assert!(w.fake.firewall.borrow().is_empty());
+}
+
+#[test]
+fn services_for_everyone_are_windows_services() {
+    let w = World::new("winservice");
+    let manifest = format!("{MANIFEST}service main --background\n  restart never\n");
+    let plan = w.plan_in(&manifest, Scope::Machine);
+    install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    let service = w.fake.services.borrow().get("dev.test.app.main").cloned();
+    let service = service.unwrap();
+    assert!(service.command_line.contains("app.exe"));
+    assert!(service.command_line.ends_with("--background"));
+    assert!(service.automatic && !service.restart_on_failure);
+    assert_eq!(service.display_name, "App main");
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.services.borrow().is_empty());
+
+    // a failed install takes its service out again.
+    let mut broken = plan.clone();
+    broken.operations.push(Operation::CreateDirectory {
+        path: "{app}/x".parse().unwrap(),
+    });
+    let w2 = World::new("winservice-fail");
+    let fake = Fake {
+        fail_register: true,
+        ..Fake::new(w2.dir.join("machine"))
+    };
+    assert!(install(&broken, &fake, &w2.store, &w2.dir.join("kago.exe")).is_err());
+    assert!(fake.services.borrow().is_empty(), "rolled back");
 }
 
 #[test]

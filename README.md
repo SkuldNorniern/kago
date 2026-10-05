@@ -152,7 +152,7 @@ A download is only used when its sha256 matches. Leave the `sha256` line out at 
 | `shortcut` | Start menu entry for the first app; `shortcut "Name" desktop -> <app>` for others |
 | `path` | puts the app's folder on the user's PATH; `path optional "label"` makes it a tick box |
 | `steamvr <driver folder>` | copies a SteamVR driver and registers it with SteamVR; the folder needs `driver.vrdrivermanifest` |
-| `service <app> [arguments]` | starts the app when the user signs in; `name "..."` under it |
+| `service <app> [arguments]` | installed for everyone: a Windows service (your program has to speak the service protocol); `scope user` under it: starts the app when the person signs in instead. Under it: `name "..."`, `start manual`, `restart never` (it restarts after a crash by default) |
 | `hook post-install <app> [arguments]` | runs one of your own programs after the files are in; if it fails, the install is undone |
 | `hook pre-uninstall <app> [arguments]` | runs first on uninstall |
 | `firewall <app> ["Rule name"] [public]` | lets the app accept connections through Windows Firewall on private networks (and public ones with `public`), so Windows does not ask the first time it listens; installs for everyone only, the uninstall removes the rule |
@@ -328,7 +328,6 @@ Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 
 ## Not supported yet
 
-- `service` for everyone (a Windows service); per-user sign-in services work
 - Linux and macOS setups, and MSI, DMG, AppImage, DEB, RPM outputs; `target` lines for them only check the Kagofile
 - building a setup for another OS or architecture than the machine running `kago build`
 - checking for updates on a schedule; the app or the person runs `kago update`

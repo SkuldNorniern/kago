@@ -167,6 +167,7 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
         | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
         | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
+        | (Resource::Service { name: a }, Resource::Service { name: b })
         | (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
             a == b
         }
@@ -321,8 +322,13 @@ impl Run<'_> {
                 id,
                 command,
                 arguments,
-                scope,
-            } => self.login_item(id, command, arguments, *scope),
+                scope: Scope::User,
+                ..
+            } => self.login_item(id, command, arguments),
+            Operation::InstallService {
+                scope: Scope::Machine,
+                ..
+            } => self.windows_service(op),
             Operation::AllowThroughFirewall {
                 name,
                 program,
@@ -371,13 +377,7 @@ impl Run<'_> {
         id: &str,
         command: &SemanticPath,
         arguments: &[String],
-        scope: Scope,
     ) -> Result<(), Error> {
-        if scope == Scope::Machine {
-            return Err(Error::Other(format!(
-                "service `{id}` for every user needs the elevation helper, which is not done yet"
-            )));
-        }
         let exe = self.resolve(command)?;
         let name = format!("{}.{id}", self.plan.package);
         let previous = self.platform.login_item(&name).map_err(Error::Other)?;
@@ -389,6 +389,43 @@ impl Run<'_> {
             .add_login_item(&name, &exe, arguments)
             .map_err(Error::Other)?;
         self.resources.push(Resource::LoginItem { name });
+        Ok(())
+    }
+
+    /// a Windows service, named after the package so two never clash.
+    fn windows_service(&mut self, op: &Operation) -> Result<(), Error> {
+        let Operation::InstallService {
+            id,
+            command,
+            arguments,
+            name,
+            manual,
+            restart,
+            ..
+        } = op
+        else {
+            return Ok(());
+        };
+        let exe = self.resolve(command)?;
+        let service = crate::platform::WindowsService {
+            display_name: name
+                .clone()
+                .unwrap_or_else(|| format!("{} {id}", self.plan.name)),
+            command_line: crate::platform::command_line(&exe, arguments),
+            automatic: !manual,
+            restart_on_failure: *restart,
+        };
+        let service = &service;
+        let name = format!("{}.{id}", self.plan.package);
+        let previous = self.platform.service(&name).map_err(Error::Other)?;
+        self.step(Undo::RestoreService {
+            name: name.clone(),
+            previous,
+        })?;
+        self.platform
+            .set_service(&name, Some(service))
+            .map_err(Error::Other)?;
+        self.resources.push(Resource::Service { name });
         Ok(())
     }
 

@@ -52,11 +52,22 @@ pub enum Operation {
         command: SemanticPath,
         arguments: Vec<String>,
     },
+    /// per user, a program started at sign-in; for everyone, a Windows
+    /// service.
     InstallService {
         id: String,
         command: SemanticPath,
         arguments: Vec<String>,
         scope: Scope,
+        /// what Windows shows for it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// a service started only when asked, not with Windows.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        manual: bool,
+        /// a service started again after it crashes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        restart: bool,
     },
     /// lets `program` accept connections through Windows Firewall. needs
     /// an install for everyone; a per-user one leaves it to Windows to

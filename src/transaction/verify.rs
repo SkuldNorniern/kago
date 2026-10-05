@@ -64,6 +64,7 @@ pub fn verify(receipt: &Receipt) -> Verified {
             | Resource::UninstallHook { .. }
             | Resource::LoginItem { .. }
             | Resource::FirewallRule { .. }
+            | Resource::Service { .. }
             | Resource::Registration { .. } => out.unchecked += 1,
         }
     }

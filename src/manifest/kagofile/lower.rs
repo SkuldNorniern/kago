@@ -554,13 +554,19 @@ impl Lower<'_> {
         };
         let mut name = None;
         let mut service_scope = None;
+        let mut start = None;
+        let mut restart = None;
         for child in &node.children {
             match child.keyword() {
                 "name" => name = Some(rest(child.args())),
                 "scope" => service_scope = self.one(child),
+                "start" => start = self.one(child),
+                "restart" => restart = self.one(child),
                 other => self.syntax(
                     child.at(),
-                    format!("unknown service field `{other}`; expected name or scope"),
+                    format!(
+                        "unknown service field `{other}`; expected name, scope, start or restart"
+                    ),
                 ),
             }
         }
@@ -571,8 +577,8 @@ impl Lower<'_> {
             command: spanned(app),
             arguments: arguments.iter().map(|a| a.text.clone()).collect(),
             scope: service_scope,
-            start: None,
-            restart: None,
+            start,
+            restart,
             component: scope.component.clone(),
             when,
         });

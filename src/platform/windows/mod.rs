@@ -8,6 +8,8 @@ pub mod folder;
 pub mod instance;
 mod registry;
 pub mod resource;
+
+pub use shortcut::{join_arguments, quote};
 pub mod restart;
 pub mod service;
 mod shortcut;
