@@ -193,9 +193,9 @@ fn brand_images(
         out.push((name.to_owned(), bytes));
     }
     if brand.logo.is_none()
-        && let Some(png) = icon.and_then(kago::format::image::png_in_icon)
+        && let Some(png) = icon.and_then(kago::format::image::logo_from_icon)
     {
-        out.push(("logo".to_owned(), png.to_vec()));
+        out.push(("logo".to_owned(), png));
     }
     Ok(out)
 }

@@ -118,7 +118,7 @@ pub fn run_embedded() -> Option<ExitCode> {
 
 #[cfg(feature = "gui")]
 fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
-    use kago::gui::setup::{Folder, Info, Installed, License, Picked, run};
+    use kago::gui::setup::{Existing, Folder, Info, Installed, License, Picked, run};
     use kago::install::check_folder;
     use kago::manifest::{FolderChoice, Root};
 
@@ -128,11 +128,22 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             let plan = &c.header.plan;
             let host = platform::host().ok();
             // where the installed version is, if there is one.
-            let installed = host
+            let receipt = host
                 .as_ref()
                 .and_then(|p| transaction::store(p.as_ref(), plan.scope).ok())
-                .and_then(|store| store.read_receipt(&plan.package).ok().flatten())
-                .and_then(|r| r.roots.get(&Root::App).cloned());
+                .and_then(|store| store.read_receipt(&plan.package).ok().flatten());
+            let existing = receipt.as_ref().map_or(Existing::None, |r| {
+                match r.version.cmp_precedence(&plan.version) {
+                    std::cmp::Ordering::Equal => Existing::Same,
+                    std::cmp::Ordering::Less => Existing::Older(r.version.to_string()),
+                    std::cmp::Ordering::Greater => Existing::Newer {
+                        version: r.version.to_string(),
+                        allowed: plan.downgrade == kago::manifest::Downgrade::Allow,
+                    },
+                }
+            });
+            // where the installed version is, if there is one.
+            let installed = receipt.and_then(|r| r.roots.get(&Root::App).cloned());
             let default = host
                 .as_ref()
                 .and_then(|p| p.roots(plan.scope, &plan.name).ok())
@@ -148,7 +159,7 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                 name: plan.name.clone(),
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
-                upgrade: installed.is_some(),
+                existing,
                 location: installed.or(default),
                 brand,
                 license: c.header.setup.license.as_ref().map(|l| License {

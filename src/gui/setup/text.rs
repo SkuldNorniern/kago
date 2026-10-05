@@ -21,6 +21,12 @@ pub enum Line {
     Return,
     Cancel,
     Install,
+    Update,
+    Repair,
+    StateRepair,
+    StateUpdate,
+    StateNewer,
+    StateReplace,
     Agree,
     LicenseTitle,
     LicenseBody,
@@ -145,6 +151,10 @@ impl Lang {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one entry per line of text, in both languages"
+)]
 const fn table(line: Line) -> [&'static str; 2] {
     match line {
         Line::WindowTitle => ["{name} Setup", "{name} 설치"],
@@ -161,6 +171,24 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Return => ["Back", "뒤로"],
         Line::Cancel => ["Cancel", "취소"],
         Line::Install => ["Install", "설치"],
+        Line::Update => ["Update", "업데이트"],
+        Line::Repair => ["Repair", "복구"],
+        Line::StateRepair => [
+            "{name} {version} is already installed. Setup will repair it.",
+            "{name} {version}이(가) 이미 설치되어 있습니다. 설치 프로그램이 복구합니다.",
+        ],
+        Line::StateUpdate => [
+            "{name} {from} is installed. Setup will update it to {version}.",
+            "{name} {from}이(가) 설치되어 있습니다. {version}(으)로 업데이트합니다.",
+        ],
+        Line::StateNewer => [
+            "A newer {name} ({from}) is installed. This setup cannot replace it.",
+            "더 새로운 {name}({from})이(가) 설치되어 있어 이 설치 프로그램으로 바꿀 수 없습니다.",
+        ],
+        Line::StateReplace => [
+            "A newer {name} ({from}) is installed. Setup will replace it with {version}.",
+            "더 새로운 {name}({from})이(가) 설치되어 있습니다. {version}(으)로 바꿉니다.",
+        ],
         Line::Agree => ["I Agree", "동의함"],
         Line::LicenseTitle => ["License Agreement", "사용권 계약"],
         Line::LicenseBody => [

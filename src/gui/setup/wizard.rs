@@ -76,6 +76,8 @@ pub struct Wizard {
     pub folder_open: bool,
     /// why `location` cannot be used, if it cannot.
     pub folder_error: Option<LocationError>,
+    /// a newer version is installed that this one may not replace.
+    pub blocked: bool,
     /// 0 to 1.
     pub fraction: f32,
     pub log: Vec<Step>,
@@ -109,6 +111,7 @@ impl Wizard {
             location,
             folder_open,
             folder_error: None,
+            blocked: false,
             fraction: 0.0,
             log: Vec::new(),
             launch: None,
@@ -288,7 +291,7 @@ impl Wizard {
 
     /// installing begins unless the folder is unusable.
     fn start(&mut self) -> Outcome {
-        if self.folder_error.is_some() {
+        if self.folder_error.is_some() || self.blocked {
             return Outcome::Stay;
         }
         self.page = Page::Installing;
@@ -485,6 +488,15 @@ mod tests {
         assert_eq!(w.location, Some(here));
         assert_eq!(w.chosen_location(), None, "upgrades stay where they are");
         assert_eq!(w.act(Action::Next), Outcome::Start);
+    }
+
+    #[test]
+    fn a_newer_install_blocks_starting() {
+        let mut w = plain(None);
+        w.blocked = true;
+        assert_eq!(w.act(Action::Next), Outcome::Stay);
+        assert_eq!(w.act(Action::Install), Outcome::Stay);
+        assert_eq!(w.act(Action::Cancel), Outcome::Exit { launch: None });
     }
 
     #[test]

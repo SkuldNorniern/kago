@@ -616,7 +616,7 @@ fn location_card(
     let y = at.y;
     let note = if let Some(error) = wizard.folder_error {
         Some((lang.folder_error(error), color::BAD))
-    } else if s.info.upgrade {
+    } else if s.info.existing.installed() {
         Some((lang.line(Line::UpdateHere), color::FAINT))
     } else {
         None
@@ -655,6 +655,49 @@ fn location_card(
     Ok(card.bottom())
 }
 
+/// the components caption and one tick row each; returns where the next
+/// thing goes.
+fn component_rows(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    s: &State,
+    at: Area,
+) -> AureaResult<f32> {
+    let lang = s.lang;
+    let wizard = &s.session.wizard;
+    let body = at;
+    let mut y = at.y;
+    caption(pen, lang.line(Line::Components), body.x, y)?;
+    y += COMPONENTS_CAPTION;
+    for (i, component) in s.info.components.iter().enumerate() {
+        #[allow(clippy::cast_possible_truncation)]
+        let index = i as u32;
+        let picked = wizard.chosen.get(i).is_some_and(|on| *on);
+        let on = frame.anim.to(key::ticked(index), f32::from(picked), 16.0);
+        let row = tick(
+            pen,
+            frame,
+            (body.x, y),
+            (
+                &component.name,
+                (!wizard.locked(i)).then_some(Hit::Component(index)),
+            ),
+            on,
+        )?;
+        let (note, warn) = component.note(lang);
+        let left = row.right() + 12.0;
+        pen.clipped(
+            &note,
+            Area::new(left, y, (body.right() - left).max(0.0), 24.0),
+            &pen.font(13.0),
+            if warn { color::WARN } else { color::FAINT },
+        )?;
+        y += COMPONENT_ROW;
+    }
+    y += 6.0;
+    Ok(y)
+}
+
 fn welcome(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
@@ -683,39 +726,30 @@ fn welcome(
         color::TEXT,
     )?;
     let mut y = body.y + used + 12.0;
+    if let Some(state) = s
+        .info
+        .existing
+        .sentence(lang, &s.info.name, &s.info.version)
+    {
+        let tone = if s.session.wizard.blocked {
+            color::BAD
+        } else {
+            color::DIM
+        };
+        let used = pen.wrapped(
+            &state,
+            Area::new(body.x, y - 4.0, body.w, 40.0),
+            &pen.font(13.0),
+            tone,
+        )?;
+        y += used + 6.0;
+    }
     let wizard = &s.session.wizard;
     if let Some(location) = &wizard.location {
         y = location_card(pen, frame, s, location, Area::new(body.x, y, body.w, 0.0))? + 16.0;
     }
     if !s.info.components.is_empty() {
-        caption(pen, lang.line(Line::Components), body.x, y)?;
-        y += COMPONENTS_CAPTION;
-        for (i, component) in s.info.components.iter().enumerate() {
-            #[allow(clippy::cast_possible_truncation)]
-            let index = i as u32;
-            let picked = wizard.chosen.get(i).is_some_and(|on| *on);
-            let on = frame.anim.to(key::ticked(index), f32::from(picked), 16.0);
-            let row = tick(
-                pen,
-                frame,
-                (body.x, y),
-                (
-                    &component.name,
-                    (!wizard.locked(i)).then_some(Hit::Component(index)),
-                ),
-                on,
-            )?;
-            let (note, warn) = component.note(lang);
-            let left = row.right() + 12.0;
-            pen.clipped(
-                &note,
-                Area::new(left, y, (body.right() - left).max(0.0), 24.0),
-                &pen.font(13.0),
-                if warn { color::WARN } else { color::FAINT },
-            )?;
-            y += COMPONENT_ROW;
-        }
-        y += 6.0;
+        y = component_rows(pen, frame, s, Area::new(body.x, y, body.w, 0.0))?;
     }
     if wizard.has_license {
         let mut left = body.x;
@@ -744,7 +778,10 @@ fn welcome(
         pen,
         frame,
         footer,
-        (lang.line(Line::Install), wizard.folder_error.is_none()),
+        (
+            lang.line(s.info.existing.verb()),
+            wizard.folder_error.is_none() && !wizard.blocked,
+        ),
         Some(lang.line(Line::Cancel)),
     )
 }
@@ -804,7 +841,7 @@ fn license(
         pen,
         frame,
         footer,
-        (lang.line(Line::Install), wizard.can_go_on()),
+        (lang.line(s.info.existing.verb()), wizard.can_go_on()),
         Some(lang.line(Line::Return)),
     )
 }

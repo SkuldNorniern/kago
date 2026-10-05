@@ -257,6 +257,9 @@ fn render(
                 .clone()
                 .unwrap_or_else(|| fill(Line::WelcomeBody));
             body.add(Label::new(&intro)?)?;
+            if let Some(state) = info.existing.sentence(lang, name, &info.version) {
+                body.add(Label::new(&state)?)?;
+            }
             if let Some(publisher) = &info.publisher {
                 body.add(Label::new(&lang.fill(Line::By, &[("name", publisher)]))?)?;
             }
@@ -269,9 +272,12 @@ fn render(
             let next = if wizard.has_license || !info.components.is_empty() || wizard.folder_open {
                 Line::Next
             } else {
-                Line::Install
+                info.existing.verb()
             };
-            buttons.add(button(lang.line(next), tx, Action::Next)?)?;
+            // a newer install it may not replace: only a way out.
+            if !wizard.blocked {
+                buttons.add(button(lang.line(next), tx, Action::Next)?)?;
+            }
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
         Page::License => {
@@ -287,7 +293,7 @@ fn render(
                 buttons.add(button(lang.line(Line::Agree), tx, Action::Agree)?)?;
             } else {
                 let next = if info.components.is_empty() && !wizard.folder_open {
-                    Line::Install
+                    info.existing.verb()
                 } else {
                     Line::Next
                 };
@@ -315,7 +321,7 @@ fn render(
             let next = if wizard.folder_open {
                 Line::Next
             } else {
-                Line::Install
+                info.existing.verb()
             };
             buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
@@ -340,7 +346,7 @@ fn render(
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
-            buttons.add(button(lang.line(Line::Install), tx, Action::Next)?)?;
+            buttons.add(button(lang.line(info.existing.verb()), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
         Page::Installing => {

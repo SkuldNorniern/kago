@@ -28,13 +28,71 @@ pub struct Info {
     pub publisher: Option<String>,
     /// where it will be installed, when known.
     pub location: Option<PathBuf>,
-    /// `location` is where the installed version already is; an update
-    /// stays there.
-    pub upgrade: bool,
+    /// what is installed already; an update stays in its folder.
+    pub existing: Existing,
     pub license: Option<License>,
     /// optional parts the person can tick or untick.
     pub components: Vec<Component>,
     pub brand: Brand,
+}
+
+/// the same package already on this machine, by its version.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Existing {
+    /// not installed: a fresh install.
+    #[default]
+    None,
+    /// this version: running setup repairs it.
+    Same,
+    /// an older version: setup updates it.
+    Older(String),
+    /// a newer version: replaced only when the package allows downgrades.
+    Newer { version: String, allowed: bool },
+}
+
+impl Existing {
+    #[must_use]
+    pub const fn installed(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// a newer version the package does not let this one replace.
+    #[must_use]
+    pub const fn blocks(&self) -> bool {
+        matches!(self, Self::Newer { allowed: false, .. })
+    }
+
+    /// the word on the button that starts the install.
+    #[must_use]
+    pub const fn verb(&self) -> Line {
+        match self {
+            Self::None | Self::Newer { .. } => Line::Install,
+            Self::Same => Line::Repair,
+            Self::Older(_) => Line::Update,
+        }
+    }
+
+    /// one sentence on what setup will do, for the welcome page.
+    #[must_use]
+    pub fn sentence(&self, lang: Lang, name: &str, version: &str) -> Option<String> {
+        let (line, from) = match self {
+            Self::None => return None,
+            Self::Same => (Line::StateRepair, ""),
+            Self::Older(from) => (Line::StateUpdate, from.as_str()),
+            Self::Newer {
+                version: from,
+                allowed: false,
+            } => (Line::StateNewer, from.as_str()),
+            Self::Newer {
+                version: from,
+                allowed: true,
+            } => (Line::StateReplace, from.as_str()),
+        };
+        Some(lang.fill(
+            line,
+            &[("name", name), ("version", version), ("from", from)],
+        ))
+    }
 }
 
 /// how the package dresses its setup. everything is optional.
@@ -217,19 +275,21 @@ impl Session {
         F: FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
-        Self {
+        let mut session = Self {
             wizard: Wizard::new(
                 info.license.as_ref().map(|l| l.accept),
                 &info.components,
                 info.location.clone(),
-                folder.is_some() && !info.upgrade,
+                folder.is_some() && !info.existing.installed(),
             ),
             folder,
             app_folder: crate::install::folder_name(&info.name),
             install: Some(Box::new(install)),
             tx,
             rx,
-        }
+        };
+        session.wizard.blocked = info.existing.blocks();
+        session
     }
 
     /// applies `action`. true when the window should close.
@@ -355,7 +415,7 @@ mod tests {
             version: "1.0.0".into(),
             publisher: None,
             location: Some(PathBuf::from("/apps/Ozone")),
-            upgrade: false,
+            existing: Existing::None,
             license: None,
             components: Vec::new(),
             brand: Brand::default(),

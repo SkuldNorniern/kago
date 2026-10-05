@@ -64,6 +64,68 @@ pub fn png_in_icon(icon: &super::ico::IconGroup) -> Option<&[u8]> {
         .map(Vec::as_slice)
 }
 
+/// the icon's largest image as PNG bytes, for the setup's logo: a PNG
+/// image as it is, else the largest 32-bit bitmap image converted.
+#[must_use]
+pub fn logo_from_icon(icon: &super::ico::IconGroup) -> Option<Vec<u8>> {
+    if let Some(png) = png_in_icon(icon) {
+        return Some(png.to_vec());
+    }
+    let bitmap = icon
+        .images
+        .iter()
+        .filter_map(|image| bitmap_image(image))
+        .max_by_key(|rgba| rgba.width)?;
+    encode_png(&bitmap).ok()
+}
+
+/// a 32-bit icon bitmap (`BITMAPINFOHEADER`, rows bottom-up, BGRA, height
+/// doubled for the mask) as RGBA.
+fn bitmap_image(data: &[u8]) -> Option<Rgba> {
+    let u32_at = |i: usize| {
+        data.get(i..i + 4)
+            .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+    };
+    let u16_at = |i: usize| data.get(i..i + 2).map(|s| u16::from_le_bytes([s[0], s[1]]));
+    if u32_at(0)? != 40 || u16_at(14)? != 32 {
+        return None;
+    }
+    let width = u32_at(4)?;
+    let height = u32_at(8)? / 2;
+    let (w, h) = (width as usize, height as usize);
+    let pixels_at = 40;
+    let mut pixels = Vec::with_capacity(w * h * 4);
+    for row in (0..h).rev() {
+        let start = pixels_at + row * w * 4;
+        for p in data.get(start..start + w * 4)?.as_chunks::<4>().0 {
+            pixels.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+        }
+    }
+    Some(Rgba {
+        width,
+        height,
+        pixels,
+    })
+}
+
+/// RGBA as PNG bytes.
+///
+/// # Errors
+///
+/// when the encoder fails.
+pub fn encode_png(image: &Rgba) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, image.width, image.height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer
+        .write_image_data(&image.pixels)
+        .map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 impl Rgba {
     /// scaled to fit inside `width` x `height`, keeping its shape. shrinking
     /// averages the pixels it covers, growing repeats them.
@@ -211,6 +273,26 @@ mod tests {
         let square = image.cover(2, 2);
         assert_eq!((square.width, square.height), (2, 2));
         assert_eq!(&square.pixels[..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn bitmap_icons_become_a_png_logo() {
+        // a 1x1 32-bit icon bitmap: header, one BGRA pixel, one mask row.
+        let mut bmp = Vec::new();
+        for v in [40u32, 1, 2] {
+            bmp.extend_from_slice(&v.to_le_bytes());
+        }
+        bmp.extend_from_slice(&1u16.to_le_bytes());
+        bmp.extend_from_slice(&32u16.to_le_bytes());
+        bmp.extend_from_slice(&[0; 24]);
+        bmp.extend_from_slice(&[30, 20, 10, 255]);
+        bmp.extend_from_slice(&[0; 4]);
+        let icon = super::super::ico::IconGroup {
+            images: vec![bmp],
+            group: Vec::new(),
+        };
+        let logo = decode_png(&logo_from_icon(&icon).unwrap()).unwrap();
+        assert_eq!(logo.pixels, [10, 20, 30, 255]);
     }
 
     #[test]
