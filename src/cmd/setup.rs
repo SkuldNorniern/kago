@@ -1,5 +1,6 @@
 //! setup mode: this executable carries a package and was started to install
-//! it. a window by default, `--silent` for no window and no prompt.
+//! it. a window by default; `--silent` (or NSIS's `/S`) for no window and no
+//! prompt, with `--components a,b` and `--location <dir>` for rollouts.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,33 +13,107 @@ use kago::manifest::SemanticPath;
 use kago::platform;
 use kago::transaction;
 
+const SETUP_USAGE: &str = "\
+usage: <setup>.exe [--silent | /S] [--components <a,b>] [--location <dir>]
+
+  (nothing)           open the setup window
+  --silent, /S        install without a window, with the defaults
+  --components <a,b>  with --silent: these optional components, besides the
+                      required ones; an empty list installs only those
+  --location <dir>    with --silent: install into this folder
+
+exit code 0 when installed, 1 otherwise; errors go to stderr.
+";
+
+/// what the setup's own command line asked for.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SetupArgs {
+    silent: bool,
+    components: Option<Vec<String>>,
+    location: Option<PathBuf>,
+    help: bool,
+}
+
+/// the setup's arguments, or `None` when they are not setup arguments, so
+/// the executable runs as plain kago (the uninstall entry relies on that).
+fn setup_args(args: &[String]) -> Option<Result<SetupArgs, String>> {
+    let mut out = SetupArgs::default();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--silent" | "/S" | "/s" => out.silent = true,
+            "--help" | "-h" | "/?" => out.help = true,
+            "--components" => match it.next() {
+                Some(list) => {
+                    out.components = Some(
+                        list.split(',')
+                            .map(str::trim)
+                            .filter(|c| !c.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                    );
+                }
+                None => return Some(Err("`--components` needs a list like a,b".to_owned())),
+            },
+            "--location" => match it.next() {
+                Some(dir) => out.location = Some(PathBuf::from(dir)),
+                None => return Some(Err("`--location` needs a folder".to_owned())),
+            },
+            _ => return None,
+        }
+    }
+    if !out.silent && (out.components.is_some() || out.location.is_some()) {
+        return Some(Err(
+            "`--components` and `--location` go with `--silent`; the window asks for them"
+                .to_owned(),
+        ));
+    }
+    Some(Ok(out))
+}
+
 /// installs the embedded package when there is one and the arguments are
-/// empty or `--silent`. `None` means run as plain kago.
+/// setup arguments. `None` means run as plain kago.
 pub fn run_embedded() -> Option<ExitCode> {
     let exe = std::env::current_exe().ok()?;
     let embedded = setup::embedded(&exe).ok()??;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let silent = match args.as_slice() {
-        [] => false,
-        [flag] if flag == "--silent" => true,
-        _ => return None,
+    let parsed = match setup_args(&args)? {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("setup: {e}\n\n{SETUP_USAGE}");
+            return Some(ExitCode::FAILURE);
+        }
     };
-    if !silent {
+    if parsed.help {
+        print!("{SETUP_USAGE}");
+        return Some(ExitCode::SUCCESS);
+    }
+    if !parsed.silent {
         #[cfg(feature = "gui")]
         return Some(window(exe, embedded));
     }
-    Some(
-        match install(&exe, embedded, &Choice::default(), &mut |_, _| {}) {
-            Ok(done) => {
-                println!("installed {}", done.name);
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!("setup failed: {e}");
-                ExitCode::FAILURE
-            }
-        },
-    )
+    let location = match parsed.location.as_deref().map(std::path::absolute) {
+        Some(Ok(dir)) => Some(dir),
+        Some(Err(e)) => {
+            eprintln!("setup failed: {e}");
+            return Some(ExitCode::FAILURE);
+        }
+        None => None,
+    };
+    let choice = Choice {
+        components: parsed.components.as_deref(),
+        location: location.as_deref(),
+    };
+    Some(match install(&exe, embedded, &choice, &mut |_, _| {}) {
+        Ok(done) => {
+            println!("installed {}", done.name);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("setup failed: {e}");
+            ExitCode::FAILURE
+        }
+    })
 }
 
 #[cfg(feature = "gui")]
@@ -221,6 +296,30 @@ fn install(
     let result = (|| {
         // choose first: what is not installed is not unpacked either.
         let plan = &container.header.plan;
+        if let Some(chosen) = choice.components
+            && let Some(unknown) = chosen
+                .iter()
+                .find(|c| !plan.choices.iter().any(|choice| &choice.id == *c))
+        {
+            let known: Vec<&str> = plan.choices.iter().map(|c| c.id.as_str()).collect();
+            return Err(format!(
+                "unknown component `{unknown}`; this setup has {}",
+                if known.is_empty() {
+                    "none".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            ));
+        }
+        if let Some(dir) = choice.location {
+            let installed = store
+                .read_receipt(&plan.package)
+                .ok()
+                .flatten()
+                .and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned());
+            kago::install::check_folder(dir, installed.as_deref())
+                .map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
         let plan = match choice.components {
             Some(chosen) => plan.select(chosen.iter().map(String::as_str)),
             None => plan.with_defaults(),
@@ -267,4 +366,38 @@ fn install(
         let _ = fs::remove_dir(parent);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Option<Result<SetupArgs, String>> {
+        let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
+        setup_args(&args)
+    }
+
+    #[test]
+    fn setup_arguments() {
+        assert_eq!(parse(&[]), Some(Ok(SetupArgs::default())));
+        let silent = parse(&[
+            "/S",
+            "--components",
+            "steamvr, desktop",
+            "--location",
+            "D:/Apps/X",
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(silent.silent);
+        assert_eq!(silent.components.unwrap(), ["steamvr", "desktop"]);
+        assert_eq!(silent.location, Some(PathBuf::from("D:/Apps/X")));
+        assert!(
+            parse(&["--location", "D:/x"]).unwrap().is_err(),
+            "the window asks itself"
+        );
+        assert!(parse(&["--components"]).unwrap().is_err());
+        // anything else is plain kago, like the uninstall entry's call.
+        assert_eq!(parse(&["uninstall", "dev.x.y"]), None);
+    }
 }
