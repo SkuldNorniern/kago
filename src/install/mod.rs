@@ -9,10 +9,10 @@ mod scope;
 mod slot;
 
 pub use need::{Need, at_least};
-pub use operation::{Digest, Operation};
+pub use operation::{Digest, Invocation, Operation, Program};
 pub use plan::{Choice, InstallPlan, Look, Prerequisite, Sources, hash};
 pub use resolve::{
-    Resolved, ResolvedHook, ResolvedPath, ResolvedService, ResolvedShortcut, Selection, resolve,
+    Resolved, ResolvedPath, ResolvedRun, ResolvedService, ResolvedShortcut, Selection, resolve,
 };
 pub use roots::{LocationError, Roots, check_folder, check_location, folder_name};
 pub use scope::{Scope, choose};

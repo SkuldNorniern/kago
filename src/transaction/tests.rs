@@ -741,9 +741,9 @@ fn unmet_needs_stop_before_anything_changes() {
     assert!(w.app().join("app.exe").is_file());
 }
 
-/// a world whose app is this test binary, so hooks have a real program:
+/// a world whose app is this test binary, so `run` has a real program:
 /// `--list` exits 0, an unknown flag fails.
-fn hook_world(name: &str) -> World {
+fn run_world(name: &str) -> World {
     let w = World::new(name);
     fs::copy(
         std::env::current_exe().unwrap(),
@@ -754,41 +754,64 @@ fn hook_world(name: &str) -> World {
 }
 
 #[test]
-fn post_install_hook_runs_and_failure_rolls_back() {
-    let w = hook_world("hook-post");
-    w.install(&format!("{MANIFEST}hook post-install main --list\n"))
-        .unwrap();
+fn a_run_runs_and_its_failure_rolls_back() {
+    let w = run_world("run-install");
+    w.install(&format!("{MANIFEST}run main --list\n")).unwrap();
     assert!(w.app().join("app.exe").is_file());
     uninstall(&World::id(), &w.fake, &w.store).unwrap();
 
     let err = w
-        .install(&format!(
-            "{MANIFEST}hook post-install main --no-such-flag\n"
-        ))
+        .install(&format!("{MANIFEST}run main --no-such-flag\n"))
         .unwrap_err();
     assert!(matches!(err, Error::RolledBack(_)), "{err}");
     assert!(!w.app().exists());
 }
 
 #[test]
-fn pre_uninstall_hook_is_kept_for_uninstall_and_skipped_on_upgrade() {
-    let w = hook_world("hook-pre");
-    let manifest = format!("{MANIFEST}hook pre-uninstall main --list\n");
+fn a_run_at_uninstall_is_kept_for_then_and_skipped_on_upgrade() {
+    let w = run_world("run-uninstall");
+    let manifest = format!("{MANIFEST}run main --list\n  at uninstall\n");
     let receipt = w.install(&manifest).unwrap();
     assert!(receipt.resources.iter().any(
         |r| matches!(r, Resource::UninstallHook { arguments, .. } if arguments == &["--list"])
     ));
-    // dropping the hook in an update must not run it.
+    // dropping it in an update must not run it.
     w.install(&MANIFEST.replace("1.0.0", "1.1.0")).unwrap();
     assert!(w.app().join("app.exe").is_file());
-    // a broken uninstall hook does not keep the package installed.
+    // a broken one does not keep the package installed.
     w.install(
-        &format!("{MANIFEST}hook pre-uninstall main --no-such-flag\n").replace("1.0.0", "1.2.0"),
+        &format!("{MANIFEST}run main --no-such-flag\n  at uninstall\n").replace("1.0.0", "1.2.0"),
     )
     .unwrap();
     let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert!(done.failed.is_empty(), "{:?}", done.failed);
     assert!(!w.app().exists());
+}
+
+#[test]
+fn an_undo_runs_on_rollback_and_is_kept_for_uninstall() {
+    let w = run_world("run-undo");
+    // the undo fails, so a rollback that ran it says so.
+    let err = w
+        .install(&format!(
+            "{MANIFEST}run main --list\n  undo main --no-such-flag\nrun main --no-such-flag\n"
+        ))
+        .unwrap_err();
+    assert!(err.to_string().contains("rollback was incomplete"), "{err}");
+
+    let w = run_world("run-undo-kept");
+    let receipt = w
+        .install(&format!(
+            "{MANIFEST}run main --list {{app}}\n  undo main --list {{app}}\n"
+        ))
+        .unwrap();
+    let app = w.dir.join("machine").join("programs").join("App");
+    assert!(receipt.resources.iter().any(|r| matches!(
+        r,
+        Resource::UninstallHook { arguments, .. } if arguments == &["--list".to_owned(), app.display().to_string()]
+    )));
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
 }
 
 #[test]

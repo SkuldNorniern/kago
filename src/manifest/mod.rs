@@ -30,8 +30,8 @@ pub use policy::{
 };
 pub use prerequisite::Prerequisite;
 pub use resource::{
-    Component, Expect, File, Hook, HookPhase, HookPrivilege, Icon, Ownership, PathEntry, PathKind,
-    PathSource, Requirement, RequirementKind, RequirementPolicy, ResourceScope, Service,
+    Command, Component, Expect, File, Icon, Ownership, PathEntry, PathKind, PathSource,
+    Requirement, RequirementKind, RequirementPolicy, ResourceScope, Run, RunAt, Service,
     ServiceRestart, ServiceStart, Shortcut, ShortcutLocation,
 };
 pub use selector::{Context, Selector};
@@ -60,7 +60,8 @@ pub struct Manifest {
     pub expects: Vec<Expect>,
     pub shortcuts: Vec<Shortcut>,
     pub services: Vec<Service>,
-    pub hooks: Vec<Hook>,
+    /// programs started at install or uninstall.
+    pub runs: Vec<Run>,
     pub requirements: Vec<Requirement>,
     pub update: Option<Update>,
     /// `target <os> <artifact>...`, only for listed OSes.
@@ -159,6 +160,7 @@ impl Manifest {
             m.firewall = lowered.firewall;
             m.changes = lowered.changes;
             m.expects = lowered.expects;
+            m.runs = lowered.runs;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -398,11 +400,14 @@ target linux setup appimage
     }
 
     #[test]
-    fn service_and_hook_lines() {
+    fn service_and_run_lines() {
         let (m, codes) = check(&with(
             "service main-executable --tray
   name \"Aurea tray\"
-hook post-install main-executable --setup
+run main-executable --setup
+  undo main-executable --unsetup
+run {app}/tools/clean.exe --all
+  at uninstall
 ",
         ));
         assert!(codes.is_empty(), "{codes:?}");
@@ -410,12 +415,19 @@ hook post-install main-executable --setup
         assert_eq!(m.services[0].command, "main-executable");
         assert_eq!(m.services[0].arguments, ["--tray"]);
         assert_eq!(m.services[0].name.as_deref(), Some("Aurea tray"));
-        assert_eq!(m.hooks[0].phase, HookPhase::PostInstall);
-        let (_, codes) = check(&with(
-            "hook post-install
-",
-        ));
-        assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+        assert_eq!(m.runs[0].phase, RunAt::Install);
+        assert_eq!(m.runs[0].undo.as_ref().unwrap().arguments, ["--unsetup"]);
+        assert_eq!(m.runs[1].phase, RunAt::Uninstall);
+        assert_eq!(m.runs[1].command.program, "{app}/tools/clean.exe");
+        for bad in [
+            "run\n",
+            "hook post-install main-executable\n",
+            "run x\n  at later\n",
+            "run x\n  at uninstall\n  undo y\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(m.is_none() && !codes.is_empty(), "{bad}");
+        }
     }
 
     #[test]

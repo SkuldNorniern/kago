@@ -12,14 +12,14 @@ use super::tree::{Node, Word};
 use super::version;
 use crate::diagnostic::{self, Code, Diagnostic, Diagnostics, Location};
 use crate::manifest::schema::{
-    RawApplication, RawComponent, RawFile, RawHook, RawIcon, RawInstall, RawLicense, RawManifest,
+    RawApplication, RawComponent, RawFile, RawIcon, RawInstall, RawLicense, RawManifest,
     RawPackage, RawPath, RawRequirement, RawService, RawShortcut, RawTarget, RawTargets, RawUpdate,
     RawWhen,
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Change, Check, Detect, Edit, Expect, FirewallRule, Place, Prerequisite, Setting, Sign,
-    SignKey, TIMESTAMP, Value, parse_color,
+    Brand, Change, Check, Command, Detect, Edit, Expect, FirewallRule, Place, Prerequisite, Run,
+    RunAt, Setting, Sign, SignKey, TIMESTAMP, Value, parse_color,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -33,7 +33,7 @@ const STATEMENTS: &[&str] = &[
     "path",
     "service",
     "require",
-    "hook",
+    "run",
     "component",
     "when",
     "target",
@@ -65,6 +65,7 @@ pub struct Lowered {
     pub firewall: Vec<FirewallRule>,
     pub changes: Vec<Change>,
     pub expects: Vec<Expect>,
+    pub runs: Vec<Run>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -99,7 +100,7 @@ pub fn lower(
         files: Vec::new(),
         paths: Vec::new(),
         requirements: Vec::new(),
-        hooks: Vec::new(),
+        runs: Vec::new(),
         services: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
@@ -179,7 +180,7 @@ struct Lower<'a> {
     files: Vec<RawFile>,
     paths: Vec<Spanned<RawPath>>,
     requirements: Vec<RawRequirement>,
-    hooks: Vec<RawHook>,
+    runs: Vec<Run>,
     services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
@@ -286,7 +287,11 @@ impl Lower<'_> {
             "path" => self.path(node, scope),
             "expect" => self.expect(node, scope),
             "require" => self.require(node, scope),
-            "hook" => self.hook(node, scope),
+            "run" => self.run(node, scope),
+            "hook" => self.syntax(
+                node.at(),
+                "`hook` is now `run <program> [arguments]`, with `at uninstall` under it to run at uninstall",
+            ),
             "service" => self.service(node, scope),
             "firewall" => self.firewall_rule(node, scope),
             "json" | "registry" | "env" => self.change(node, scope),
@@ -1027,24 +1032,45 @@ impl Lower<'_> {
         }
     }
 
-    /// `hook <phase> <app> [arguments...]`: runs one of the package's own
-    /// programs at an install phase.
-    fn hook(&mut self, node: &Node, scope: &Scope) {
-        self.no_children(node);
-        let [phase, app, arguments @ ..] = node.args() else {
-            self.syntax(
-                node.at(),
-                "expected `hook post-install|pre-uninstall <app> [arguments...]`",
-            );
-            return;
+    /// `run <program> [arguments...]`, with `at install|uninstall` and
+    /// `undo <program> [arguments...]` under it.
+    fn run(&mut self, node: &Node, scope: &Scope) {
+        let Some(command) = invocation(node.args()) else {
+            return self.syntax(node.at(), "expected `run <program> [arguments...]`");
         };
+        let mut phase = RunAt::Install;
+        let mut undo = None;
+        for child in &node.children {
+            self.no_children(child);
+            match (child.keyword(), child.args()) {
+                ("at", [when]) => match when.text.parse() {
+                    Ok(p) => phase = p,
+                    Err(e) => self.error(diagnostic::MANIFEST_VALUE, when.at, e),
+                },
+                ("undo", args) if !args.is_empty() => undo = invocation(args),
+                _ => self.syntax(
+                    child.at(),
+                    "expected `at install|uninstall` or `undo <program> [arguments...]`",
+                ),
+            }
+        }
+        if phase == RunAt::Uninstall && undo.is_some() {
+            return self.syntax(node.at(), "a program run at uninstall has nothing to undo");
+        }
         let when = self.when(scope, &[]);
-        self.hooks.push(RawHook {
-            phase: spanned(phase),
-            command: spanned(app),
-            arguments: arguments.iter().map(|a| a.text.clone()).collect(),
-            privilege: None,
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
+        self.runs.push(Run {
+            phase,
+            command,
+            undo,
+            component: scope.component.as_ref().map(|c| c.get_ref().clone()),
             when,
+            at: Location::at(self.file, self.source, node.at()),
         });
     }
 
@@ -1636,7 +1662,6 @@ impl Lower<'_> {
             paths: self.paths,
             shortcuts: self.shortcuts,
             services: self.services,
-            hooks: self.hooks,
             requirements: self.requirements,
             update: self.update,
             targets: Some(RawTargets {
@@ -1654,6 +1679,7 @@ impl Lower<'_> {
             firewall: self.firewall,
             changes: self.changes,
             expects: self.expects,
+            runs: self.runs,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),
@@ -1712,4 +1738,13 @@ fn location(text: &str) -> Result<(), String> {
             "`{text}` must start with a root like `{{config}}/` or a variable like `%LOCALAPPDATA%/`"
         ))
     }
+}
+
+/// `<program> [arguments...]`.
+fn invocation(words: &[Word]) -> Option<Command> {
+    let (program, arguments) = words.split_first()?;
+    Some(Command {
+        program: program.text.clone(),
+        arguments: arguments.iter().map(|w| w.text.clone()).collect(),
+    })
 }

@@ -11,8 +11,8 @@ use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
-    Check, Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, Place, ResourceScope,
-    ScopeChoice, SemanticPath, SetupLook,
+    Check, Detect, Downgrade, File, Manifest, Place, ResourceScope, ScopeChoice, SemanticPath,
+    SetupLook,
 };
 use crate::package::{PackageId, Target, Version};
 
@@ -211,9 +211,7 @@ impl InstallPlan {
             icon,
         };
         steps.push(register, None);
-        for op in hooks(resolved, &mut diagnostics) {
-            steps.push(op, None);
-        }
+        steps.runs(resolved, scope, scope_open, &mut diagnostics);
         expected(resolved, sources, &mut diagnostics);
         let needs = needs(resolved, &mut diagnostics);
         let prerequisites = prerequisites(manifest, target, sources, &mut diagnostics);
@@ -519,6 +517,51 @@ impl Steps {
         }
     }
 
+    /// a step per `run` that applies. a program on the machine, outside
+    /// the package, only runs for an install just for the person.
+    fn runs(
+        &mut self,
+        resolved: &Resolved,
+        scope: Scope,
+        scope_open: bool,
+        diagnostics: &mut Diagnostics,
+    ) {
+        for r in &resolved.runs {
+            let outside = [Some(&r.command), r.undo.as_ref()]
+                .into_iter()
+                .flatten()
+                .find(|c| matches!(c.program, super::Program::System { .. }));
+            if let Some(c) = outside {
+                if scope == Scope::Machine || scope_open {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            diagnostic::INSTALL_SCOPE,
+                            format!("`run {c}` starts a program outside the package, which an install for everyone does not do"),
+                        )
+                        .at(r.run.at.clone())
+                        .help("ship the program and run it as `{app}/...`, or use `scope user`"),
+                    );
+                    continue;
+                }
+                diagnostics.push(
+                    Diagnostic::warning(
+                        diagnostic::MANIFEST_REFERENCE,
+                        format!(
+                            "`run {c}` starts a program from the machine, not from the package"
+                        ),
+                    )
+                    .at(r.run.at.clone()),
+                );
+            }
+            let op = Operation::Run {
+                phase: r.run.phase,
+                command: r.command.clone(),
+                undo: r.undo.clone(),
+            };
+            self.push(op, r.run.component.clone());
+        }
+    }
+
     fn push(&mut self, op: Operation, owner: Option<String>) {
         self.operations.push(op);
         self.owners.push(owner);
@@ -672,43 +715,6 @@ fn prerequisites<S: Sources + ?Sized>(
         }
     }
     out
-}
-
-/// the resolved hooks kago can run, with a diagnostic for each it cannot.
-fn hooks(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Operation> {
-    let mut out = Vec::new();
-    for h in &resolved.hooks {
-        match hook(h) {
-            Ok(op) => out.push(op),
-            Err(d) => diagnostics.push(d),
-        }
-    }
-    out
-}
-
-/// a hook as an operation, when kago can run it at that phase yet.
-fn hook(h: &super::ResolvedHook) -> Result<Operation, Diagnostic> {
-    let unsupported =
-        |what: String| Diagnostic::error(diagnostic::TARGET_CAPABILITY, what).at(h.hook.at.clone());
-    if h.hook.privilege == HookPrivilege::Elevated {
-        return Err(unsupported(
-            "elevated hooks need the elevation helper, which is not done yet".to_owned(),
-        ));
-    }
-    if !matches!(
-        h.hook.phase,
-        HookPhase::PostInstall | HookPhase::PreUninstall
-    ) {
-        return Err(unsupported(format!(
-            "`{}` hooks are not supported yet; use post-install or pre-uninstall",
-            h.hook.phase
-        )));
-    }
-    Ok(Operation::RunHook {
-        phase: h.hook.phase,
-        command: h.command.clone(),
-        arguments: h.hook.arguments.clone(),
-    })
 }
 
 /// what the resolved requirements need, with a diagnostic for each kago
@@ -1066,39 +1072,42 @@ component docs Documentation off
     }
 
     #[test]
-    fn only_post_install_and_pre_uninstall_hooks_run_for_now() {
-        let dir = payload_dir("hooks");
-        let build = |extra: &str| {
-            let src = format!(
-                "{AUREA}
-{extra}"
-            );
+    fn runs_start_package_programs_and_others_only_per_user() {
+        let dir = payload_dir("runs");
+        let build = |extra: &str, scope: Scope| {
+            let src = format!("{AUREA}\n{extra}");
             let m = Manifest::parse("Kagofile", &src).0.unwrap();
             let target: Target = "windows-x86_64".parse().unwrap();
             let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
                 .0
                 .unwrap();
-            InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+            InstallPlan::build(&m, &r, target, scope, dir.as_path())
         };
         let (p, d) = build(
-            "hook post-install main-executable --setup
-",
+            "run main-executable --setup {app}\n  undo main-executable --remove\n",
+            Scope::Machine,
         );
         assert!(d.is_empty(), "{d:?}");
         assert!(
             p.unwrap()
                 .to_string()
-                .contains("hook      post-install {app}/bin/aurea.exe")
+                .contains("run       {app}/bin/aurea.exe --setup {app} (at install)")
         );
-        let (p, d) = build(
-            "hook pre-install main-executable
-",
-        );
+        let (p, d) = build("run regsvr32 /s {app}/x.dll\n", Scope::Machine);
         assert!(p.is_none());
         assert_eq!(
             d.iter().map(|d| d.code).collect::<Vec<_>>(),
-            [diagnostic::TARGET_CAPABILITY]
+            [diagnostic::INSTALL_SCOPE]
         );
+        let src = format!("{AUREA}\nrun regsvr32 /s x.dll\n")
+            .replace("  scope choose\n", "  scope user\n");
+        let m = Manifest::parse("Kagofile", &src).0.unwrap();
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+            .0
+            .unwrap();
+        let (p, d) = InstallPlan::build(&m, &r, target, Scope::User, dir.as_path());
+        assert!(p.is_some(), "per user it only warns: {d:?}");
         fs::remove_dir_all(dir).unwrap();
     }
 

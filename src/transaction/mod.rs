@@ -5,8 +5,8 @@
 //! run. the receipt is written only once everything applied.
 
 mod apply;
-mod hook;
 mod journal;
+mod program;
 mod recovery;
 mod store;
 mod verify;
@@ -297,7 +297,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::UninstallHook { command, arguments } => {
                 // best effort: a broken hook must not keep the package from
                 // being removed.
-                let _ = hook::run(Path::new(command), arguments);
+                let _ = program::run(Path::new(command), arguments);
                 Ok(())
             }
             Resource::LoginItem { name } => platform.set_login_item(name, None),

@@ -7,7 +7,7 @@ use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
 use crate::manifest::{
-    Downgrade, Edit, HookPhase, Ownership, Place, Root, SemanticPath, ShortcutLocation, Value,
+    Downgrade, Edit, Ownership, Place, Root, RunAt, SemanticPath, ShortcutLocation, Value,
 };
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
@@ -294,11 +294,11 @@ impl Run<'_> {
                 Ok(())
             }
             Operation::AddPathEntry { directory, scope } => self.path_entry(directory, *scope),
-            Operation::RunHook {
+            Operation::Run {
                 phase,
                 command,
-                arguments,
-            } => self.hook(*phase, command, arguments),
+                undo,
+            } => self.run(*phase, command, undo.as_ref()),
             Operation::CreateShortcut {
                 name,
                 target,
@@ -536,24 +536,53 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// a post-install hook runs now; what it did cannot be taken back, but
-    /// a failing one still rolls the install itself back. a pre-uninstall
-    /// hook is kept for uninstall.
-    fn hook(
+    /// a program for `install` runs now, and a failing one rolls the
+    /// install back; its `undo` runs on rollback and at uninstall. one for
+    /// `uninstall` is kept for then.
+    fn run(
         &mut self,
-        phase: HookPhase,
-        command: &SemanticPath,
-        arguments: &[String],
+        phase: RunAt,
+        command: &crate::install::Invocation,
+        undo: Option<&crate::install::Invocation>,
     ) -> Result<(), Error> {
-        let exe = self.resolve(command)?;
-        if phase == HookPhase::PreUninstall {
+        let (exe, arguments) = self.invocation(command)?;
+        if phase == RunAt::Uninstall {
             self.resources.push(Resource::UninstallHook {
                 command: exe.display().to_string(),
-                arguments: arguments.to_vec(),
+                arguments,
             });
             return Ok(());
         }
-        super::hook::run(&exe, arguments).map_err(Error::Other)
+        super::program::run(&exe, &arguments).map_err(Error::Other)?;
+        if let Some(undo) = undo {
+            let (exe, arguments) = self.invocation(undo)?;
+            self.step(Undo::Run {
+                command: exe.clone(),
+                arguments: arguments.clone(),
+            })?;
+            self.resources.push(Resource::UninstallHook {
+                command: exe.display().to_string(),
+                arguments,
+            });
+        }
+        Ok(())
+    }
+
+    /// the program to start and its arguments, with the roots filled in.
+    fn invocation(
+        &self,
+        invocation: &crate::install::Invocation,
+    ) -> Result<(PathBuf, Vec<String>), Error> {
+        let exe = match &invocation.program {
+            crate::install::Program::Installed { path } => self.resolve(path)?,
+            crate::install::Program::System { name } => PathBuf::from(name),
+        };
+        let arguments = invocation
+            .arguments
+            .iter()
+            .map(|a| crate::install::fill_text(a, self.roots))
+            .collect();
+        Ok((exe, arguments))
     }
 
     fn keep_user_file(

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::manifest::{
-    Change, Context, Expect, File, Hook, Manifest, PathKind, PathSource, Requirement,
-    ResourceScope, Selector, SemanticPath, Service, Shortcut,
+    Change, Command, Context, Expect, File, Manifest, PathKind, PathSource, Requirement,
+    ResourceScope, Run, Selector, SemanticPath, Service, Shortcut,
 };
 
 /// components picked for one install. items without a component are
@@ -69,7 +69,7 @@ pub struct Resolved {
     pub requirements: Vec<Requirement>,
     pub shortcuts: Vec<ResolvedShortcut>,
     pub services: Vec<ResolvedService>,
-    pub hooks: Vec<ResolvedHook>,
+    pub runs: Vec<ResolvedRun>,
     /// values set outside the package, for this target.
     pub changes: Vec<Change>,
     pub components: Selection,
@@ -95,9 +95,10 @@ pub struct ResolvedService {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedHook {
-    pub hook: Hook,
-    pub command: SemanticPath,
+pub struct ResolvedRun {
+    pub run: Run,
+    pub command: super::Invocation,
+    pub undo: Option<super::Invocation>,
 }
 
 /// picks the variant of every resource for `cx`. missing or ambiguous
@@ -142,7 +143,7 @@ pub fn resolve(
         .collect();
     let shortcuts = r.shortcuts(manifest);
     let services = r.services(manifest);
-    let hooks = r.hooks(manifest);
+    let runs = r.runs(manifest);
     let changes = manifest
         .changes
         .iter()
@@ -160,7 +161,7 @@ pub fn resolve(
         requirements,
         shortcuts,
         services,
-        hooks,
+        runs,
         changes,
         components,
     };
@@ -297,19 +298,62 @@ impl Resolver<'_> {
         out
     }
 
-    fn hooks(&mut self, manifest: &Manifest) -> Vec<ResolvedHook> {
+    fn runs(&mut self, manifest: &Manifest) -> Vec<ResolvedRun> {
         let mut out = Vec::new();
-        for h in &manifest.hooks {
-            if h.when.matches(self.cx)
-                && let Some(command) = self.lookup("hook", &h.command, Some(&h.at))
-            {
-                out.push(ResolvedHook {
-                    hook: h.clone(),
+        for run in &manifest.runs {
+            if !self.active(run.component.as_deref(), &run.when) {
+                continue;
+            }
+            let command = self.invocation(&run.command, &run.at);
+            let undo = match &run.undo {
+                Some(u) => match self.invocation(u, &run.at) {
+                    Some(u) => Some(u),
+                    None => continue,
+                },
+                None => None,
+            };
+            if let Some(command) = command {
+                out.push(ResolvedRun {
+                    run: run.clone(),
                     command,
+                    undo,
                 });
             }
         }
         out
+    }
+
+    /// an app id is that app's file, `{root}/...` an installed path, and
+    /// anything else a program on the machine.
+    fn invocation(&mut self, c: &Command, at: &Location) -> Option<super::Invocation> {
+        use super::Program;
+        let program = if self.variants.contains_key(&c.program) {
+            Program::Installed {
+                path: self.lookup("run", &c.program, Some(at))?,
+            }
+        } else if c.program.starts_with('{') {
+            match c.program.parse() {
+                Ok(path) => Program::Installed { path },
+                Err(e) => {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            diagnostic::MANIFEST_PATH,
+                            format!("run `{}`: {e}", c.program),
+                        )
+                        .at(at.clone()),
+                    );
+                    return None;
+                }
+            }
+        } else {
+            Program::System {
+                name: c.program.clone(),
+            }
+        };
+        Some(super::Invocation {
+            program,
+            arguments: c.arguments.clone(),
+        })
     }
 }
 

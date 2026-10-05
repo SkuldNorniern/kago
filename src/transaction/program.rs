@@ -1,13 +1,12 @@
-//! running a package's own executable at an install phase. only programs
-//! the package installed run, with the arguments the manifest gave; never a
-//! shell line.
+//! starting a program for `run`: with the arguments the Kagofile gave,
+//! never through a shell.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// longest a hook may take before it counts as failed.
+/// longest a program may take before it counts as failed.
 const LIMIT: Duration = Duration::from_secs(120);
 
 /// runs `exe` with `arguments` in its own folder and waits for it.
@@ -22,7 +21,7 @@ pub(super) fn run(exe: &Path, arguments: &[String]) -> Result<(), String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(dir) = exe.parent() {
+    if let Some(dir) = exe.parent().filter(|d| !d.as_os_str().is_empty()) {
         command.current_dir(dir);
     }
     #[cfg(windows)]
@@ -35,20 +34,20 @@ pub(super) fn run(exe: &Path, arguments: &[String]) -> Result<(), String> {
     let name = exe.display();
     let mut child = command
         .spawn()
-        .map_err(|e| format!("hook {name} cannot start: {e}"))?;
+        .map_err(|e| format!("{name} cannot start: {e}"))?;
     let started = Instant::now();
     loop {
-        if let Some(status) = child.try_wait().map_err(|e| format!("hook {name}: {e}"))? {
+        if let Some(status) = child.try_wait().map_err(|e| format!("{name}: {e}"))? {
             return if status.success() {
                 Ok(())
             } else {
-                Err(format!("hook {name} failed ({status})"))
+                Err(format!("{name} failed ({status})"))
             };
         }
         if started.elapsed() > LIMIT {
             let _ = child.kill();
             return Err(format!(
-                "hook {name} did not finish within {} seconds",
+                "{name} did not finish within {} seconds",
                 LIMIT.as_secs()
             ));
         }

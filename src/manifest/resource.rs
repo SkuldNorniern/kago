@@ -42,18 +42,9 @@ keywords! {
 }
 
 keywords! {
-    HookPhase {
-        PreInstall => "pre-install",
-        PostInstall => "post-install",
-        PreUninstall => "pre-uninstall",
-        PostUninstall => "post-uninstall",
-        PreUpdate => "pre-update",
-        PostUpdate => "post-update",
-    }
-}
-
-keywords! {
-    HookPrivilege { User => "user", Elevated => "elevated" }
+    /// when `run` starts its program: once the files are in, or first
+    /// thing at uninstall.
+    RunAt { Install => "install", Uninstall => "uninstall" }
 }
 
 keywords! {
@@ -148,13 +139,23 @@ pub struct Service {
     pub at: Location,
 }
 
+/// a program and its arguments as the Kagofile names them: an app id, an
+/// installed file like `{app}/tools/setup.exe`, or a program on the
+/// machine like `regsvr32`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Hook {
-    pub phase: HookPhase,
-    /// logical resource id.
-    pub command: String,
+pub struct Command {
+    pub program: String,
     pub arguments: Vec<String>,
-    pub privilege: HookPrivilege,
+}
+
+/// `run`: a program started at install or uninstall. `undo` takes back
+/// what it did, on rollback and at uninstall.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    pub phase: RunAt,
+    pub command: Command,
+    pub undo: Option<Command>,
+    pub component: Option<String>,
     pub when: Selector,
     pub at: Location,
 }

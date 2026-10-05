@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use super::Scope;
-use crate::manifest::{Edit, HookPhase, Ownership, Place, SemanticPath, ShortcutLocation, Value};
+use crate::manifest::{Edit, Ownership, Place, RunAt, SemanticPath, ShortcutLocation, Value};
 
 /// one step of an install. platforms carry these out; nothing here
 /// touches the machine.
@@ -41,12 +41,13 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         icon: Option<SemanticPath>,
     },
-    /// runs the package's own `command`: now for `post-install`, at
-    /// uninstall for `pre-uninstall`.
-    RunHook {
-        phase: HookPhase,
-        command: SemanticPath,
-        arguments: Vec<String>,
+    /// starts a program: now for `install`, first thing at uninstall for
+    /// `uninstall`. `undo` runs on rollback and at uninstall.
+    Run {
+        phase: RunAt,
+        command: Invocation,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        undo: Option<Invocation>,
     },
     /// per user, a program started at sign-in; for everyone, a Windows
     /// service.
@@ -92,7 +93,7 @@ impl Operation {
             Self::AddPathEntry { .. } => "add-path-entry",
             Self::CreateShortcut { .. } => "create-shortcut",
             Self::RegisterApplication { .. } => "register-application",
-            Self::RunHook { .. } => "run-hook",
+            Self::Run { .. } => "run",
             Self::InstallService { .. } => "install-service",
             Self::AllowThroughFirewall { .. } => "allow-through-firewall",
             Self::Change { .. } => "change",
@@ -115,7 +116,7 @@ impl fmt::Display for Operation {
                 ..
             } => write!(f, "shortcut  {name} -> {target} ({location})"),
             Self::RegisterApplication { display_name, .. } => write!(f, "register  {display_name}"),
-            Self::RunHook { phase, command, .. } => write!(f, "hook      {phase} {command}"),
+            Self::Run { phase, command, .. } => write!(f, "run       {command} (at {phase})"),
             Self::InstallService {
                 id, command, scope, ..
             } => {
@@ -137,6 +138,38 @@ impl fmt::Display for Operation {
                 write!(f, "firewall  {name} -> {program} ({networks})")
             }
         }
+    }
+}
+
+/// what `run` starts.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "from", rename_all = "kebab-case")]
+pub enum Program {
+    /// a file the package installs.
+    Installed { path: SemanticPath },
+    /// a program on the machine, found on PATH. only installs for one
+    /// person may start one.
+    System { name: String },
+}
+
+/// a program with its arguments; `{app}` and the other roots in them
+/// become real paths at install.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Invocation {
+    pub program: Program,
+    pub arguments: Vec<String>,
+}
+
+impl fmt::Display for Invocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.program {
+            Program::Installed { path } => write!(f, "{path}")?,
+            Program::System { name } => f.write_str(name)?,
+        }
+        for a in &self.arguments {
+            write!(f, " {a}")?;
+        }
+        Ok(())
     }
 }
 

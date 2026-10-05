@@ -52,6 +52,7 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
         },
         Undo::RemovePathEntry { entry, scope } => platform.remove_path_entry(*scope, entry),
         Undo::RemoveRegistration { key, scope } => platform.unregister(*scope, key),
+        Undo::Run { command, arguments } => super::program::run(command, arguments),
         Undo::PutBack { slot, previous } => platform.set_value(slot, previous.as_ref()),
         Undo::TakeOut { slot, item } => platform.remove_item(slot, item),
         Undo::RestoreService { name, previous } => platform.set_service(name, previous.as_ref()),

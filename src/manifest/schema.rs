@@ -16,7 +16,6 @@ pub struct RawManifest {
     pub paths: Vec<Spanned<RawPath>>,
     pub shortcuts: Vec<RawShortcut>,
     pub services: Vec<RawService>,
-    pub hooks: Vec<RawHook>,
     pub requirements: Vec<RawRequirement>,
     pub update: Option<RawUpdate>,
     pub targets: Option<RawTargets>,
@@ -120,15 +119,6 @@ pub struct RawService {
     pub start: Option<Spanned<String>>,
     pub restart: Option<Spanned<String>>,
     pub component: Option<Spanned<String>>,
-    pub when: Option<RawWhen>,
-}
-
-#[derive(Debug)]
-pub struct RawHook {
-    pub phase: Spanned<String>,
-    pub command: Spanned<String>,
-    pub arguments: Vec<String>,
-    pub privilege: Option<Spanned<String>>,
     pub when: Option<RawWhen>,
 }
 

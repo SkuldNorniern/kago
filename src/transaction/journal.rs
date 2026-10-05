@@ -42,6 +42,11 @@ pub enum Undo {
         slot: crate::install::Slot,
         item: crate::manifest::Value,
     },
+    /// runs a program's `undo`, taking back what it did.
+    Run {
+        command: PathBuf,
+        arguments: Vec<String>,
+    },
     /// puts a login item back as it was, removing it for `None`.
     RestoreLoginItem {
         name: String,

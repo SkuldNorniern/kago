@@ -6,8 +6,8 @@ use serde_spanned::Spanned;
 use super::path::SemanticPath;
 use super::policy::{AppKind, InstallPolicy, LicenseFormat};
 use super::resource::{
-    Component, File, Hook, HookPrivilege, Icon, Ownership, PathEntry, PathKind, PathSource,
-    Requirement, RequirementPolicy, ResourceScope, Service, ServiceRestart, ServiceStart, Shortcut,
+    Component, File, Icon, Ownership, PathEntry, PathKind, PathSource, Requirement,
+    RequirementPolicy, ResourceScope, Service, ServiceRestart, ServiceStart, Shortcut,
     ShortcutLocation,
 };
 use super::schema::{RawManifest, RawTarget};
@@ -89,7 +89,6 @@ impl Validator<'_> {
         let paths = self.paths(&raw);
         let shortcuts = self.shortcuts(&raw);
         let services = self.services(&raw);
-        let hooks = self.hooks(&raw);
         let requirements = self.requirements(&raw);
         let artifacts = self.targets(raw.targets.take());
         let update = raw.update.take().map(|u| Update {
@@ -106,7 +105,7 @@ impl Validator<'_> {
             expects: Vec::new(),
             shortcuts,
             services,
-            hooks,
+            runs: Vec::new(),
             requirements,
             update,
             artifacts,
@@ -384,38 +383,6 @@ impl Validator<'_> {
         out
     }
 
-    fn hooks(&mut self, raw: &RawManifest) -> Vec<Hook> {
-        raw.hooks
-            .iter()
-            .filter_map(|h| {
-                let phase = self.value("hooks.phase", &h.phase);
-                let hook = Hook {
-                    phase: phase?,
-                    command: h.command.get_ref().clone(),
-                    arguments: h.arguments.clone(),
-                    privilege: self.keyword(
-                        "hooks.privilege",
-                        h.privilege.as_ref(),
-                        HookPrivilege::User,
-                    ),
-                    when: self.when(h.when.as_ref()),
-                    at: self.at(&h.command),
-                };
-                if hook.privilege == HookPrivilege::Elevated {
-                    self.diagnostics.push(
-                        Diagnostic::warning(
-                            diagnostic::MANIFEST_VALUE,
-                            "elevated hook runs arbitrary code as admin/root and weakens rollback",
-                        )
-                        .at(hook.at.clone())
-                        .help("prefer a built-in operation if one fits"),
-                    );
-                }
-                Some(hook)
-            })
-            .collect()
-    }
-
     fn requirements(&mut self, raw: &RawManifest) -> Vec<Requirement> {
         raw.requirements
             .iter()
@@ -528,9 +495,6 @@ impl Validator<'_> {
         }
         for s in &m.services {
             resource("service", &s.command, &s.at);
-        }
-        for h in &m.hooks {
-            resource("hook", &h.command, &h.at);
         }
         for p in &m.paths {
             if let PathSource::Resource { id, .. } = &p.source {
