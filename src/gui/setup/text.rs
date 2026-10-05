@@ -27,6 +27,8 @@ pub enum Line {
     StateUpdate,
     StateNewer,
     StateReplace,
+    StateToEveryone,
+    StateToUser,
     Agree,
     LicenseTitle,
     LicenseBody,
@@ -196,6 +198,14 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::StateReplace => [
             "A newer {name} ({from}) is installed. Setup will replace it with {version}.",
             "더 새로운 {name}({from})이(가) 설치되어 있습니다. {version}(으)로 바꿉니다.",
+        ],
+        Line::StateToEveryone => [
+            "{name} is installed just for you. Setup will move it to Program Files, for everyone.",
+            "{name}이(가) 현재 사용자에게만 설치되어 있습니다. 모든 사용자를 위해 Program Files로 옮깁니다.",
+        ],
+        Line::StateToUser => [
+            "{name} is installed for everyone. Setup will install it just for you and remove that copy.",
+            "{name}이(가) 모든 사용자용으로 설치되어 있습니다. 현재 사용자용으로 설치하고 그 사본은 제거합니다.",
         ],
         Line::Agree => ["I Agree", "동의함"],
         Line::LicenseTitle => ["License Agreement", "사용권 계약"],

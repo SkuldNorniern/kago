@@ -51,12 +51,16 @@ pub enum Existing {
     Older(String),
     /// a newer version: replaced only when the package allows downgrades.
     Newer { version: String, allowed: bool },
+    /// installed the other way, for everyone or just this user: setup
+    /// removes that copy and installs this one.
+    Elsewhere { for_everyone: bool },
 }
 
 impl Existing {
+    /// installed where this setup installs, so the folder stays.
     #[must_use]
     pub const fn installed(&self) -> bool {
-        !matches!(self, Self::None)
+        !matches!(self, Self::None | Self::Elsewhere { .. })
     }
 
     /// a newer version the package does not let this one replace.
@@ -69,7 +73,7 @@ impl Existing {
     #[must_use]
     pub const fn verb(&self) -> Line {
         match self {
-            Self::None | Self::Newer { .. } => Line::Install,
+            Self::None | Self::Newer { .. } | Self::Elsewhere { .. } => Line::Install,
             Self::Same => Line::Repair,
             Self::Older(_) => Line::Update,
         }
@@ -90,6 +94,10 @@ impl Existing {
                 version: from,
                 allowed: true,
             } => (Line::StateReplace, from.as_str()),
+            Self::Elsewhere {
+                for_everyone: false,
+            } => (Line::StateToEveryone, ""),
+            Self::Elsewhere { for_everyone: true } => (Line::StateToUser, ""),
         };
         Some(lang.fill(
             line,

@@ -145,6 +145,9 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                 .as_ref()
                 .and_then(|p| transaction::store(p.as_ref(), plan.scope).ok())
                 .and_then(|store| store.read_receipt(&plan.package).ok().flatten());
+            let elsewhere = host
+                .as_ref()
+                .is_some_and(|p| other_install(p.as_ref(), plan.scope, &plan.package).is_some());
             let existing = receipt.as_ref().map_or(Existing::None, |r| {
                 match r.version.cmp_precedence(&plan.version) {
                     std::cmp::Ordering::Equal => Existing::Same,
@@ -155,6 +158,13 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
                     },
                 }
             });
+            let existing = if existing == Existing::None && elsewhere {
+                Existing::Elsewhere {
+                    for_everyone: plan.scope == kago::install::Scope::User,
+                }
+            } else {
+                existing
+            };
             // where the installed version is, if there is one.
             let installed = receipt.and_then(|r| r.roots.get(&Root::App).cloned());
             let default = host
@@ -293,6 +303,25 @@ enum Stage<'a> {
     Apply(&'a Operation),
 }
 
+/// the same package installed in the other scope, with that scope's store.
+fn other_install(
+    platform: &dyn kago::platform::Platform,
+    scope: kago::install::Scope,
+    package: &kago::package::PackageId,
+) -> Option<(kago::install::Scope, transaction::Store)> {
+    use kago::install::Scope;
+    let other = match scope {
+        Scope::User => Scope::Machine,
+        Scope::Machine => Scope::User,
+    };
+    let store = transaction::store(platform, other).ok()?;
+    store
+        .read_receipt(package)
+        .ok()
+        .flatten()
+        .map(|_| (other, store))
+}
+
 /// what the person installing picked.
 #[derive(Default)]
 struct Choice<'a> {
@@ -364,6 +393,13 @@ fn install(
         };
         let runtime = staging.join(format!("kago{}", std::env::consts::EXE_SUFFIX));
         setup::extract_stub(exe, embedded, &runtime).map_err(|e| e.to_string())?;
+        // the same package installed the other way (just for this user, or
+        // for everyone) goes first, so there are never two. what ownership
+        // keeps, like user data, stays.
+        if let Some((scope, other)) = other_install(platform.as_ref(), plan.scope, &plan.package) {
+            transaction::uninstall(&plan.package, platform.as_ref(), &other)
+                .map_err(|e| format!("cannot remove the {scope} install first: {e}"))?;
+        }
         let receipt = transaction::install_observed(
             &plan,
             platform.as_ref(),

@@ -16,6 +16,24 @@ fn scope(args: &Args) -> Result<Scope, String> {
     args.value("--scope").map_or(Ok(Scope::User), str::parse)
 }
 
+/// the scope `package` is installed in: `--scope` when given, else the one
+/// that has it, per-user first.
+fn installed_scope(args: &Args, package: &PackageId) -> Result<Scope, String> {
+    if args.value("--scope").is_some() {
+        return scope(args);
+    }
+    let platform = platform::host()?;
+    for scope in [Scope::User, Scope::Machine] {
+        let Ok(store) = transaction::store(platform.as_ref(), scope) else {
+            continue;
+        };
+        if store.read_receipt(package).ok().flatten().is_some() {
+            return Ok(scope);
+        }
+    }
+    Err(format!("{package} is not installed"))
+}
+
 fn open(scope: Scope) -> Result<(Box<dyn Platform>, Store), String> {
     let platform = platform::host()?;
     let store = transaction::store(platform.as_ref(), scope).map_err(|e| e.to_string())?;
@@ -76,7 +94,13 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
         return Err("usage: kago uninstall <package-id> [--scope user|machine]".to_owned());
     };
     let package = PackageId::new(id).map_err(|e| e.to_string())?;
-    let (platform, store) = open(scope(args)?)?;
+    let scope = installed_scope(args, &package)?;
+    if scope == Scope::Machine && !platform::is_elevated() {
+        return Err(format!(
+            "{package} is installed for everyone; run this from a terminal opened as administrator"
+        ));
+    }
+    let (platform, store) = open(scope)?;
     let done =
         transaction::uninstall(&package, platform.as_ref(), &store).map_err(|e| e.to_string())?;
     for kept in &done.kept {
@@ -112,13 +136,22 @@ pub fn recover(args: &Args) -> Result<ExitCode, String> {
 
 pub fn status(args: &Args) -> Result<ExitCode, String> {
     args.at_most_one()?;
-    let (_, store) = open(scope(args)?)?;
-    let receipts = store.receipts().map_err(|e| e.to_string())?;
-    if receipts.is_empty() {
-        println!("nothing installed");
+    let scopes = match args.value("--scope") {
+        Some(_) => vec![scope(args)?],
+        None => vec![Scope::User, Scope::Machine],
+    };
+    let mut any = false;
+    for scope in scopes {
+        let Ok((_, store)) = open(scope) else {
+            continue;
+        };
+        for r in store.receipts().unwrap_or_default() {
+            any = true;
+            println!("{} {} ({}) {}", r.package, r.version, r.scope, r.name);
+        }
     }
-    for r in receipts {
-        println!("{} {} ({}) {}", r.package, r.version, r.scope, r.name);
+    if !any {
+        println!("nothing installed");
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -128,7 +161,7 @@ pub fn verify(args: &Args) -> Result<ExitCode, String> {
         return Err("usage: kago verify <package-id> [--scope user|machine]".to_owned());
     };
     let package = PackageId::new(id).map_err(|e| e.to_string())?;
-    let (_, store) = open(scope(args)?)?;
+    let (_, store) = open(installed_scope(args, &package)?)?;
     let receipt = store
         .read_receipt(&package)
         .map_err(|e| e.to_string())?

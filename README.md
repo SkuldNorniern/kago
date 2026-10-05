@@ -1,6 +1,6 @@
 # kago
 
-Kago turns a small text file, the `Kagofile`, into a Windows setup program. The setup installs into the user's own folders, can be repaired or upgraded, and uninstalls cleanly from Settings › Apps. Every install keeps a receipt of what it put on the machine. Uninstall removes exactly that, and a failed install undoes itself.
+Kago turns a small text file, the `Kagofile`, into a Windows setup program. The setup installs into Program Files by default, or just for the current user. It can be repaired or upgraded, and it uninstalls cleanly through its own `uninstall.exe` or Settings › Apps. Every install keeps a receipt of what it put on the machine. Uninstall removes exactly that, and a failed install undoes itself.
 
 The setup has two looks:
 
@@ -96,7 +96,7 @@ The first block. Only the id and `version` are required.
 | `setup modern` / `setup native` | the look; modern by default |
 | `folder choose` / `folder fixed` | whether people may pick the install folder; choose by default |
 | `downgrade deny` / `downgrade allow` | whether an older version may replace a newer one; deny by default |
-| `scope user` | per-user install, the default (machine-wide is not supported yet) |
+| `scope machine` / `scope user` | for everyone in Program Files (the default; the setup asks for administrator rights), or just for the current user in `%LOCALAPPDATA%\Programs`, with no prompt |
 
 ### files
 
@@ -116,13 +116,12 @@ Install paths start with a root:
 
 | root | on Windows |
 |---|---|
-| `{app}` | `%LOCALAPPDATA%\Programs\<Name>`, or the folder picked in setup |
+| `{app}` | `C:\Program Files\<Name>` (`scope user`: `%LOCALAPPDATA%\Programs\<Name>`), or the folder picked in setup |
 | `{bin}` | `{app}\bin` |
-| `{config}` | `%APPDATA%\<Name>` |
-| `{data}` | `%LOCALAPPDATA%\<Name>` |
+| `{config}`, `{data}` | `%ProgramData%\<Name>` (`scope user`: `%APPDATA%\<Name>`, `%LOCALAPPDATA%\<Name>`) |
 | `{cache}`, `{logs}`, `{state}` | under `{data}` |
-| `{desktop}`, `{applications}` | Desktop, Start menu |
-| `{user-home}` | the user's home folder |
+| `{desktop}`, `{applications}` | Desktop, Start menu (for everyone, or the user's own) |
+| `{user-home}` | the user's home folder (`scope user` only) |
 
 File paths may use `${version}`, `${name}`, `${id}`, `${os}`, `${arch}`, `${target}`, `${triple}` (like `x86_64-pc-windows-msvc`) and `${exe}` (`.exe` on Windows).
 
@@ -231,11 +230,24 @@ For rollouts with Intune, SCCM, a script or similar:
 
 The exit code is 0 when installed and 1 otherwise, with the reason on stderr.
 
-Running the same setup again repairs the install. A newer setup upgrades it in the same folder.
+The setup says what it will do before it starts:
+
+- a new install
+- a repair, for the same version
+- an update from the installed version, in the same folder
+- moving the app between per-user and Program Files, removing the other copy
+- refusing to replace a newer version, unless the package has `downgrade allow`
+
+Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
+
+- it asks first, then removes everything the install put there, and lists what it kept, like your changed settings
+- Settings › Apps runs it
+- `uninstall.exe /S` removes the app silently
+- `QuietUninstallString` (the command-line runtime) gives tools a real exit code
 
 ## Not supported yet
 
-- installing for all users (`scope machine`) and machine-wide services: these need an elevation helper
+- `service` for everyone (a Windows service); per-user sign-in services work
 - code signing; setups are unsigned, so SmartScreen may warn on first run
 - Linux and macOS setups, and MSI, DMG, AppImage, DEB, RPM outputs; `target` lines for them only check the Kagofile
 - building a setup for another OS or architecture than the machine running `kago build`

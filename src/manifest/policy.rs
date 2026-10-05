@@ -126,7 +126,9 @@ pub struct InstallPolicy {
 impl Default for InstallPolicy {
     fn default() -> Self {
         Self {
-            scope: ScopeChoice::User,
+            // Program Files, like most Windows installers; `scope user`
+            // keeps an app per-user, without the UAC prompt.
+            scope: ScopeChoice::Machine,
             scope_conflict: ScopeConflict::Exclusive,
             elevation: Elevation::WhenRequired,
             upgrade: Upgrade::Replace,
