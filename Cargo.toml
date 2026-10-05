@@ -24,6 +24,7 @@ zstd = "0.14.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tar = "0.4.46"
 flate2 = "1.1.10"
+png = "0.18.1"
 
 [lints.rust]
 unsafe_code = "deny"
