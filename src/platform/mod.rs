@@ -78,6 +78,32 @@ pub trait Platform {
     /// when SteamVR's path file cannot be read or written.
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
 
+    /// the inbound firewall rule called `name`, if there is one.
+    ///
+    /// # Errors
+    ///
+    /// when the firewall cannot be read here.
+    fn firewall_rule(&self, name: &str) -> Result<Option<Firewall>, String> {
+        let _ = name;
+        Err("firewall rules are Windows-only for now".to_owned())
+    }
+
+    /// makes the rule `name`, in `group`, say what `rule` says, replacing
+    /// one of that name; `None` removes it.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, or where there is no such firewall.
+    fn set_firewall_rule(
+        &self,
+        name: &str,
+        group: &str,
+        rule: Option<&Firewall>,
+    ) -> Result<(), String> {
+        let _ = (name, group, rule);
+        Err("firewall rules are Windows-only for now".to_owned())
+    }
+
     /// has the file or empty folder at `path` deleted when the computer
     /// next starts, for one still in use now.
     ///
@@ -276,6 +302,14 @@ pub fn run_elevated(exe: &Path, arguments: &[String], wait: bool) -> Result<u32,
     }
 }
 
+/// a firewall rule letting a program accept connections: on private and
+/// work networks, and on public ones when `public`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Firewall {
+    pub program: PathBuf,
+    pub public: bool,
+}
+
 /// held while this process is the only setup or uninstaller working on
 /// a package; let go on drop.
 pub struct Instance {
@@ -407,6 +441,12 @@ mod tests {
         assert_eq!(expand_env("%PATH%;x"), format!("{path};x"));
         assert_eq!(expand_env(r"%KAGO_NO_SUCH%\a"), r"%KAGO_NO_SUCH%\a");
         assert_eq!(expand_env("50%"), "50%");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_missing_firewall_rule_reads_as_none() {
+        assert_eq!(windows::firewall::rule("kago test: no such rule"), Ok(None));
     }
 
     #[cfg(windows)]

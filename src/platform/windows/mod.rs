@@ -3,6 +3,7 @@
 
 pub mod elevation;
 mod environment;
+pub mod firewall;
 pub mod folder;
 pub mod instance;
 mod registry;
@@ -144,6 +145,19 @@ impl Platform for Windows {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         super::openvr::remove(&openvr_paths()?, directory)
+    }
+
+    fn firewall_rule(&self, name: &str) -> Result<Option<super::Firewall>, String> {
+        firewall::rule(name)
+    }
+
+    fn set_firewall_rule(
+        &self,
+        name: &str,
+        group: &str,
+        rule: Option<&super::Firewall>,
+    ) -> Result<(), String> {
+        firewall::set_rule(name, group, rule)
     }
 
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
