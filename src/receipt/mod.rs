@@ -64,6 +64,11 @@ pub enum Resource {
     LoginItem {
         name: String,
     },
+    /// a Windows Firewall rule, in the package's group.
+    FirewallRule {
+        name: String,
+        group: String,
+    },
     /// the package's own program to run first at uninstall.
     UninstallHook {
         command: String,

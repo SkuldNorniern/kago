@@ -99,6 +99,7 @@ pub enum Line {
     Hook,
     Service,
     Prerequisite,
+    Firewall,
 }
 
 impl Lang {
@@ -390,6 +391,7 @@ const fn table(line: Line) -> [&'static str; 2] {
         Line::Register => ["Register {item}", "{item} 등록"],
         Line::Service => ["Start at sign-in: {item}", "로그인 시 시작: {item}"],
         Line::Prerequisite => ["Install first: {item}", "먼저 설치: {item}"],
+        Line::Firewall => ["Firewall rule: {item}", "방화벽 규칙: {item}"],
     }
 }
 

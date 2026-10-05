@@ -279,7 +279,8 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         Resource::Shortcut { .. } => 2,
         Resource::PathEntry { .. }
         | Resource::SteamVrDriver { .. }
-        | Resource::LoginItem { .. } => 3,
+        | Resource::LoginItem { .. }
+        | Resource::FirewallRule { .. } => 3,
         Resource::File { .. } => 4,
         Resource::Directory { path } => 5 + usize::MAX / 2 - path.segments().count(),
     };
@@ -299,6 +300,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 Ok(())
             }
             Resource::LoginItem { name } => platform.set_login_item(name, None),
+            Resource::FirewallRule { name, group } => platform.set_firewall_rule(name, group, None),
             Resource::SteamVrDriver { directory } => {
                 platform.remove_steamvr_driver(Path::new(directory))
             }

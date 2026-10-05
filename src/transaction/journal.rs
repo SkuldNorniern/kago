@@ -40,6 +40,12 @@ pub enum Undo {
         name: String,
         previous: Option<String>,
     },
+    /// puts a firewall rule back as it was, removing it for `None`.
+    RestoreFirewallRule {
+        name: String,
+        group: String,
+        previous: Option<crate::platform::Firewall>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

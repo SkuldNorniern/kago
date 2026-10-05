@@ -1,6 +1,7 @@
 //! the Kagofile: parsing, `when` selectors, sources and validation.
 
 mod brand;
+mod firewall;
 mod kagofile;
 mod path;
 mod policy;
@@ -16,6 +17,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub use brand::{Brand, parse_color};
+pub use firewall::FirewallRule;
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
@@ -66,6 +68,8 @@ pub struct Manifest {
     pub sign: Option<Sign>,
     /// other vendors' installers to run first when their check fails.
     pub prerequisites: Vec<Prerequisite>,
+    /// programs Windows Firewall lets accept connections.
+    pub firewall: Vec<FirewallRule>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +148,7 @@ impl Manifest {
             m.brand = lowered.brand;
             m.sign = lowered.sign;
             m.prerequisites = lowered.prerequisites;
+            m.firewall = lowered.firewall;
             m
         });
         let manifest = if diagnostics.has_errors() {

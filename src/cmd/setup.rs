@@ -454,6 +454,7 @@ fn window_step(stage: &Stage<'_>) -> kago::gui::setup::Step {
             }
             Operation::RunHook { command, .. } => Step::Hook(command.to_string()),
             Operation::InstallService { id, .. } => Step::Service(id.clone()),
+            Operation::AllowThroughFirewall { name, .. } => Step::Firewall(name.clone()),
         },
     }
 }

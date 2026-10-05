@@ -20,6 +20,7 @@ struct Fake {
     login: RefCell<BTreeMap<String, String>>,
     /// what was left for the next restart, in order.
     at_restart: RefCell<Vec<PathBuf>>,
+    firewall: RefCell<BTreeMap<String, crate::platform::Firewall>>,
 }
 
 impl Fake {
@@ -33,6 +34,7 @@ impl Fake {
             has_steamvr: false,
             login: RefCell::new(BTreeMap::new()),
             at_restart: RefCell::new(Vec::new()),
+            firewall: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -113,6 +115,24 @@ impl Platform for Fake {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         self.steamvr.borrow_mut().retain(|d| d != directory);
+        Ok(())
+    }
+
+    fn firewall_rule(&self, name: &str) -> Result<Option<crate::platform::Firewall>, String> {
+        Ok(self.firewall.borrow().get(name).cloned())
+    }
+
+    fn set_firewall_rule(
+        &self,
+        name: &str,
+        _: &str,
+        rule: Option<&crate::platform::Firewall>,
+    ) -> Result<(), String> {
+        let mut rules = self.firewall.borrow_mut();
+        match rule {
+            Some(rule) => rules.insert(name.to_owned(), rule.clone()),
+            None => rules.remove(name),
+        };
         Ok(())
     }
 
@@ -269,6 +289,26 @@ fn what_stays_in_use_goes_at_restart_files_first() {
         "{:?}",
         left.resources
     );
+}
+
+#[test]
+fn firewall_rules_come_and_go_with_installs_for_everyone() {
+    let w = World::new("firewall");
+    let manifest = MANIFEST.replace("  version 1.0.0\n", "  version 1.0.0\n  scope choose\n")
+        + "firewall main public\n";
+    let mut plan = w.plan(&manifest);
+    plan.scope = Scope::Machine;
+    install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    let rule = w.fake.firewall.borrow().get("App").cloned().unwrap();
+    assert_eq!(rule.program, w.app().join("app.exe"));
+    assert!(rule.public);
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.firewall.borrow().is_empty());
+
+    // just for this user: no rights to add one, so none is added.
+    plan.scope = Scope::User;
+    install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    assert!(w.fake.firewall.borrow().is_empty());
 }
 
 #[test]

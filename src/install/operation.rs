@@ -58,6 +58,14 @@ pub enum Operation {
         arguments: Vec<String>,
         scope: Scope,
     },
+    /// lets `program` accept connections through Windows Firewall. needs
+    /// an install for everyone; a per-user one leaves it to Windows to
+    /// ask the first time the program listens.
+    AllowThroughFirewall {
+        name: String,
+        program: SemanticPath,
+        public: bool,
+    },
 }
 
 impl Operation {
@@ -73,6 +81,7 @@ impl Operation {
             Self::RegisterApplication { .. } => "register-application",
             Self::RunHook { .. } => "run-hook",
             Self::InstallService { .. } => "install-service",
+            Self::AllowThroughFirewall { .. } => "allow-through-firewall",
         }
     }
 }
@@ -98,6 +107,18 @@ impl fmt::Display for Operation {
                 id, command, scope, ..
             } => {
                 write!(f, "service   {id} -> {command} ({scope})")
+            }
+            Self::AllowThroughFirewall {
+                name,
+                program,
+                public,
+            } => {
+                let networks = if *public {
+                    "all networks"
+                } else {
+                    "private networks"
+                };
+                write!(f, "firewall  {name} -> {program} ({networks})")
             }
         }
     }

@@ -115,6 +115,7 @@ impl Validator<'_> {
             brand: super::Brand::default(),
             sign: None,
             prerequisites: Vec::new(),
+            firewall: Vec::new(),
         };
         self.references(&manifest, &raw);
         manifest

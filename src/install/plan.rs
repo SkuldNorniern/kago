@@ -196,6 +196,7 @@ impl InstallPlan {
             fixed_with_open_scope(resolved, &mut diagnostics);
         }
         steps.resources(resolved, scope, icon.as_ref(), manifest, &mut diagnostics);
+        steps.firewall(manifest, resolved, scope, scope_open, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
                 .files
@@ -428,6 +429,61 @@ struct Steps {
 }
 
 impl Steps {
+    /// a firewall rule per `firewall` line whose component is installed.
+    fn firewall(
+        &mut self,
+        manifest: &Manifest,
+        resolved: &Resolved,
+        scope: Scope,
+        scope_open: bool,
+        diagnostics: &mut Diagnostics,
+    ) {
+        for rule in &manifest.firewall {
+            if !resolved.components.contains(rule.component.as_deref()) {
+                continue;
+            }
+            if scope == Scope::User && !scope_open {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::TARGET_CAPABILITY,
+                        "a firewall rule needs an install for everyone; this package installs per user",
+                    )
+                    .at(rule.at.clone())
+                    .help("use `scope machine` or `scope choose`; per user, Windows asks the first time the program listens"),
+                );
+                continue;
+            }
+            let program = resolved
+                .files
+                .iter()
+                .find(|f| f.logical_id.as_deref() == Some(rule.app.as_str()))
+                .map(|f| f.target.clone());
+            let Some(program) = program else {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_REFERENCE,
+                        format!("firewall: no `app {}` in this package", rule.app),
+                    )
+                    .at(rule.at.clone()),
+                );
+                continue;
+            };
+            let name = rule.name.clone().unwrap_or_else(|| {
+                if manifest.application.entrypoint.as_deref() == Some(rule.app.as_str()) {
+                    manifest.package.name.clone()
+                } else {
+                    format!("{} {}", manifest.package.name, rule.app)
+                }
+            });
+            let op = Operation::AllowThroughFirewall {
+                name,
+                program,
+                public: rule.public,
+            };
+            self.push(op, rule.component.clone());
+        }
+    }
+
     fn push(&mut self, op: Operation, owner: Option<String>) {
         self.operations.push(op);
         self.owners.push(owner);
@@ -843,6 +899,34 @@ mod tests {
         assert_eq!(p.components, ["cli", "core"]);
         // same input, same plan.
         assert_eq!(plan(&dir).0.unwrap(), p);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn firewall_rules_need_an_install_for_everyone() {
+        let dir = payload_dir("firewall");
+        let build = |src: &str| {
+            let m = Manifest::parse("Kagofile", src).0.unwrap();
+            let target: Target = "windows-x86_64".parse().unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+        };
+        let open = format!(
+            "{AUREA}firewall main-executable
+"
+        );
+        let (plan, d) = build(&open);
+        assert!(d.is_empty(), "{d:?}");
+        assert!(plan.unwrap().operations.iter().any(|op| matches!(
+            op,
+            Operation::AllowThroughFirewall { name, .. } if name == "Aurea"
+        )));
+        let fixed = open.replace("scope choose", "scope user");
+        let (plan, d) = build(&fixed);
+        assert!(plan.is_none());
+        assert_eq!(d.0[0].code, diagnostic::TARGET_CAPABILITY);
         fs::remove_dir_all(dir).unwrap();
     }
 

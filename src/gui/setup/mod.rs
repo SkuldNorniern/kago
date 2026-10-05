@@ -253,6 +253,7 @@ pub enum Step {
     Hook(String),
     Service(String),
     Prerequisite(String),
+    Firewall(String),
 }
 
 impl Step {
@@ -268,6 +269,7 @@ impl Step {
             Self::Hook(s) => (Line::Hook, s),
             Self::Service(s) => (Line::Service, s),
             Self::Prerequisite(s) => (Line::Prerequisite, s),
+            Self::Firewall(s) => (Line::Firewall, s),
         };
         lang.fill(line, &[("item", item)])
     }

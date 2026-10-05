@@ -17,7 +17,8 @@ use crate::manifest::schema::{
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Check, Detect, Prerequisite, Setting, Sign, SignKey, TIMESTAMP, parse_color, preset,
+    Brand, Check, Detect, FirewallRule, Prerequisite, Setting, Sign, SignKey, TIMESTAMP,
+    parse_color, preset,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -28,6 +29,7 @@ pub struct Lowered {
     pub brand: Brand,
     pub sign: Option<Sign>,
     pub prerequisites: Vec<Prerequisite>,
+    pub firewall: Vec<FirewallRule>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -72,6 +74,7 @@ pub fn lower(
         sign: None,
         prerequisites: Vec::new(),
         update: None,
+        firewall: Vec::new(),
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -134,6 +137,7 @@ struct Lower<'a> {
     sign: Option<Sign>,
     prerequisites: Vec<Prerequisite>,
     update: Option<RawUpdate>,
+    firewall: Vec<FirewallRule>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -219,6 +223,7 @@ impl Lower<'_> {
             "require" => self.require(node, scope),
             "hook" => self.hook(node, scope),
             "service" => self.service(node, scope),
+            "firewall" => self.firewall_rule(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
                 let mut inner = scope.clone();
@@ -233,7 +238,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite or update"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite, update or firewall"
                 ),
             ),
         }
@@ -570,6 +575,37 @@ impl Lower<'_> {
             restart: None,
             component: scope.component.clone(),
             when,
+        });
+    }
+
+    /// `firewall <app> ["Rule name"] [public]`.
+    fn firewall_rule(&mut self, node: &Node, scope: &Scope) {
+        self.no_children(node);
+        let [app, rest @ ..] = node.args() else {
+            self.syntax(
+                node.at(),
+                "expected `firewall <app> [\"Rule name\"] [public]`",
+            );
+            return;
+        };
+        let mut name = None;
+        let mut public = false;
+        for word in rest {
+            match word.text.as_str() {
+                "public" if !word.quoted => public = true,
+                _ if name.is_none() => name = Some(word.text.clone()),
+                _ => self.syntax(
+                    word.at,
+                    "expected `firewall <app> [\"Rule name\"] [public]`",
+                ),
+            }
+        }
+        self.firewall.push(FirewallRule {
+            app: app.text.clone(),
+            name,
+            public,
+            component: scope.component.as_ref().map(|c| c.get_ref().clone()),
+            at: Location::at(self.file, self.source, node.at()),
         });
     }
 
@@ -1248,6 +1284,7 @@ impl Lower<'_> {
             brand: self.brand,
             sign: self.sign,
             prerequisites: self.prerequisites,
+            firewall: self.firewall,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

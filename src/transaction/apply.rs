@@ -166,6 +166,7 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
         | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
+        | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
         | (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
             a == b
         }
@@ -322,6 +323,11 @@ impl Run<'_> {
                 arguments,
                 scope,
             } => self.login_item(id, command, arguments, *scope),
+            Operation::AllowThroughFirewall {
+                name,
+                program,
+                public,
+            } => self.firewall(name, program, *public),
         }
     }
 
@@ -383,6 +389,31 @@ impl Run<'_> {
             .add_login_item(&name, &exe, arguments)
             .map_err(Error::Other)?;
         self.resources.push(Resource::LoginItem { name });
+        Ok(())
+    }
+
+    /// a firewall rule for one of the package's programs. per user there is
+    /// no right to add one; Windows asks when the program first listens.
+    fn firewall(&mut self, name: &str, program: &SemanticPath, public: bool) -> Result<(), Error> {
+        if self.plan.scope == Scope::User {
+            return Ok(());
+        }
+        let program = self.resolve(program)?;
+        let group = self.plan.package.to_string();
+        let previous = self.platform.firewall_rule(name).map_err(Error::Other)?;
+        self.step(Undo::RestoreFirewallRule {
+            name: name.to_owned(),
+            group: group.clone(),
+            previous,
+        })?;
+        let rule = crate::platform::Firewall { program, public };
+        self.platform
+            .set_firewall_rule(name, &group, Some(&rule))
+            .map_err(Error::Other)?;
+        self.resources.push(Resource::FirewallRule {
+            name: name.to_owned(),
+            group,
+        });
         Ok(())
     }
 
