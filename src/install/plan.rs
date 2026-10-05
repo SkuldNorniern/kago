@@ -913,10 +913,7 @@ mod tests {
                 .unwrap();
             InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
         };
-        let open = format!(
-            "{AUREA}firewall main-executable
-"
-        );
+        let open = format!("{AUREA}firewall main-executable\n");
         let (plan, d) = build(&open);
         assert!(d.is_empty(), "{d:?}");
         assert!(plan.unwrap().operations.iter().any(|op| matches!(
