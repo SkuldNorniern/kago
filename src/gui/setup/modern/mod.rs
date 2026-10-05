@@ -735,7 +735,7 @@ fn welcome(
         let link_w = pen.width(link, &link_font);
         let link_area = Area::new(left, y, link_w, 24.0);
         let hover = frame.hover(Hit::License);
-        let tone = color::mix(pen.accent, color::TEXT, hover * 0.5);
+        let tone = color::mix(pen.accent, color::TEXT, 0.35 + hover * 0.4);
         pen.clipped(link, link_area, &link_font, tone)?;
         frame.hits.push((link_area, Hit::License));
     }
@@ -932,7 +932,7 @@ fn done(
         let font = pen.bold(14.0);
         let link = Area::new(x, body.y + 46.0 + used, pen.width(label, &font), 22.0);
         let hover = frame.hover(Hit::Link);
-        let tone = color::mix(pen.accent, color::TEXT, hover * 0.5);
+        let tone = color::mix(pen.accent, color::TEXT, 0.35 + hover * 0.4);
         pen.clipped(label, link, &font, tone)?;
         pen.line(
             (link.x, link.bottom() - 2.0),
