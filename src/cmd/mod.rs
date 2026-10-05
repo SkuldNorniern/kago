@@ -20,7 +20,8 @@ usage: kago <command>
 
 commands:
   init [dir] [--id <package-id>] [--force]
-                write a starter Kagofile, filled in from Cargo.toml
+                write a starter Kagofile, filled in from Cargo.toml,
+                pyproject.toml or package.json
   check [manifest] [--target <target>]...
                 validate the Kagofile and resolve it for each target
                 (default: the host)
