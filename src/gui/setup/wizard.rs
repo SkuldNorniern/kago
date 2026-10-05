@@ -3,13 +3,15 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Component, Installed, Step};
+use super::{Component, Existing, Installed, Place, Step};
 use crate::install::LocationError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Welcome,
     License,
+    /// for everyone or just this user.
+    Scope,
     Components,
     Directory,
     Installing,
@@ -27,6 +29,8 @@ pub enum Action {
     /// install now when the license allows, else show the license.
     Install,
     ToggleAccept,
+    /// install for everyone (true) or just this user.
+    SetEveryone(bool),
     /// tick or untick the optional component at this index.
     SetComponent(usize, bool),
     /// run the app after finishing.
@@ -72,8 +76,20 @@ pub struct Wizard {
     offers: Vec<Offer>,
     /// where `{app}` goes.
     pub location: Option<PathBuf>,
+    /// what is installed already where `location` is.
+    pub existing: Existing,
     /// the person may change `location`.
     pub folder_open: bool,
+    /// the window can pick folders at all.
+    folder: bool,
+    /// installing for everyone rather than just this user.
+    pub for_everyone: bool,
+    /// the other way to install, when the person may pick it.
+    other: Option<Place>,
+    /// why installing did not start, like a declined administrator prompt.
+    pub notice: Option<String>,
+    /// the page installing started from, to go back to when it cannot.
+    before: Page,
     /// why `location` cannot be used, if it cannot.
     pub folder_error: Option<LocationError>,
     /// a newer version is installed that this one may not replace.
@@ -91,8 +107,8 @@ impl Wizard {
     pub fn new(
         license: Option<bool>,
         components: &[Component],
-        location: Option<PathBuf>,
-        folder_open: bool,
+        place: Place,
+        folder: bool,
     ) -> Self {
         let mut wizard = Self {
             page: Page::Welcome,
@@ -108,10 +124,16 @@ impl Wizard {
                     required: c.required,
                 })
                 .collect(),
-            location,
-            folder_open,
+            folder_open: folder && !place.existing.installed(),
+            blocked: place.existing.blocks(),
+            location: place.location,
+            existing: place.existing,
+            folder,
+            for_everyone: false,
+            other: None,
+            notice: None,
+            before: Page::Welcome,
             folder_error: None,
-            blocked: false,
             fraction: 0.0,
             log: Vec::new(),
             launch: None,
@@ -124,6 +146,42 @@ impl Wizard {
             }
         }
         wizard
+    }
+
+    /// lets the person pick between installing for everyone and just for
+    /// them; `other` is where the other way goes.
+    pub fn offer_scope(&mut self, for_everyone: bool, other: Place) {
+        self.for_everyone = for_everyone;
+        self.other = Some(other);
+    }
+
+    /// whether the person may pick between everyone and just them.
+    #[must_use]
+    pub const fn scope_open(&self) -> bool {
+        self.other.is_some()
+    }
+
+    /// switches to installing for everyone or just this user, with that
+    /// way's folder and what is installed there.
+    fn set_everyone(&mut self, on: bool) {
+        if on == self.for_everyone {
+            return;
+        }
+        let Some(other) = self.other.take() else {
+            return;
+        };
+        let current = Place {
+            location: self.location.take(),
+            existing: std::mem::take(&mut self.existing),
+        };
+        self.for_everyone = on;
+        self.folder_open = self.folder && !other.existing.installed();
+        self.blocked = other.existing.blocks();
+        self.location = other.location;
+        self.existing = other.existing;
+        self.folder_error = None;
+        self.notice = None;
+        self.other = Some(current);
     }
 
     /// whether Next works on this page right now.
@@ -161,22 +219,70 @@ impl Wizard {
             .collect()
     }
 
+    /// the pages before installing, in order. which there are depends on
+    /// the package and, for the folder, on what is installed already.
+    fn pages(&self) -> Vec<Page> {
+        let mut pages = vec![Page::Welcome];
+        if self.has_license {
+            pages.push(Page::License);
+        }
+        if self.scope_open() {
+            pages.push(Page::Scope);
+        }
+        if !self.offers.is_empty() {
+            pages.push(Page::Components);
+        }
+        if self.folder_open {
+            pages.push(Page::Directory);
+        }
+        pages
+    }
+
+    /// whether Next on this page starts installing.
+    #[must_use]
+    pub fn installs_next(&self) -> bool {
+        self.pages().last() == Some(&self.page)
+    }
+
+    /// the page after this one, or installing after the last.
+    fn next(&mut self) -> Outcome {
+        let pages = self.pages();
+        let at = pages.iter().position(|p| *p == self.page);
+        match at.and_then(|i| pages.get(i + 1)) {
+            Some(page) => self.show(*page),
+            None => self.start(),
+        }
+    }
+
+    fn back(&mut self) -> Outcome {
+        let pages = self.pages();
+        if let Some(i) = pages.iter().position(|p| *p == self.page)
+            && i > 0
+        {
+            self.show(pages[i - 1]);
+        }
+        Outcome::Stay
+    }
+
+    /// whether the page is one where the person still decides things.
+    const fn choosing(&self) -> bool {
+        matches!(
+            self.page,
+            Page::Welcome | Page::License | Page::Scope | Page::Components | Page::Directory
+        )
+    }
+
     pub fn act(&mut self, action: Action) -> Outcome {
+        let choosing = self.choosing();
         match (self.page, action) {
             (Page::Installing, _) => Outcome::Stay,
-            (Page::Welcome, Action::Next) | (Page::Components | Page::Directory, Action::Back)
-                if self.has_license =>
-            {
-                self.show(Page::License)
-            }
-            (Page::Welcome, Action::Next) => self.after_license(),
             (Page::License, Action::Agree) => {
                 self.accepted = true;
-                self.after_license()
+                self.next()
             }
-            (Page::License, Action::Next) if self.can_go_on() => self.after_license(),
-            (Page::Components, Action::Next) => self.after_components(),
-            (Page::Directory, Action::Next) => self.start(),
+            (Page::License, Action::Next) if !self.can_go_on() => Outcome::Stay,
+            (_, Action::Next) if choosing => self.next(),
+            (_, Action::Back) if choosing => self.back(),
             (Page::Welcome | Page::License, Action::Install) => {
                 if self.accepted || !self.must_accept {
                     self.start()
@@ -184,17 +290,15 @@ impl Wizard {
                     self.show(Page::License)
                 }
             }
-            (Page::Directory, Action::Back) if !self.offers.is_empty() => {
-                self.show(Page::Components)
-            }
-            (Page::License | Page::Components | Page::Directory, Action::Back) => {
-                self.show(Page::Welcome)
-            }
             (Page::Welcome | Page::License, Action::ToggleAccept) => {
                 self.accepted = !self.accepted;
                 Outcome::Stay
             }
-            (Page::Welcome | Page::License | Page::Components, Action::SetComponent(i, on)) => {
+            (_, Action::SetEveryone(on)) if choosing => {
+                self.set_everyone(on);
+                Outcome::Stay
+            }
+            (_, Action::SetComponent(i, on)) if choosing => {
                 self.set_component(i, on);
                 Outcome::Stay
             }
@@ -273,29 +377,34 @@ impl Wizard {
         Outcome::Stay
     }
 
-    fn after_license(&mut self) -> Outcome {
-        if self.offers.is_empty() {
-            self.after_components()
-        } else {
-            self.show(Page::Components)
-        }
-    }
-
-    fn after_components(&mut self) -> Outcome {
-        if self.folder_open {
-            self.show(Page::Directory)
-        } else {
-            self.start()
-        }
-    }
-
     /// installing begins unless the folder is unusable.
     fn start(&mut self) -> Outcome {
         if self.folder_error.is_some() || self.blocked {
             return Outcome::Stay;
         }
+        self.before = self.page;
+        self.notice = None;
         self.page = Page::Installing;
         Outcome::Start
+    }
+
+    /// installs with what is picked, skipping the pages left.
+    pub fn install_now(&mut self) -> Outcome {
+        self.start()
+    }
+
+    /// ticks exactly the `components` given, besides the locked ones.
+    pub fn pick(&mut self, components: &[String]) {
+        for i in 0..self.offers.len() {
+            self.chosen[i] = self.locked(i) || components.contains(&self.offers[i].id);
+        }
+    }
+
+    /// installing could not start after all: back where it started from,
+    /// saying why.
+    pub fn not_started(&mut self, why: String) {
+        self.page = self.before;
+        self.notice = Some(why);
     }
 
     pub fn progress(&mut self, fraction: f32, step: Step) {
@@ -324,7 +433,14 @@ mod tests {
     use super::*;
 
     fn plain(license: Option<bool>) -> Wizard {
-        Wizard::new(license, &[], None, false)
+        Wizard::new(license, &[], Place::default(), false)
+    }
+
+    fn at(dir: &Path) -> Place {
+        Place {
+            location: Some(dir.to_path_buf()),
+            existing: Existing::None,
+        }
     }
 
     fn component(id: &str, default: bool, depends: &[&str]) -> Component {
@@ -396,7 +512,7 @@ mod tests {
             component("steamvr", true, &[]),
             component("docs", false, &[]),
         ];
-        let mut w = Wizard::new(Some(true), &offers, None, false);
+        let mut w = Wizard::new(Some(true), &offers, Place::default(), false);
         assert_eq!(w.chosen_ids(), ["steamvr"]);
         w.act(Action::Next);
         assert_eq!(w.act(Action::Agree), Outcome::Stay);
@@ -409,7 +525,7 @@ mod tests {
         assert_eq!(w.act(Action::Next), Outcome::Start);
         assert_eq!(w.chosen_ids(), ["docs"]);
 
-        let mut w = Wizard::new(None, &offers, None, false);
+        let mut w = Wizard::new(None, &offers, Place::default(), false);
         w.act(Action::Next);
         assert_eq!(w.page, Page::Components);
         w.act(Action::Back);
@@ -423,7 +539,7 @@ mod tests {
             component("plugins", false, &["core-extras"]),
             component("tools", true, &[]),
         ];
-        let mut w = Wizard::new(None, &offers, None, false);
+        let mut w = Wizard::new(None, &offers, Place::default(), false);
         w.act(Action::SetComponent(1, true));
         assert_eq!(w.chosen_ids(), ["core-extras", "plugins", "tools"]);
         w.act(Action::SetComponent(0, false));
@@ -437,7 +553,7 @@ mod tests {
         let mut driver = component("steamvr", false, &["runtime"]);
         driver.required = true;
         let offers = [component("runtime", false, &[]), driver];
-        let mut w = Wizard::new(None, &offers, None, false);
+        let mut w = Wizard::new(None, &offers, Place::default(), false);
         assert_eq!(
             w.chosen_ids(),
             ["runtime", "steamvr"],
@@ -454,7 +570,12 @@ mod tests {
 
     #[test]
     fn modern_install_takes_the_ticks_from_welcome() {
-        let mut w = Wizard::new(None, &[component("steamvr", true, &[])], None, false);
+        let mut w = Wizard::new(
+            None,
+            &[component("steamvr", true, &[])],
+            Place::default(),
+            false,
+        );
         w.act(Action::SetComponent(0, false));
         assert_eq!(w.act(Action::Install), Outcome::Start);
         assert!(w.chosen_ids().is_empty());
@@ -464,7 +585,7 @@ mod tests {
     fn directory_page_comes_last_and_blocks_bad_folders() {
         let offers = [component("steamvr", true, &[])];
         let start = PathBuf::from("/apps/Ozone");
-        let mut w = Wizard::new(None, &offers, Some(start.clone()), true);
+        let mut w = Wizard::new(None, &offers, at(&start), true);
         w.act(Action::Next);
         assert_eq!(w.page, Page::Components);
         w.act(Action::Next);
@@ -483,11 +604,38 @@ mod tests {
     #[test]
     fn a_locked_folder_is_neither_shown_nor_changed() {
         let here = PathBuf::from("/apps/Ozone");
-        let mut w = Wizard::new(None, &[], Some(here.clone()), false);
+        let mut w = Wizard::new(None, &[], at(&here), false);
         w.set_location(Path::new("/elsewhere"), Ok(()));
         assert_eq!(w.location, Some(here));
         assert_eq!(w.chosen_location(), None, "upgrades stay where they are");
         assert_eq!(w.act(Action::Next), Outcome::Start);
+    }
+
+    #[test]
+    fn the_scope_page_switches_folder_and_what_is_installed() {
+        let mut w = Wizard::new(Some(false), &[], at(Path::new("/pf/Ozone")), true);
+        let mine = Place {
+            location: Some(PathBuf::from("/me/Ozone")),
+            existing: Existing::Older("0.9.0".into()),
+        };
+        w.offer_scope(true, mine);
+        w.act(Action::Next);
+        w.act(Action::Next);
+        assert_eq!(w.page, Page::Scope, "after the license");
+        w.act(Action::Next);
+        assert_eq!(w.page, Page::Directory);
+        w.act(Action::Back);
+        w.act(Action::SetEveryone(false));
+        assert!(!w.for_everyone);
+        assert_eq!(w.location, Some(PathBuf::from("/me/Ozone")));
+        assert!(!w.folder_open, "an update stays in its folder");
+        assert_eq!(w.act(Action::Next), Outcome::Start, "no folder page");
+        w.not_started("no".into());
+        assert_eq!(w.page, Page::Scope);
+        assert_eq!(w.notice.as_deref(), Some("no"));
+        w.act(Action::SetEveryone(true));
+        assert_eq!(w.location, Some(PathBuf::from("/pf/Ozone")));
+        assert!(w.folder_open && w.notice.is_none());
     }
 
     #[test]

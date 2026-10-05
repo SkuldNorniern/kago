@@ -29,14 +29,29 @@ pub struct Info {
     pub name: String,
     pub version: String,
     pub publisher: Option<String>,
-    /// where it will be installed, when known.
-    pub location: Option<PathBuf>,
-    /// what is installed already; an update stays in its folder.
-    pub existing: Existing,
+    /// where it goes and what is there already.
+    pub place: Place,
+    /// installing for everyone rather than just this user.
+    pub for_everyone: bool,
+    /// the other way to install, when the person may pick between
+    /// everyone and just them.
+    pub other: Option<Place>,
+    /// picked already, by the setup that asked for administrator rights:
+    /// the window starts installing straight away.
+    pub picked: Option<Picked>,
     pub license: Option<License>,
     /// optional parts the person can tick or untick.
     pub components: Vec<Component>,
     pub brand: Brand,
+}
+
+/// one way to install: where `{app}` goes and what is installed there.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Place {
+    /// where it will be installed, when known.
+    pub location: Option<PathBuf>,
+    /// an update stays in its folder.
+    pub existing: Existing,
 }
 
 /// the same package already on this machine, by its version.
@@ -174,12 +189,17 @@ pub struct Folder {
     /// the system's folder dialog over the window with this handle,
     /// titled and starting where given.
     pub browse: FolderDialog,
-    /// whether a folder can take the install.
+    /// whether a folder can take the install, for everyone (true) or just
+    /// this user.
     pub check: FolderCheck,
 }
 
-/// whether a folder can take the install.
-pub type FolderCheck = Box<dyn Fn(&Path) -> Result<(), LocationError>>;
+/// whether a folder can take the install, for everyone (true) or not.
+pub type FolderCheck = Box<dyn Fn(&Path, bool) -> Result<(), LocationError>>;
+
+/// starts the setup again with administrator rights, to install for
+/// everyone what the person picked. `Ok` once it runs; the window closes.
+pub type Elevate = Box<dyn Fn(&Picked) -> Result<(), crate::platform::ElevationError>>;
 
 /// the system's folder dialog: owner window, title, starting folder.
 pub type FolderDialog = fn(Option<isize>, &str, Option<&Path>) -> Option<PathBuf>;
@@ -190,6 +210,8 @@ pub struct Picked {
     pub components: Vec<String>,
     /// `None` keeps the default, or the folder an update replaces.
     pub location: Option<PathBuf>,
+    /// for everyone rather than just this user.
+    pub for_everyone: bool,
 }
 
 /// what a finished install reports.
@@ -249,17 +271,29 @@ enum Event {
 /// shows the setup until the user closes it. `install` runs once, on a
 /// worker thread, when the wizard gets to installing, with what the person
 /// picked. `folder` lets them choose where; without it the folder is fixed.
-/// returns whether an install finished.
+/// `elevate`, when given, takes over an install for everyone. returns
+/// whether an install finished or was handed over.
 ///
 /// # Errors
 ///
 /// when the window cannot be created.
-pub fn run<F>(look: SetupLook, info: &Info, folder: Option<Folder>, install: F) -> AureaResult<bool>
+pub fn run<F>(
+    look: SetupLook,
+    info: &Info,
+    folder: Option<Folder>,
+    elevate: Option<Elevate>,
+    install: F,
+) -> AureaResult<bool>
 where
     F: FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send + 'static,
 {
     let lang = Lang::detect();
-    let session = Session::new(info, folder, install);
+    let mut session = Session::new(info, folder, install);
+    session.elevate = elevate;
+    session.lang = lang;
+    if let Some(picked) = &info.picked {
+        session.resume(picked);
+    }
     match look {
         SetupLook::Modern => modern::run(info, lang, session),
         SetupLook::Native => native::run(info, lang, session),
@@ -276,6 +310,11 @@ struct Session {
     /// the folder name the app gets inside a picked folder.
     app_folder: String,
     install: Option<Work>,
+    /// hands an install for everyone to an elevated setup.
+    elevate: Option<Elevate>,
+    /// the install went to the elevated setup.
+    handed_off: bool,
+    lang: Lang,
     tx: Sender<Event>,
     rx: Receiver<Event>,
 }
@@ -286,34 +325,81 @@ impl Session {
         F: FnOnce(&Reporter, Picked) -> Result<Installed, String> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
-        let mut session = Self {
-            wizard: Wizard::new(
-                info.license.as_ref().map(|l| l.accept),
-                &info.components,
-                info.location.clone(),
-                folder.is_some() && !info.existing.installed(),
-            ),
+        let mut wizard = Wizard::new(
+            info.license.as_ref().map(|l| l.accept),
+            &info.components,
+            info.place.clone(),
+            folder.is_some(),
+        );
+        wizard.for_everyone = info.for_everyone;
+        if let Some(other) = &info.other {
+            wizard.offer_scope(info.for_everyone, other.clone());
+        }
+        Self {
+            wizard,
             folder,
             app_folder: crate::install::folder_name(&info.name),
             install: Some(Box::new(install)),
+            elevate: None,
+            handed_off: false,
+            lang: Lang::En,
             tx,
             rx,
-        };
-        session.wizard.blocked = info.existing.blocks();
-        session
+        }
+    }
+
+    /// takes what the setup that asked for administrator rights was given
+    /// and starts installing.
+    fn resume(&mut self, picked: &Picked) {
+        self.wizard.accepted = true;
+        self.wizard.pick(&picked.components);
+        if let Some(dir) = &picked.location {
+            self.set_location(dir);
+        }
+        // blocked or an unusable folder stays on the welcome page.
+        let outcome = self.wizard.install_now();
+        self.follow(outcome);
     }
 
     /// applies `action`. true when the window should close.
     fn act(&mut self, action: Action) -> bool {
-        match self.wizard.act(action) {
+        let outcome = self.wizard.act(action);
+        self.follow(outcome)
+    }
+
+    /// does what the wizard's answer asks. true when the window should
+    /// close.
+    fn follow(&mut self, outcome: Outcome) -> bool {
+        match outcome {
             Outcome::Stay => false,
             Outcome::Start => {
+                let picked = Picked {
+                    components: self.wizard.chosen_ids(),
+                    location: self.wizard.chosen_location(),
+                    for_everyone: self.wizard.for_everyone,
+                };
+                if picked.for_everyone
+                    && let Some(elevate) = &self.elevate
+                {
+                    return match elevate(&picked) {
+                        Ok(()) => {
+                            self.handed_off = true;
+                            true
+                        }
+                        Err(e) => {
+                            let why = match e {
+                                crate::platform::ElevationError::Declined => {
+                                    self.lang.line(Line::AdminDeclined).to_owned()
+                                }
+                                crate::platform::ElevationError::Failed(e) => e,
+                            };
+                            self.wizard.not_started(why);
+                            false
+                        }
+                    };
+                }
                 if let Some(work) = self.install.take() {
                     let reporter = Reporter(self.tx.clone());
-                    let picked = Picked {
-                        components: self.wizard.chosen_ids(),
-                        location: self.wizard.chosen_location(),
-                    };
                     thread::spawn(move || {
                         let result = work(&reporter, picked);
                         let _ = reporter.0.send(Event::Finished(result));
@@ -344,7 +430,11 @@ impl Session {
 
     /// takes a typed or picked folder and checks it.
     fn set_location(&mut self, dir: &Path) {
-        let check = self.folder.as_ref().map_or(Ok(()), |f| (f.check)(dir));
+        let everyone = self.wizard.for_everyone;
+        let check = self
+            .folder
+            .as_ref()
+            .map_or(Ok(()), |f| (f.check)(dir, everyone));
         self.wizard.set_location(dir, check);
     }
 
@@ -414,9 +504,10 @@ impl Session {
         }
     }
 
-    /// whether the install has finished, for the exit code.
+    /// whether the install has finished, or went to the elevated setup,
+    /// for the exit code.
     fn installed(&self) -> bool {
-        self.wizard.page == wizard::Page::Done
+        self.handed_off || self.wizard.page == wizard::Page::Done
     }
 
     fn closable(&self) -> bool {
@@ -433,8 +524,13 @@ mod tests {
             name: "Ozone".into(),
             version: "1.0.0".into(),
             publisher: None,
-            location: Some(PathBuf::from("/apps/Ozone")),
-            existing: Existing::None,
+            place: Place {
+                location: Some(PathBuf::from("/apps/Ozone")),
+                existing: Existing::None,
+            },
+            for_everyone: false,
+            other: None,
+            picked: None,
             license: None,
             components: Vec::new(),
             brand: Brand::default(),
@@ -444,7 +540,7 @@ mod tests {
     fn session(dialog: FolderDialog) -> Session {
         let folder = Folder {
             browse: dialog,
-            check: Box::new(|_| Ok(())),
+            check: Box::new(|_, _| Ok(())),
         };
         Session::new(&info(), Some(folder), |_, _| Ok(Installed { launch: None }))
     }

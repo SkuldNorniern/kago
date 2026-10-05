@@ -24,6 +24,8 @@ const HEIGHT: u32 = 420;
 /// a components caption and one row per component.
 const COMPONENTS_CAPTION: f32 = 24.0;
 const COMPONENT_ROW: f32 = 30.0;
+/// the everyone / just me switch with its caption and note.
+const SCOPE_ROW: f32 = 92.0;
 const MARGIN: f32 = 32.0;
 const BUTTON_H: f32 = 40.0;
 
@@ -33,6 +35,8 @@ mod key {
     pub const PROGRESS: u32 = 2;
     pub const ACCEPT: u32 = 3;
     pub const SCROLL: u32 = 4;
+    /// 1 for everyone, 0 for just me.
+    pub const SCOPE: u32 = 5;
 
     pub const fn hover(hit: super::Hit) -> u32 {
         match hit {
@@ -42,6 +46,8 @@ mod key {
             super::Hit::License => 103,
             super::Hit::Browse => 104,
             super::Hit::Link => 105,
+            super::Hit::Scope(true) => 106,
+            super::Hit::Scope(false) => 107,
             super::Hit::Component(i) => 200 + i,
         }
     }
@@ -63,6 +69,8 @@ enum Hit {
     Browse,
     /// the brand link on the finish page.
     Link,
+    /// install for everyone (true) or just this user.
+    Scope(bool),
 }
 
 struct State {
@@ -151,6 +159,7 @@ impl State {
                 }
                 return;
             }
+            (_, Hit::Scope(on)) => Action::SetEveryone(on),
             (_, Hit::Component(i)) => {
                 let i = i as usize;
                 let on = wizard.chosen.get(i).is_some_and(|on| *on);
@@ -237,6 +246,12 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
         HEIGHT
     } else {
         HEIGHT + (COMPONENTS_CAPTION + COMPONENT_ROW * info.components.len() as f32).ceil() as u32
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let height = if info.other.is_some() {
+        height + SCOPE_ROW as u32
+    } else {
+        height
     };
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let width = if info.brand.side.is_some() {
@@ -375,7 +390,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         )?;
     }
     match page {
-        Page::Welcome | Page::Components | Page::Directory => {
+        Page::Welcome | Page::Scope | Page::Components | Page::Directory => {
             welcome(&mut pen, &mut frame, s, body, footer)?;
         }
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
@@ -616,7 +631,7 @@ fn location_card(
     let y = at.y;
     let note = if let Some(error) = wizard.folder_error {
         Some((lang.folder_error(error), color::BAD))
-    } else if s.info.existing.installed() {
+    } else if wizard.existing.installed() {
         Some((lang.line(Line::UpdateHere), color::FAINT))
     } else {
         None
@@ -698,6 +713,69 @@ fn component_rows(
     Ok(y)
 }
 
+/// for everyone or just me, as two halves of one track with the pick
+/// sliding between them, and what the pick means under it. returns where
+/// the next thing goes.
+fn scope_switch(pen: &mut Pen<'_>, frame: &mut Frame<'_>, s: &State, at: Area) -> AureaResult<f32> {
+    let lang = s.lang;
+    let everyone = s.session.wizard.for_everyone;
+    caption(pen, lang.line(Line::InstallFor), at.x, at.y)?;
+    let track = Area::new(at.x, at.y + 22.0, at.w.min(420.0), 36.0);
+    pen.round(track, 10.0, color::SURFACE)?;
+    pen.outline(
+        track,
+        10.0,
+        1.0,
+        color::mix(color::SURFACE, color::BORDER, 0.6),
+    )?;
+    let half = track.w / 2.0;
+    let t = smooth(frame.anim.to(key::SCOPE, f32::from(everyone), 14.0));
+    // the pick slides from the right half (just me) to the left.
+    let thumb = Area::new(
+        track.x + 3.0 + (1.0 - t) * half,
+        track.y + 3.0,
+        half - 6.0,
+        track.h - 6.0,
+    );
+    pen.round(thumb, 8.0, pen.accent)?;
+    for (on, label) in [(true, Line::Everyone), (false, Line::JustMe)] {
+        let a = Area::new(
+            if on { track.x } else { track.x + half },
+            track.y,
+            half,
+            track.h,
+        );
+        let picked = if on { t } else { 1.0 - t };
+        let hover = if on == everyone {
+            0.0
+        } else {
+            frame.hover(Hit::Scope(on))
+        };
+        let idle = color::mix(color::DIM, color::TEXT, hover);
+        pen.centred(
+            lang.line(label),
+            a,
+            &pen.bold(13.0),
+            color::mix(idle, pen.on_accent, picked),
+        )?;
+        if on != everyone {
+            frame.hits.push((a, Hit::Scope(on)));
+        }
+    }
+    let note = if everyone {
+        Line::ForEveryoneNote
+    } else {
+        Line::JustMeNote
+    };
+    pen.clipped(
+        lang.line(note),
+        Area::new(at.x, track.bottom() + 8.0, at.w, 18.0),
+        &pen.font(12.0),
+        color::FAINT,
+    )?;
+    Ok(track.bottom() + 8.0 + 18.0 + 16.0)
+}
+
 fn welcome(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
@@ -727,7 +805,8 @@ fn welcome(
     )?;
     let mut y = body.y + used + 12.0;
     if let Some(state) = s
-        .info
+        .session
+        .wizard
         .existing
         .sentence(lang, &s.info.name, &s.info.version)
     {
@@ -745,6 +824,18 @@ fn welcome(
         y += used + 6.0;
     }
     let wizard = &s.session.wizard;
+    if let Some(notice) = &wizard.notice {
+        let used = pen.wrapped(
+            notice,
+            Area::new(body.x, y - 4.0, body.w, 40.0),
+            &pen.font(13.0),
+            color::BAD,
+        )?;
+        y += used + 6.0;
+    }
+    if wizard.scope_open() {
+        y = scope_switch(pen, frame, s, Area::new(body.x, y, body.w, 0.0))?;
+    }
     if let Some(location) = &wizard.location {
         y = location_card(pen, frame, s, location, Area::new(body.x, y, body.w, 0.0))? + 16.0;
     }
@@ -779,7 +870,7 @@ fn welcome(
         frame,
         footer,
         (
-            lang.line(s.info.existing.verb()),
+            lang.line(wizard.existing.verb()),
             wizard.folder_error.is_none() && !wizard.blocked,
         ),
         Some(lang.line(Line::Cancel)),
@@ -841,7 +932,7 @@ fn license(
         pen,
         frame,
         footer,
-        (lang.line(s.info.existing.verb()), wizard.can_go_on()),
+        (lang.line(wizard.existing.verb()), wizard.can_go_on()),
         Some(lang.line(Line::Return)),
     )
 }

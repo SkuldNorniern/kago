@@ -8,19 +8,22 @@ use std::process::ExitCode;
 
 use kago::container::Container;
 use kago::format::setup::{self, Embedded};
-use kago::install::Operation;
+use kago::install::{InstallPlan, Operation, Scope};
 use kago::manifest::SemanticPath;
 use kago::platform;
 use kago::transaction;
 
 const SETUP_USAGE: &str = "\
 usage: <setup>.exe [--silent | /S] [--components <a,b>] [--location <dir>]
+                   [--scope user|machine]
 
   (nothing)           open the setup window
   --silent, /S        install without a window, with the defaults
   --components <a,b>  with --silent: these optional components, besides the
                       required ones; an empty list installs only those
   --location <dir>    with --silent: install into this folder
+  --scope <s>         with --silent, for a package that lets you pick:
+                      machine (for everyone, the default) or user
 
 exit code 0 when installed, 1 otherwise; errors go to stderr.
 ";
@@ -31,6 +34,10 @@ struct SetupArgs {
     silent: bool,
     components: Option<Vec<String>>,
     location: Option<PathBuf>,
+    scope: Option<Scope>,
+    /// started by the setup window with administrator rights, to install
+    /// for everyone what was picked there.
+    elevated: bool,
     help: bool,
 }
 
@@ -59,12 +66,19 @@ fn setup_args(args: &[String]) -> Option<Result<SetupArgs, String>> {
                 Some(dir) => out.location = Some(PathBuf::from(dir)),
                 None => return Some(Err("`--location` needs a folder".to_owned())),
             },
+            "--scope" => match it.next().map(|s| s.parse()) {
+                Some(Ok(scope)) => out.scope = Some(scope),
+                Some(Err(e)) => return Some(Err(e)),
+                None => return Some(Err("`--scope` needs user or machine".to_owned())),
+            },
+            "--elevated" => out.elevated = true,
             _ => return None,
         }
     }
-    if !out.silent && (out.components.is_some() || out.location.is_some()) {
+    let picked = out.components.is_some() || out.location.is_some() || out.scope.is_some();
+    if !out.silent && !out.elevated && picked {
         return Some(Err(
-            "`--components` and `--location` go with `--silent`; the window asks for them"
+            "`--components`, `--location` and `--scope` go with `--silent`; the window asks for them"
                 .to_owned(),
         ));
     }
@@ -88,12 +102,31 @@ pub fn run_embedded() -> Option<ExitCode> {
         print!("{SETUP_USAGE}");
         return Some(ExitCode::SUCCESS);
     }
-    // a package for everyone goes to Program Files: ask for administrator
-    // rights once, by starting this setup again with the UAC prompt.
-    let for_everyone = Container::open(&exe, embedded.offset)
-        .is_ok_and(|c| c.header.plan.scope == kago::install::Scope::Machine);
-    if for_everyone && !platform::is_elevated() {
-        return Some(match platform::run_elevated(&exe, &args, true) {
+    let plan = match Container::open(&exe, embedded.offset) {
+        Ok(c) => c.header.plan,
+        Err(e) => {
+            eprintln!("setup failed: {e}");
+            return Some(ExitCode::FAILURE);
+        }
+    };
+    let scope = match starting_scope(&plan, parsed.scope) {
+        Ok(scope) => scope,
+        Err(e) => {
+            eprintln!("setup: {e}");
+            return Some(ExitCode::FAILURE);
+        }
+    };
+    // for everyone goes to Program Files: ask for administrator rights
+    // once, by starting this setup again with the UAC prompt. a window
+    // that lets the person pick asks only once they picked everyone.
+    let window = !parsed.silent && cfg!(feature = "gui");
+    let asks_later = window && plan.scope_open && !parsed.elevated;
+    if scope == Scope::Machine && !asks_later && !platform::is_elevated() {
+        let mut again = args.clone();
+        if plan.scope_open && parsed.scope.is_none() {
+            again.extend(["--scope".to_owned(), scope.to_string()]);
+        }
+        return Some(match platform::run_elevated(&exe, &again, true) {
             Ok(code) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
             Err(e) => {
                 eprintln!("setup: {e}");
@@ -101,9 +134,9 @@ pub fn run_embedded() -> Option<ExitCode> {
             }
         });
     }
-    if !parsed.silent {
+    if window {
         #[cfg(feature = "gui")]
-        return Some(window(exe, embedded));
+        return Some(self::window(exe, embedded, &plan, scope, &parsed));
     }
     let location = match parsed.location.as_deref().map(std::path::absolute) {
         Some(Ok(dir)) => Some(dir),
@@ -116,6 +149,7 @@ pub fn run_embedded() -> Option<ExitCode> {
     let choice = Choice {
         components: parsed.components.as_deref(),
         location: location.as_deref(),
+        scope,
     };
     Some(match install(&exe, embedded, &choice, &mut |_, _| {}) {
         Ok(done) => {
@@ -129,61 +163,139 @@ pub fn run_embedded() -> Option<ExitCode> {
     })
 }
 
+/// where the install starts: the scope asked for, else the one it is
+/// installed in, else for everyone when the person may pick.
+fn starting_scope(plan: &InstallPlan, asked: Option<Scope>) -> Result<Scope, String> {
+    if !plan.scope_open {
+        return match asked {
+            Some(asked) if asked != plan.scope => Err(format!(
+                "{} installs for {} only",
+                plan.name,
+                everyone_or_user(plan.scope)
+            )),
+            _ => Ok(plan.scope),
+        };
+    }
+    if let Some(asked) = asked {
+        return Ok(asked);
+    }
+    let installed = platform::host().ok().and_then(|p| {
+        [Scope::Machine, Scope::User].into_iter().find(|scope| {
+            transaction::store(p.as_ref(), *scope)
+                .ok()
+                .and_then(|store| store.read_receipt(&plan.package).ok().flatten())
+                .is_some()
+        })
+    });
+    Ok(installed.unwrap_or(Scope::Machine))
+}
+
+fn everyone_or_user(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Machine => "everyone",
+        Scope::User => "the current user",
+    }
+}
+
+/// what installing in `scope` would find: the installed version and its
+/// folder, or the default folder.
 #[cfg(feature = "gui")]
-fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
-    use kago::gui::setup::{Existing, Folder, Info, Installed, License, Picked, run};
+fn place(
+    host: Option<&dyn platform::Platform>,
+    plan: &InstallPlan,
+    scope: Scope,
+) -> (kago::gui::setup::Place, Option<PathBuf>) {
+    use kago::gui::setup::{Existing, Place};
+    use kago::manifest::Root;
+
+    let receipt = host
+        .and_then(|p| transaction::store(p, scope).ok())
+        .and_then(|store| store.read_receipt(&plan.package).ok().flatten());
+    let elsewhere = host.is_some_and(|p| other_install(p, scope, &plan.package).is_some());
+    let existing = match &receipt {
+        Some(r) => match r.version.cmp_precedence(&plan.version) {
+            std::cmp::Ordering::Equal => Existing::Same,
+            std::cmp::Ordering::Less => Existing::Older(r.version.to_string()),
+            std::cmp::Ordering::Greater => Existing::Newer {
+                version: r.version.to_string(),
+                allowed: plan.downgrade == kago::manifest::Downgrade::Allow,
+            },
+        },
+        None if elsewhere => Existing::Elsewhere {
+            for_everyone: scope == Scope::User,
+        },
+        None => Existing::None,
+    };
+    let installed = receipt.and_then(|r| r.roots.get(&Root::App).cloned());
+    let default = host
+        .and_then(|p| p.roots(scope, &plan.name).ok())
+        .and_then(|r| r.0.get(&Root::App).cloned());
+    let place = Place {
+        location: installed.clone().or(default),
+        existing,
+    };
+    (place, installed)
+}
+
+#[cfg(feature = "gui")]
+fn window(
+    exe: PathBuf,
+    embedded: Embedded,
+    plan: &InstallPlan,
+    scope: Scope,
+    parsed: &SetupArgs,
+) -> ExitCode {
+    use kago::gui::setup::{Folder, Info, Installed, License, Picked, run};
     use kago::install::check_folder;
-    use kago::manifest::{FolderChoice, Root};
+    use kago::manifest::FolderChoice;
 
     let (info, look, folder) = match Container::open(&exe, embedded.offset) {
         Ok(mut c) => {
             let brand = window_brand(&mut c);
-            let plan = &c.header.plan;
             let host = platform::host().ok();
-            // where the installed version is, if there is one.
-            let receipt = host
-                .as_ref()
-                .and_then(|p| transaction::store(p.as_ref(), plan.scope).ok())
-                .and_then(|store| store.read_receipt(&plan.package).ok().flatten());
-            let elsewhere = host
-                .as_ref()
-                .is_some_and(|p| other_install(p.as_ref(), plan.scope, &plan.package).is_some());
-            let existing = receipt.as_ref().map_or(Existing::None, |r| {
-                match r.version.cmp_precedence(&plan.version) {
-                    std::cmp::Ordering::Equal => Existing::Same,
-                    std::cmp::Ordering::Less => Existing::Older(r.version.to_string()),
-                    std::cmp::Ordering::Greater => Existing::Newer {
-                        version: r.version.to_string(),
-                        allowed: plan.downgrade == kago::manifest::Downgrade::Allow,
-                    },
-                }
-            });
-            let existing = if existing == Existing::None && elsewhere {
-                Existing::Elsewhere {
-                    for_everyone: plan.scope == kago::install::Scope::User,
-                }
-            } else {
-                existing
+            let host = host.as_deref();
+            let other_scope = match scope {
+                Scope::Machine => Scope::User,
+                Scope::User => Scope::Machine,
             };
-            // where the installed version is, if there is one.
-            let installed = receipt.and_then(|r| r.roots.get(&Root::App).cloned());
-            let default = host
-                .as_ref()
-                .and_then(|p| p.roots(plan.scope, &plan.name).ok())
-                .and_then(|r| r.0.get(&Root::App).cloned());
+            let (here, folder_now) = place(host, plan, scope);
+            let (there, folder_other) = place(host, plan, other_scope);
+            // the elevated setup installs for everyone only.
+            let open = plan.scope_open && !parsed.elevated;
             let folder = (c.header.setup.folder == FolderChoice::Choose).then(|| {
-                let installed = installed.clone();
+                let installed = move |everyone: bool| {
+                    if everyone == (scope == Scope::Machine) {
+                        folder_now.clone()
+                    } else {
+                        folder_other.clone()
+                    }
+                };
                 Folder {
                     browse: platform::pick_folder,
-                    check: Box::new(move |dir: &Path| check_folder(dir, installed.as_deref())),
+                    check: Box::new(move |dir: &Path, everyone| {
+                        check_folder(dir, installed(everyone).as_deref())
+                    }),
                 }
+            });
+            let picked = parsed.elevated.then(|| Picked {
+                components: parsed.components.clone().unwrap_or_else(|| {
+                    plan.choices
+                        .iter()
+                        .filter(|c| c.default)
+                        .map(|c| c.id.clone())
+                        .collect()
+                }),
+                location: parsed.location.clone(),
+                for_everyone: true,
             });
             let info = Info {
                 name: plan.name.clone(),
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
-                existing,
-                location: installed.or(default),
+                place: here,
+                for_everyone: scope == Scope::Machine,
+                other: open.then_some(there),
+                picked,
                 brand,
                 license: c.header.setup.license.as_ref().map(|l| License {
                     text: l.text.clone(),
@@ -198,18 +310,26 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // picking everyone in a window without administrator rights starts
+    // this setup again with them, carrying what was picked.
+    let elevate = (info.other.is_some() && !platform::is_elevated()).then(|| handoff(exe.clone()));
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
         let mut report =
             |fraction, stage: Stage<'_>| reporter.report(fraction, window_step(&stage));
         let choice = Choice {
             components: Some(&picked.components),
             location: picked.location.as_deref(),
+            scope: if picked.for_everyone {
+                Scope::Machine
+            } else {
+                Scope::User
+            },
         };
         install(&exe, embedded, &choice, &mut report).map(|done| Installed {
             launch: done.launch,
         })
     };
-    match run(look, &info, folder, work) {
+    match run(look, &info, folder, elevate, work) {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -217,6 +337,25 @@ fn window(exe: PathBuf, embedded: Embedded) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// starts this setup again with administrator rights and what the person
+/// picked, to install for everyone.
+#[cfg(feature = "gui")]
+fn handoff(exe: PathBuf) -> kago::gui::setup::Elevate {
+    Box::new(move |picked: &kago::gui::setup::Picked| {
+        let mut args = vec![
+            "--elevated".to_owned(),
+            "--scope".to_owned(),
+            Scope::Machine.to_string(),
+            "--components".to_owned(),
+            picked.components.join(","),
+        ];
+        if let Some(dir) = &picked.location {
+            args.extend(["--location".to_owned(), dir.display().to_string()]);
+        }
+        platform::run_elevated(&exe, &args, false).map(|_| ())
+    })
 }
 
 /// the setup's brand with its images decoded. an image that does not
@@ -306,10 +445,9 @@ enum Stage<'a> {
 /// the same package installed in the other scope, with that scope's store.
 fn other_install(
     platform: &dyn kago::platform::Platform,
-    scope: kago::install::Scope,
+    scope: Scope,
     package: &kago::package::PackageId,
-) -> Option<(kago::install::Scope, transaction::Store)> {
-    use kago::install::Scope;
+) -> Option<(Scope, transaction::Store)> {
     let other = match scope {
         Scope::User => Scope::Machine,
         Scope::Machine => Scope::User,
@@ -323,12 +461,13 @@ fn other_install(
 }
 
 /// what the person installing picked.
-#[derive(Default)]
 struct Choice<'a> {
     /// optional components to install, the defaults when `None`.
     components: Option<&'a [String]>,
     /// `{app}` when not the default or the installed version's folder.
     location: Option<&'a Path>,
+    /// for everyone or just this user.
+    scope: Scope,
 }
 
 /// installs the embedded package as `choice` says. `progress` hears each
@@ -341,14 +480,25 @@ fn install(
     progress: &mut dyn FnMut(f32, Stage<'_>),
 ) -> Result<Done, String> {
     let mut container = Container::open(exe, embedded.offset).map_err(|e| e.to_string())?;
-    let header = &container.header.plan;
+    let plan = container
+        .header
+        .plan
+        .in_scope(choice.scope)
+        .ok_or_else(|| {
+            let plan = &container.header.plan;
+            format!(
+                "{} installs for {} only",
+                plan.name,
+                everyone_or_user(plan.scope)
+            )
+        })?;
     let platform = platform::host()?;
-    let store = transaction::store(platform.as_ref(), header.scope).map_err(|e| e.to_string())?;
-    let staging = store.root().join("staging").join(header.package.as_str());
+    let store = transaction::store(platform.as_ref(), plan.scope).map_err(|e| e.to_string())?;
+    let staging = store.root().join("staging").join(plan.package.as_str());
     let _ = fs::remove_dir_all(&staging);
     let result = (|| {
         // choose first: what is not installed is not unpacked either.
-        let plan = &container.header.plan;
+        let plan = &plan;
         if let Some(chosen) = choice.components
             && let Some(unknown) = chosen
                 .iter()
@@ -457,6 +607,18 @@ mod tests {
             "the window asks itself"
         );
         assert!(parse(&["--components"]).unwrap().is_err());
+        let picked = parse(&["/S", "--scope", "user"]).unwrap().unwrap();
+        assert_eq!(picked.scope, Some(Scope::User));
+        assert!(parse(&["/S", "--scope", "all"]).unwrap().is_err());
+        assert!(
+            parse(&["--scope", "user"]).unwrap().is_err(),
+            "the window asks"
+        );
+        let handed = parse(&["--elevated", "--scope", "machine", "--components", ""])
+            .unwrap()
+            .unwrap();
+        assert!(handed.elevated && !handed.silent);
+        assert_eq!(handed.components, Some(Vec::new()));
         // anything else is plain kago, like the uninstall entry's call.
         assert_eq!(parse(&["uninstall", "dev.x.y"]), None);
     }

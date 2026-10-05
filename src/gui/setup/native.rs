@@ -62,6 +62,9 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
             {
                 session.act(Action::SetOpen(open.0.borrow().get_checked()));
             }
+            if page == Page::Scope {
+                pick_scope(&mut session, &live);
+            }
             if page == Page::Components {
                 // the boxes are read when leaving the page, either way.
                 for (i, tick) in live.components.iter().enumerate() {
@@ -85,6 +88,10 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
             }
         }
         busy |= session.pump();
+        // the two boxes act as one radio choice.
+        if page == Page::Scope && pick_scope(&mut session, &live) {
+            redraw = true;
+        }
         if session.wizard.page != page || redraw {
             page = session.wizard.page;
             // the old widgets go with the old content.
@@ -111,6 +118,29 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
     }
 }
 
+/// takes a tick of the other box on the scope page. true when the pick
+/// changed or a box needs its tick back.
+fn pick_scope(session: &mut Session, live: &Live) -> bool {
+    let Some((everyone, just_me)) = &live.scope else {
+        return false;
+    };
+    let (e, m) = (
+        everyone.0.borrow().get_checked(),
+        just_me.0.borrow().get_checked(),
+    );
+    let now = session.wizard.for_everyone;
+    if now && m {
+        session.act(Action::SetEveryone(false));
+        true
+    } else if !now && e {
+        session.act(Action::SetEveryone(true));
+        true
+    } else {
+        // the ticked one was unticked: tick it again.
+        !e && !m
+    }
+}
+
 fn details(lang: Lang, session: &Session) -> String {
     let lines: Vec<String> = session.wizard.log.iter().map(|s| s.text(lang)).collect();
     lines.join("\n")
@@ -124,6 +154,8 @@ struct Live {
     open: Option<Kept<Checkbox>>,
     components: Vec<Kept<Checkbox>>,
     folder: Option<Kept<TextField>>,
+    /// for everyone, just me.
+    scope: Option<(Kept<Checkbox>, Kept<Checkbox>)>,
 }
 
 /// a widget still reachable after a container took it.
@@ -231,6 +263,12 @@ fn render(
     let fill = |line| lang.fill(line, &[("name", name), ("version", &info.version)]);
     let wizard = &session.wizard;
     let mut live = Live::default();
+    // the main button installs on the last page before installing.
+    let next = if wizard.installs_next() {
+        wizard.existing.verb()
+    } else {
+        Line::Next
+    };
     let mut window = Stack::new(Orientation::Vertical)?;
     let mut body = Stack::new(Orientation::Vertical)?;
     let mut buttons = Stack::new(Orientation::Horizontal)?;
@@ -257,23 +295,18 @@ fn render(
                 .clone()
                 .unwrap_or_else(|| fill(Line::WelcomeBody));
             body.add(Label::new(&intro)?)?;
-            if let Some(state) = info.existing.sentence(lang, name, &info.version) {
+            if let Some(state) = wizard.existing.sentence(lang, name, &info.version) {
                 body.add(Label::new(&state)?)?;
             }
             if let Some(publisher) = &info.publisher {
                 body.add(Label::new(&lang.fill(Line::By, &[("name", publisher)]))?)?;
             }
-            if let Some(location) = &info.location {
+            if let Some(location) = &wizard.location {
                 body.add(Label::new(lang.line(Line::InstallInto))?)?;
                 body.add(Label::new(&format!("    {}", location.display()))?)?;
             }
             body.add_spacer(1.0)?;
             body.add(Label::new(lang.line(Line::ClickNext))?)?;
-            let next = if wizard.has_license || !info.components.is_empty() || wizard.folder_open {
-                Line::Next
-            } else {
-                info.existing.verb()
-            };
             // a newer install it may not replace: only a way out.
             if !wizard.blocked {
                 buttons.add(button(lang.line(next), tx, Action::Next)?)?;
@@ -292,11 +325,32 @@ fn render(
             if wizard.must_accept {
                 buttons.add(button(lang.line(Line::Agree), tx, Action::Agree)?)?;
             } else {
-                let next = if info.components.is_empty() && !wizard.folder_open {
-                    info.existing.verb()
-                } else {
-                    Line::Next
-                };
+                buttons.add(button(lang.line(next), tx, Action::Next)?)?;
+            }
+            buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
+        }
+        Page::Scope => {
+            window.add(header(Line::ScopeTitle, Line::ScopeBody)?)?;
+            window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
+            let mut choice = |label: Line, note: Line, on: bool| -> AureaResult<Kept<Checkbox>> {
+                let tick = Kept::new(Checkbox::with_checked(lang.line(label), on)?);
+                body.add(tick.share())?;
+                body.add(Label::new(&format!("        {}", lang.line(note)))?)?;
+                Ok(tick)
+            };
+            let everyone = choice(
+                Line::ForEveryone,
+                Line::ForEveryoneNote,
+                wizard.for_everyone,
+            )?;
+            let just_me = choice(Line::JustMe, Line::JustMeNote, !wizard.for_everyone)?;
+            live.scope = Some((everyone, just_me));
+            if let Some(state) = wizard.existing.sentence(lang, name, &info.version) {
+                body.add(Label::new(&state)?)?;
+            }
+            body.add_spacer(1.0)?;
+            buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
+            if !wizard.blocked {
                 buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             }
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
@@ -318,11 +372,6 @@ fn render(
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
-            let next = if wizard.folder_open {
-                Line::Next
-            } else {
-                info.existing.verb()
-            };
             buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
@@ -346,7 +395,7 @@ fn render(
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
-            buttons.add(button(lang.line(info.existing.verb()), tx, Action::Next)?)?;
+            buttons.add(button(lang.line(next), tx, Action::Next)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
         }
         Page::Installing => {
@@ -388,6 +437,10 @@ fn render(
             body.add_weighted(TextView::with_content(false, error)?, 1.0)?;
             buttons.add(button(lang.line(Line::Close), tx, Action::Next)?)?;
         }
+    }
+    // why installing did not start, like a declined administrator prompt.
+    if let Some(notice) = &wizard.notice {
+        body.add(Label::new(notice)?)?;
     }
     // NSIS puts its welcome bitmap down the left of the first and last
     // pages.
