@@ -2,7 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use super::Scope;
-use crate::manifest::{HookPhase, Ownership, SemanticPath, ShortcutLocation};
+use crate::manifest::{Edit, HookPhase, Ownership, Place, SemanticPath, ShortcutLocation, Value};
 
 /// one step of an install. platforms carry these out; nothing here
 /// touches the machine.
@@ -69,6 +69,13 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         restart: bool,
     },
+    /// sets a value outside the package: in a JSON file, the registry or
+    /// the environment. uninstall puts it back.
+    Change {
+        place: Place,
+        edit: Edit,
+        value: Value,
+    },
     /// lets `program` accept connections through Windows Firewall. needs
     /// an install for everyone; a per-user one leaves it to Windows to
     /// ask the first time the program listens.
@@ -93,6 +100,7 @@ impl Operation {
             Self::RunHook { .. } => "run-hook",
             Self::InstallService { .. } => "install-service",
             Self::AllowThroughFirewall { .. } => "allow-through-firewall",
+            Self::Change { .. } => "change",
         }
     }
 }
@@ -118,6 +126,9 @@ impl fmt::Display for Operation {
                 id, command, scope, ..
             } => {
                 write!(f, "service   {id} -> {command} ({scope})")
+            }
+            Self::Change { place, edit, value } => {
+                write!(f, "{:<9} {place} {edit} {value}", place.kind())
             }
             Self::AllowThroughFirewall {
                 name,

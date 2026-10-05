@@ -17,8 +17,8 @@ use crate::manifest::schema::{
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Check, Detect, FirewallRule, Prerequisite, Setting, Sign, SignKey, TIMESTAMP,
-    parse_color, preset,
+    Brand, Change, Check, Detect, Edit, FirewallRule, Place, Prerequisite, Setting, Sign, SignKey,
+    TIMESTAMP, Value, parse_color, preset,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -30,6 +30,7 @@ pub struct Lowered {
     pub sign: Option<Sign>,
     pub prerequisites: Vec<Prerequisite>,
     pub firewall: Vec<FirewallRule>,
+    pub changes: Vec<Change>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -75,6 +76,7 @@ pub fn lower(
         prerequisites: Vec::new(),
         update: None,
         firewall: Vec::new(),
+        changes: Vec::new(),
     };
     // sources first, so references to them work in any order.
     for node in nodes.iter().filter(|n| n.keyword() == "source") {
@@ -138,6 +140,7 @@ struct Lower<'a> {
     prerequisites: Vec<Prerequisite>,
     update: Option<RawUpdate>,
     firewall: Vec<FirewallRule>,
+    changes: Vec<Change>,
 }
 
 /// `<text>` or `env <VARIABLE>`.
@@ -224,6 +227,7 @@ impl Lower<'_> {
             "hook" => self.hook(node, scope),
             "service" => self.service(node, scope),
             "firewall" => self.firewall_rule(node, scope),
+            "json" | "registry" | "env" => self.change(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
                 let mut inner = scope.clone();
@@ -238,7 +242,7 @@ impl Lower<'_> {
             other => self.syntax(
                 node.at(),
                 format!(
-                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite, update or firewall"
+                    "unknown statement `{other}`; expected package, source, app, copy, shortcut, path, steamvr, service, require, hook, component, when, target, license, brand, sign, prerequisite, update, firewall, json, registry or env"
                 ),
             ),
         }
@@ -613,6 +617,129 @@ impl Lower<'_> {
             component: scope.component.as_ref().map(|c| c.get_ref().clone()),
             at: Location::at(self.file, self.source, node.at()),
         });
+    }
+
+    /// `json <file>`, `registry <key>` or `env`, with `set|add|init <key>
+    /// <value>` on the same line or indented under it.
+    fn change(&mut self, node: &Node, scope: &Scope) {
+        let kind = node.keyword();
+        let (place, edits) = match (kind, node.args()) {
+            ("env", edits) => (None, edits),
+            (_, [place, edits @ ..]) => (Some(place), edits),
+            _ => {
+                self.syntax(node.at(), change_usage(kind));
+                return;
+            }
+        };
+        let when = self.when(scope, &[]);
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
+        let mut lines: Vec<&[Word]> = node.children.iter().map(|c| &c.words[..]).collect();
+        if !edits.is_empty() {
+            lines.insert(0, edits);
+        }
+        if lines.is_empty() {
+            self.syntax(node.at(), change_usage(kind));
+        }
+        for line in lines {
+            let [edit, key, value] = line else {
+                self.syntax(line.first().map_or(node.at(), |w| w.at), change_usage(kind));
+                continue;
+            };
+            let edit_kind = match edit.text.parse::<Edit>() {
+                Ok(e) => e,
+                Err(e) => {
+                    self.error(diagnostic::MANIFEST_VALUE, edit.at, e);
+                    continue;
+                }
+            };
+            let Some(place) = self.place(kind, place, key) else {
+                continue;
+            };
+            if edit_kind == Edit::Add && matches!(place, Place::Registry { .. }) {
+                self.error(
+                    diagnostic::MANIFEST_VALUE,
+                    edit.at,
+                    "a registry value is not a list; use `set` or `init`",
+                );
+                continue;
+            }
+            self.changes.push(Change {
+                place,
+                edit: edit_kind,
+                value: Value::word(&value.text, value.quoted),
+                component: scope.component.as_ref().map(|c| c.get_ref().clone()),
+                when: when.clone(),
+                at: Location::at(self.file, self.source, edit.at),
+            });
+        }
+    }
+
+    /// where a change goes: the file or registry key of its statement plus
+    /// the key or name on its line.
+    fn place(&mut self, kind: &str, place: Option<&Word>, key: &Word) -> Option<Place> {
+        match (kind, place) {
+            ("json", Some(file)) => {
+                if let Err(e) = location(&file.text) {
+                    self.error(diagnostic::MANIFEST_VALUE, file.at, e);
+                    return None;
+                }
+                let names: Vec<String> = key.text.split('.').map(str::to_owned).collect();
+                if names.iter().any(String::is_empty) {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        key.at,
+                        format!("`{}` is not a key path like `a.b.c`", key.text),
+                    );
+                    return None;
+                }
+                Some(Place::Json {
+                    file: file.text.clone(),
+                    key: names,
+                })
+            }
+            ("registry", Some(registry)) => {
+                let path = registry.text.trim_matches('\\');
+                if path.is_empty() || path.contains("\\\\") {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        registry.at,
+                        format!("`{}` is not a registry key", registry.text),
+                    );
+                    return None;
+                }
+                Some(Place::Registry {
+                    key: path.to_owned(),
+                    name: if key.text == "@" {
+                        String::new()
+                    } else {
+                        key.text.clone()
+                    },
+                })
+            }
+            _ => {
+                let valid = !key.text.is_empty()
+                    && key
+                        .text
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !valid {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        key.at,
+                        format!("`{}` is not an environment variable name", key.text),
+                    );
+                    return None;
+                }
+                Some(Place::Environment {
+                    name: key.text.clone(),
+                })
+            }
+        }
     }
 
     /// `hook <phase> <app> [arguments...]`: runs one of the package's own
@@ -1291,6 +1418,7 @@ impl Lower<'_> {
             sign: self.sign,
             prerequisites: self.prerequisites,
             firewall: self.firewall,
+            changes: self.changes,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),
@@ -1315,4 +1443,38 @@ fn basename(reference: &str) -> &str {
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(path)
+}
+
+fn change_usage(kind: &str) -> &'static str {
+    match kind {
+        "json" => "expected `json <file>` with `set|add|init <key.path> <value>` lines",
+        "registry" => {
+            "expected `registry <key>` with `set|init <name> <value>` lines; `@` names the default value"
+        }
+        _ => "expected `env` with `set|add|init <NAME> <value>` lines",
+    }
+}
+
+/// checks a place outside the package written as `{root}/...` or
+/// `%VARIABLE%/...`. kago fills both in at install.
+fn location(text: &str) -> Result<(), String> {
+    if text.starts_with('{') {
+        return text
+            .parse::<crate::manifest::SemanticPath>()
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+    }
+    let named = text
+        .strip_prefix('%')
+        .and_then(|rest| rest.split_once('%'))
+        .is_some_and(|(name, rest)| {
+            !name.is_empty() && (rest.is_empty() || rest.starts_with(['/', '\\']))
+        });
+    if named && !text.split(['/', '\\']).any(|s| s == "..") {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{text}` must start with a root like `{{config}}/` or a variable like `%LOCALAPPDATA%/`"
+        ))
+    }
 }

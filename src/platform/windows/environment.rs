@@ -1,5 +1,5 @@
-//! PATH as a parsed list in the registry, plus the `WM_SETTINGCHANGE`
-//! broadcast so new shells see it.
+//! environment variables in the registry, lists like PATH split on `;`,
+//! plus the `WM_SETTINGCHANGE` broadcast so new shells see a change.
 
 use std::path::Path;
 
@@ -50,29 +50,57 @@ pub fn without_entry(path: &str, entry: &str) -> String {
 }
 
 pub fn add(scope: Scope, entry: &Path) -> Result<bool, String> {
-    let entry = entry.display().to_string();
+    add_item(scope, "Path", &entry.display().to_string())
+}
+
+pub fn remove(scope: Scope, entry: &Path) -> Result<(), String> {
+    remove_item(scope, "Path", &entry.display().to_string())
+}
+
+/// the variable `name` as written, `%OTHER%` references unexpanded.
+pub fn value(scope: Scope, name: &str) -> Result<Option<String>, String> {
+    let Some(key) = Key::open_read(registry::hive(scope), env_key(scope))? else {
+        return Ok(None);
+    };
+    Ok(key.text(name)?.map(|t| t.value))
+}
+
+/// sets the variable `name`, or removes it for `None`. a value naming
+/// another variable like `%USERPROFILE%` is stored to be expanded.
+pub fn set(scope: Scope, name: &str, value: Option<&str>) -> Result<(), String> {
     let key = Key::create(registry::hive(scope), env_key(scope))?;
-    let current = key.text("Path")?;
+    match value {
+        Some(v) => key.set_text(name, v, v.contains('%'))?,
+        None => key.delete_value(name)?,
+    }
+    broadcast();
+    Ok(())
+}
+
+/// adds `entry` to the `;` list in `name`. `false` when it was there.
+pub fn add_item(scope: Scope, name: &str, entry: &str) -> Result<bool, String> {
+    let key = Key::create(registry::hive(scope), env_key(scope))?;
+    let current = key.text(name)?;
     let (value, expand) = current.map_or((String::new(), true), |t| (t.value, t.expand));
-    let Some(next) = with_entry(&value, &entry) else {
+    let Some(next) = with_entry(&value, entry) else {
         return Ok(false);
     };
-    key.set_text("Path", &next, expand)?;
+    key.set_text(name, &next, expand)?;
     broadcast();
     Ok(true)
 }
 
-pub fn remove(scope: Scope, entry: &Path) -> Result<(), String> {
-    let entry = entry.display().to_string();
+/// takes `entry` out of the `;` list in `name`. missing is fine.
+pub fn remove_item(scope: Scope, name: &str, entry: &str) -> Result<(), String> {
     let Some(key) = Key::open(registry::hive(scope), env_key(scope))? else {
         return Ok(());
     };
-    let Some(current) = key.text("Path")? else {
+    let Some(current) = key.text(name)? else {
         return Ok(());
     };
-    let next = without_entry(&current.value, &entry);
+    let next = without_entry(&current.value, entry);
     if next != current.value {
-        key.set_text("Path", &next, current.expand)?;
+        key.set_text(name, &next, current.expand)?;
         broadcast();
     }
     Ok(())

@@ -11,8 +11,8 @@ use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
-    Check, Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, ResourceScope, ScopeChoice,
-    SemanticPath, SetupLook,
+    Check, Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, Place, ResourceScope,
+    ScopeChoice, SemanticPath, SetupLook,
 };
 use crate::package::{PackageId, Target, Version};
 
@@ -197,6 +197,7 @@ impl InstallPlan {
         }
         steps.resources(resolved, scope, icon.as_ref(), manifest, &mut diagnostics);
         steps.firewall(manifest, resolved, scope, scope_open, &mut diagnostics);
+        steps.changes(resolved, scope, scope_open, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
                 .files
@@ -481,6 +482,39 @@ impl Steps {
                 public: rule.public,
             };
             self.push(op, rule.component.clone());
+        }
+    }
+
+    /// a change per `json`, `registry` and `env` line that applies.
+    fn changes(
+        &mut self,
+        resolved: &Resolved,
+        scope: Scope,
+        scope_open: bool,
+        diagnostics: &mut Diagnostics,
+    ) {
+        for c in &resolved.changes {
+            let everyone_only = matches!(&c.place, Place::Registry { key, .. }
+            if key.split('\\').next().is_some_and(|h| {
+                h.eq_ignore_ascii_case("HKLM") || h.eq_ignore_ascii_case("HKEY_LOCAL_MACHINE")
+            }));
+            if everyone_only && (scope == Scope::User || scope_open) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::INSTALL_SCOPE,
+                        format!("`{}` is for everyone, but this package can install per user", c.place),
+                    )
+                    .at(c.at.clone())
+                    .help("leave out `HKLM\\` so the value follows the install, or use `scope machine`"),
+                );
+                continue;
+            }
+            let op = Operation::Change {
+                place: c.place.clone(),
+                edit: c.edit,
+                value: c.value.clone(),
+            };
+            self.push(op, c.component.clone());
         }
     }
 

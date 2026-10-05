@@ -6,7 +6,9 @@ use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
-use crate::manifest::{Downgrade, HookPhase, Ownership, Root, SemanticPath, ShortcutLocation};
+use crate::manifest::{
+    Downgrade, Edit, HookPhase, Ownership, Place, Root, SemanticPath, ShortcutLocation, Value,
+};
 use crate::platform::{Platform, Registration};
 use crate::receipt::{self, Receipt, Resource};
 
@@ -165,13 +167,26 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         | (Resource::Directory { path: a }, Resource::Directory { path: b }) => on_disk(a, b),
         (Resource::Registration { key: a, .. }, Resource::Registration { key: b, .. })
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
-        | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
         | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
         | (Resource::Service { name: a }, Resource::Service { name: b })
+        | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b })
         | (Resource::SteamVrDriver { directory: a }, Resource::SteamVrDriver { directory: b }) => {
             a == b
         }
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
+        // a value set is the same wherever it is set; an added item is
+        // only the same item.
+        (
+            Resource::Changed {
+                slot: old_slot,
+                edit: old_edit,
+                value: old_value,
+                ..
+            },
+            Resource::Changed {
+                slot, edit, value, ..
+            },
+        ) => old_slot == slot && old_edit == edit && (*edit != Edit::Add || old_value == value),
         (
             Resource::UninstallHook {
                 command: a,
@@ -334,6 +349,7 @@ impl Run<'_> {
                 program,
                 public,
             } => self.firewall(name, program, *public),
+            Operation::Change { place, edit, value } => self.change(place, *edit, value),
         }
     }
 
@@ -426,6 +442,76 @@ impl Run<'_> {
             .set_service(&name, Some(service))
             .map_err(Error::Other)?;
         self.resources.push(Resource::Service { name });
+        Ok(())
+    }
+
+    /// sets a value outside the package and owns it, so uninstall can
+    /// put back what was there. an update keeps what was there before
+    /// the first install, not the older version's value.
+    fn change(&mut self, place: &Place, edit: Edit, value: &Value) -> Result<(), Error> {
+        let slot = crate::install::slot(place, self.plan.scope, self.roots, &|name| {
+            std::env::var(name).ok()
+        })
+        .map_err(Error::Other)?;
+        let value = crate::install::fill(value, self.roots);
+        let earlier = self.previous.and_then(|p| {
+            p.resources.iter().find_map(|r| match r {
+                Resource::Changed {
+                    slot: s,
+                    edit: e,
+                    value: v,
+                    previous,
+                } if *s == slot && *e == edit && (edit != Edit::Add || *v == value) => {
+                    Some(previous.clone())
+                }
+                _ => None,
+            })
+        });
+        if edit == Edit::Add {
+            let added = self
+                .platform
+                .add_item(&slot, &value)
+                .map_err(Error::Other)?;
+            if added {
+                self.step(Undo::TakeOut {
+                    slot: slot.clone(),
+                    item: value.clone(),
+                })?;
+            }
+            if added || earlier.is_some() {
+                self.resources.push(Resource::Changed {
+                    slot,
+                    edit,
+                    value,
+                    previous: None,
+                });
+            }
+            return Ok(());
+        }
+        let now = self.platform.value(&slot).map_err(Error::Other)?;
+        if edit == Edit::Init && now.is_some() {
+            return Ok(());
+        }
+        if now.as_ref() != Some(&value) {
+            self.step(Undo::PutBack {
+                slot: slot.clone(),
+                previous: now.clone(),
+            })?;
+            self.platform
+                .set_value(&slot, Some(&value))
+                .map_err(Error::Other)?;
+        } else if earlier.is_none() {
+            // someone else set the same value; it stays theirs.
+            return Ok(());
+        }
+        if edit == Edit::Set {
+            self.resources.push(Resource::Changed {
+                slot,
+                edit,
+                value,
+                previous: earlier.unwrap_or(now),
+            });
+        }
         Ok(())
     }
 

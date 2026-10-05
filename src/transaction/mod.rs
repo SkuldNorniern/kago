@@ -281,7 +281,8 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         | Resource::SteamVrDriver { .. }
         | Resource::LoginItem { .. }
         | Resource::FirewallRule { .. }
-        | Resource::Service { .. } => 3,
+        | Resource::Service { .. }
+        | Resource::Changed { .. } => 3,
         Resource::File { .. } => 4,
         Resource::Directory { path } => 5 + usize::MAX / 2 - path.segments().count(),
     };
@@ -303,6 +304,12 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::LoginItem { name } => platform.set_login_item(name, None),
             Resource::FirewallRule { name, group } => platform.set_firewall_rule(name, group, None),
             Resource::Service { name } => platform.set_service(name, None),
+            Resource::Changed {
+                slot,
+                edit,
+                value,
+                previous,
+            } => revert(platform, slot, *edit, value, previous.as_ref()),
             Resource::SteamVrDriver { directory } => {
                 platform.remove_steamvr_driver(Path::new(directory))
             }
@@ -347,6 +354,29 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         }
     }
     out
+}
+
+/// takes back a change at uninstall: an added item comes out; a value
+/// set goes back to what it was, unless someone changed it since.
+fn revert(
+    platform: &dyn Platform,
+    slot: &crate::install::Slot,
+    edit: crate::manifest::Edit,
+    value: &crate::manifest::Value,
+    previous: Option<&crate::manifest::Value>,
+) -> Result<(), String> {
+    use crate::manifest::Edit;
+    match edit {
+        Edit::Add => platform.remove_item(slot, value),
+        Edit::Set => {
+            if platform.value(slot)?.as_ref() == Some(value) {
+                platform.set_value(slot, previous)
+            } else {
+                Ok(())
+            }
+        }
+        Edit::Init => Ok(()),
+    }
 }
 
 fn remove_file(path: &Path) -> Result<(), String> {

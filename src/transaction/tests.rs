@@ -22,6 +22,9 @@ struct Fake {
     at_restart: RefCell<Vec<PathBuf>>,
     firewall: RefCell<BTreeMap<String, crate::platform::Firewall>>,
     services: RefCell<BTreeMap<String, crate::platform::WindowsService>>,
+    /// registry values and environment variables; JSON goes to real files
+    /// under `base`.
+    values: RefCell<BTreeMap<String, crate::manifest::Value>>,
 }
 
 impl Fake {
@@ -37,6 +40,7 @@ impl Fake {
             at_restart: RefCell::new(Vec::new()),
             firewall: RefCell::new(BTreeMap::new()),
             services: RefCell::new(BTreeMap::new()),
+            values: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -117,6 +121,29 @@ impl Platform for Fake {
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
         self.steamvr.borrow_mut().retain(|d| d != directory);
+        Ok(())
+    }
+
+    fn value(&self, slot: &crate::install::Slot) -> Result<Option<crate::manifest::Value>, String> {
+        if let crate::install::Slot::Json { file, key } = slot {
+            return crate::platform::json_value(file, key);
+        }
+        Ok(self.values.borrow().get(&slot.to_string()).cloned())
+    }
+
+    fn set_value(
+        &self,
+        slot: &crate::install::Slot,
+        value: Option<&crate::manifest::Value>,
+    ) -> Result<(), String> {
+        if let crate::install::Slot::Json { file, key } = slot {
+            return crate::platform::set_json_value(file, key, value);
+        }
+        let mut values = self.values.borrow_mut();
+        match value {
+            Some(v) => values.insert(slot.to_string(), v.clone()),
+            None => values.remove(&slot.to_string()),
+        };
         Ok(())
     }
 
@@ -787,4 +814,97 @@ fn service_starts_at_sign_in_and_survives_a_failed_upgrade() {
     w.fake.fail_register = false;
     uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert!(w.fake.login.borrow().is_empty());
+}
+
+#[test]
+fn changes_are_put_back_at_uninstall() {
+    let w = World::new("changes");
+    let settings = w.dir.join("machine/config/App/other.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"drivers":["/someone/else"],"theme":"light"}"#,
+    )
+    .unwrap();
+    let manifest = format!(
+        "{MANIFEST}json {{config}}/other.json\n  add drivers {{app}}/driver\n  set theme dark\n  init format 2\n\
+         registry Software\\Test\n  set Folder {{app}}\n  set Count 3\n\
+         env set APP_HOME {{app}}\n"
+    );
+    w.install(&manifest).unwrap();
+    let read = || -> serde_json::Value {
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap()
+    };
+    let app = w.dir.join("machine").join("programs").join("App");
+    let driver = app.join("driver").display().to_string();
+    assert_eq!(
+        read()["drivers"],
+        serde_json::json!(["/someone/else", driver])
+    );
+    assert_eq!(read()["theme"], "dark");
+    assert_eq!(read()["format"], 2);
+    let values = w.fake.values.borrow().clone();
+    assert_eq!(
+        values[r"HKCU\Software\Test Folder"].as_str(),
+        Some(app.display().to_string().as_str())
+    );
+    assert_eq!(
+        values[r"HKCU\Software\Test Count"],
+        crate::manifest::Value::word("3", false)
+    );
+    assert!(values.contains_key("%APP_HOME%"));
+
+    // an update finds them set already and still owns them.
+    w.install(&manifest).unwrap();
+    assert_eq!(read()["drivers"].as_array().unwrap().len(), 2);
+
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    let after = read();
+    assert_eq!(after["drivers"], serde_json::json!(["/someone/else"]));
+    assert_eq!(after["theme"], "light", "put back as it was");
+    assert_eq!(after["format"], 2, "init stays");
+    assert!(w.fake.values.borrow().is_empty());
+}
+
+#[test]
+fn a_value_changed_since_stays_at_uninstall() {
+    let w = World::new("changed-since");
+    let manifest = format!("{MANIFEST}env set APP_HOME here\n");
+    w.install(&manifest).unwrap();
+    w.fake.values.borrow_mut().insert(
+        "%APP_HOME%".into(),
+        crate::manifest::Value::text("mine now"),
+    );
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(
+        w.fake.values.borrow()["%APP_HOME%"].as_str(),
+        Some("mine now")
+    );
+}
+
+#[test]
+fn a_failed_install_takes_its_changes_back() {
+    let w = World::new("changes-fail");
+    let settings = w.dir.join("machine/config/App/other.json");
+    let manifest = format!(
+        "{MANIFEST}json {{config}}/other.json\n  add drivers x\n  set theme dark\nenv set APP_HOME here\n"
+    );
+    let fake = Fake {
+        fail_register: true,
+        ..Fake::new(w.dir.join("machine"))
+    };
+    let mut plan = w.plan(&manifest);
+    // the changes run first, then the registration fails.
+    let register = plan
+        .operations
+        .iter()
+        .position(|op| matches!(op, Operation::RegisterApplication { .. }))
+        .unwrap();
+    let op = plan.operations.remove(register);
+    plan.operations.push(op);
+    assert!(install(&plan, &fake, &w.store, &w.dir.join("kago.exe")).is_err());
+    let left: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(left, serde_json::json!({ "drivers": [] }));
+    assert!(fake.values.borrow().is_empty());
 }

@@ -1,6 +1,7 @@
 //! the Kagofile: parsing, `when` selectors, sources and validation.
 
 mod brand;
+mod change;
 mod firewall;
 mod kagofile;
 mod path;
@@ -17,6 +18,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub use brand::{Brand, parse_color};
+pub use change::{Change, Edit, Place, Value};
 pub use firewall::FirewallRule;
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
@@ -70,6 +72,9 @@ pub struct Manifest {
     pub prerequisites: Vec<Prerequisite>,
     /// programs Windows Firewall lets accept connections.
     pub firewall: Vec<FirewallRule>,
+    /// values set in other programs' settings, the registry or the
+    /// environment.
+    pub changes: Vec<Change>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +154,7 @@ impl Manifest {
             m.sign = lowered.sign;
             m.prerequisites = lowered.prerequisites;
             m.firewall = lowered.firewall;
+            m.changes = lowered.changes;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -630,6 +636,50 @@ require steamvr
             d.iter().next().unwrap().severity,
             crate::diagnostic::Severity::Warning
         );
+    }
+
+    #[test]
+    fn changes_read_from_one_line_or_a_block() {
+        let (m, codes) = check(&with(
+            "json %LOCALAPPDATA%/openvr/openvrpaths.vrpath\n  init version 1\n  add external_drivers {app}/driver\nregistry HKCU\\Software\\Aurea set @ \"1\"\nenv set AUREA_HOME {app}\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let changes = m.unwrap().changes;
+        assert_eq!(changes.len(), 4);
+        assert_eq!(changes[0].edit, Edit::Init);
+        assert_eq!(changes[0].value, Value::word("1", false));
+        assert_eq!(
+            changes[1].place,
+            Place::Json {
+                file: "%LOCALAPPDATA%/openvr/openvrpaths.vrpath".into(),
+                key: vec!["external_drivers".into()],
+            }
+        );
+        assert_eq!(
+            changes[2].place,
+            Place::Registry {
+                key: r"HKCU\Software\Aurea".into(),
+                name: String::new(),
+            }
+        );
+        assert_eq!(changes[2].value, Value::text("1"), "quoted stays text");
+        assert_eq!(changes[3].place.to_string(), "%AUREA_HOME%");
+    }
+
+    #[test]
+    fn bad_changes_are_errors() {
+        for line in [
+            "json settings.json set a 1",
+            "json %X%/../a.json set a 1",
+            "json {config}/a.json set a..b 1",
+            "registry Software\\X add List 1",
+            "env set BAD-NAME 1",
+            "env put A 1",
+            "json {config}/a.json",
+        ] {
+            let (m, codes) = check(&with(&format!("{line}\n")));
+            assert!(m.is_none() && !codes.is_empty(), "{line}");
+        }
     }
 
     #[test]

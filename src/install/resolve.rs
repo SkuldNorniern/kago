@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::manifest::{
-    Context, File, Hook, Manifest, PathKind, PathSource, Requirement, ResourceScope, Selector,
-    SemanticPath, Service, Shortcut, SteamVrDriver,
+    Change, Context, File, Hook, Manifest, PathKind, PathSource, Requirement, ResourceScope,
+    Selector, SemanticPath, Service, Shortcut, SteamVrDriver,
 };
 
 /// components picked for one install. items without a component are
@@ -69,6 +69,8 @@ pub struct Resolved {
     pub shortcuts: Vec<ResolvedShortcut>,
     pub services: Vec<ResolvedService>,
     pub hooks: Vec<ResolvedHook>,
+    /// values set outside the package, for this target.
+    pub changes: Vec<Change>,
     pub components: Selection,
 }
 
@@ -140,6 +142,12 @@ pub fn resolve(
     let shortcuts = r.shortcuts(manifest);
     let services = r.services(manifest);
     let hooks = r.hooks(manifest);
+    let changes = manifest
+        .changes
+        .iter()
+        .filter(|c| r.active(c.component.as_deref(), &c.when))
+        .cloned()
+        .collect();
     if let Some(entry) = &manifest.application.entrypoint {
         r.lookup("`application.entrypoint`", entry, None);
     }
@@ -152,6 +160,7 @@ pub fn resolve(
         shortcuts,
         services,
         hooks,
+        changes,
         components,
     };
     ((!diagnostics.has_errors()).then_some(resolved), diagnostics)

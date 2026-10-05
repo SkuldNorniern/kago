@@ -6,6 +6,7 @@ mod plan;
 mod resolve;
 mod roots;
 mod scope;
+mod slot;
 
 pub use need::{Need, at_least};
 pub use operation::{Digest, Operation};
@@ -15,3 +16,4 @@ pub use resolve::{
 };
 pub use roots::{LocationError, Roots, check_folder, check_location, folder_name};
 pub use scope::{Scope, choose};
+pub use slot::{Slot, fill, fill_text, slot};

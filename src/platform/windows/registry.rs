@@ -206,3 +206,53 @@ pub fn delete_tree(hive: HKEY, path: &str) -> Result<(), String> {
     }
     check(e, "cannot delete registry key", path)
 }
+
+fn hive_of(machine: bool) -> HKEY {
+    if machine {
+        HKEY_LOCAL_MACHINE
+    } else {
+        HKEY_CURRENT_USER
+    }
+}
+
+/// the value `name` in `key`: a `REG_DWORD` as a number, a string as
+/// text. `None` when it or the key is missing.
+pub fn value(machine: bool, key: &str, name: &str) -> Result<Option<serde_json::Value>, String> {
+    let Some(key) = Key::open_read(hive_of(machine), key)? else {
+        return Ok(None);
+    };
+    if let Some(n) = key.dword(name)? {
+        return Ok(Some(n.into()));
+    }
+    Ok(key.text(name)?.map(|t| t.value.into()))
+}
+
+/// writes the value `name` in `key`, making the key when missing: a
+/// number as a `REG_DWORD`, true and false as 1 and 0, text as a string.
+/// `None` deletes it.
+pub fn set_value(
+    machine: bool,
+    key: &str,
+    name: &str,
+    value: Option<&serde_json::Value>,
+) -> Result<(), String> {
+    let Some(value) = value else {
+        return match Key::open(hive_of(machine), key)? {
+            Some(k) => k.delete_value(name),
+            None => Ok(()),
+        };
+    };
+    let k = Key::create(hive_of(machine), key)?;
+    match value {
+        serde_json::Value::String(s) => k.set_text(name, s, false),
+        serde_json::Value::Bool(b) => k.set_dword(name, u32::from(*b)),
+        serde_json::Value::Number(n) => {
+            let n = n
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| format!("{name}: {n} does not fit a registry DWORD"))?;
+            k.set_dword(name, n)
+        }
+        other => Err(format!("{name}: {other} cannot go in the registry")),
+    }
+}

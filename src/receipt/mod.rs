@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::install::{Digest, Scope};
-use crate::manifest::{Ownership, Root, SemanticPath};
+use crate::install::{Digest, Scope, Slot};
+use crate::manifest::{Edit, Ownership, Root, SemanticPath, Value};
 use crate::package::{PackageId, Target, Version};
 
 pub const SCHEMA: u32 = 1;
@@ -81,6 +81,15 @@ pub enum Resource {
     /// a driver folder registered with SteamVR.
     SteamVrDriver {
         directory: String,
+    },
+    /// a value set outside the package. uninstall takes an added item
+    /// out, and puts `previous` back where the value is still the one set.
+    Changed {
+        slot: Slot,
+        edit: Edit,
+        value: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<Value>,
     },
     /// uninstall entry, desktop file or similar platform registration.
     Registration {

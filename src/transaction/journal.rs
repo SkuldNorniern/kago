@@ -35,6 +35,16 @@ pub enum Undo {
     RemoveSteamVrDriver {
         directory: PathBuf,
     },
+    /// puts a value back as it was, removing it for `None`.
+    PutBack {
+        slot: crate::install::Slot,
+        previous: Option<crate::manifest::Value>,
+    },
+    /// takes an added item out of its list again.
+    TakeOut {
+        slot: crate::install::Slot,
+        item: crate::manifest::Value,
+    },
     /// puts a login item back as it was, removing it for `None`.
     RestoreLoginItem {
         name: String,

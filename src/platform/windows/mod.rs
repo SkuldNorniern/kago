@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{Platform, Registration};
-use crate::install::{Roots, Scope, folder_name};
-use crate::manifest::{Detect, Root};
+use crate::install::{Roots, Scope, Slot, folder_name};
+use crate::manifest::{Detect, Root, Value};
 use registry::Key;
 
 const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
@@ -27,6 +27,10 @@ const UNINSTALL: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
 pub struct Windows;
+
+const fn scope_of(machine: bool) -> Scope {
+    if machine { Scope::Machine } else { Scope::User }
+}
 
 fn env_dir(name: &str) -> Result<PathBuf, String> {
     std::env::var_os(name)
@@ -67,7 +71,17 @@ pub fn registry_has(key: &str, value: Option<&str>) -> bool {
 
 pub fn detect(detect: Detect) -> bool {
     match detect {
-        Detect::SteamVr => openvr_paths().is_ok_and(|f| super::openvr::runtime_installed(&f)),
+        Detect::SteamVr => openvr_paths().is_ok_and(|f| {
+            super::json::value(&f, &["runtime".to_owned()])
+                .ok()
+                .flatten()
+                .and_then(|r| r.as_array().cloned())
+                .is_some_and(|r| {
+                    r.iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .any(|p| Path::new(p).is_dir())
+                })
+        }),
     }
 }
 
@@ -143,11 +157,58 @@ impl Platform for Windows {
     }
 
     fn add_steamvr_driver(&self, directory: &Path) -> Result<bool, String> {
-        super::openvr::add(&openvr_paths()?, directory)
+        let item = serde_json::Value::from(directory.display().to_string());
+        super::json::add(&openvr_paths()?, &["external_drivers".to_owned()], &item)
     }
 
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String> {
-        super::openvr::remove(&openvr_paths()?, directory)
+        let item = serde_json::Value::from(directory.display().to_string());
+        super::json::remove(&openvr_paths()?, &["external_drivers".to_owned()], &item)
+    }
+
+    fn value(&self, slot: &Slot) -> Result<Option<Value>, String> {
+        match slot {
+            Slot::Json { file, key } => Ok(super::json::value(file, key)?.map(Value)),
+            Slot::Registry { machine, key, name } => {
+                Ok(registry::value(*machine, key, name)?.map(Value))
+            }
+            Slot::Environment { machine, name } => {
+                Ok(environment::value(scope_of(*machine), name)?.map(Value::text))
+            }
+        }
+    }
+
+    fn set_value(&self, slot: &Slot, value: Option<&Value>) -> Result<(), String> {
+        match slot {
+            Slot::Json { file, key } => super::json::set(file, key, value.map(|v| &v.0)),
+            Slot::Registry { machine, key, name } => {
+                registry::set_value(*machine, key, name, value.map(|v| &v.0))
+            }
+            Slot::Environment { machine, name } => {
+                let text = value.map(ToString::to_string);
+                environment::set(scope_of(*machine), name, text.as_deref())
+            }
+        }
+    }
+
+    fn add_item(&self, slot: &Slot, item: &Value) -> Result<bool, String> {
+        match slot {
+            Slot::Json { file, key } => super::json::add(file, key, &item.0),
+            Slot::Environment { machine, name } => {
+                environment::add_item(scope_of(*machine), name, &item.to_string())
+            }
+            Slot::Registry { .. } => Err(format!("{slot}: a registry value is not a list")),
+        }
+    }
+
+    fn remove_item(&self, slot: &Slot, item: &Value) -> Result<(), String> {
+        match slot {
+            Slot::Json { file, key } => super::json::remove(file, key, &item.0),
+            Slot::Environment { machine, name } => {
+                environment::remove_item(scope_of(*machine), name, &item.to_string())
+            }
+            Slot::Registry { .. } => Err(format!("{slot}: a registry value is not a list")),
+        }
     }
 
     fn firewall_rule(&self, name: &str) -> Result<Option<super::Firewall>, String> {

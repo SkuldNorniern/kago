@@ -3,14 +3,15 @@
 //! and stay in `transaction`.
 
 /// the only place kago calls into the OS by FFI.
-mod openvr;
+mod json;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod windows;
 
 use std::path::{Path, PathBuf};
 
-use crate::install::{Roots, Scope};
+use crate::install::{Roots, Scope, Slot};
+use crate::manifest::Value;
 use crate::package::{PackageId, Version};
 
 /// uninstall entry or desktop registration for one install.
@@ -77,6 +78,55 @@ pub trait Platform {
     ///
     /// when SteamVR's path file cannot be read or written.
     fn remove_steamvr_driver(&self, directory: &Path) -> Result<(), String>;
+
+    /// the value at `slot`; `None` when there is none.
+    ///
+    /// # Errors
+    ///
+    /// when it cannot be read, or this OS has no such place.
+    fn value(&self, slot: &Slot) -> Result<Option<Value>, String> {
+        match slot {
+            Slot::Json { file, key } => Ok(json::value(file, key)?.map(Value)),
+            _ => Err(format!("{slot}: not on this OS")),
+        }
+    }
+
+    /// sets the value at `slot`, or removes it for `None`.
+    ///
+    /// # Errors
+    ///
+    /// when it cannot be written, or this OS has no such place.
+    fn set_value(&self, slot: &Slot, value: Option<&Value>) -> Result<(), String> {
+        match slot {
+            Slot::Json { file, key } => json::set(file, key, value.map(|v| &v.0)),
+            _ => Err(format!("{slot}: not on this OS")),
+        }
+    }
+
+    /// adds `item` to the list at `slot`. `false` when it was there
+    /// already, so the install does not own it.
+    ///
+    /// # Errors
+    ///
+    /// as [`Platform::set_value`], or when the value there is no list.
+    fn add_item(&self, slot: &Slot, item: &Value) -> Result<bool, String> {
+        match slot {
+            Slot::Json { file, key } => json::add(file, key, &item.0),
+            _ => Err(format!("{slot}: not a list on this OS")),
+        }
+    }
+
+    /// takes `item` out of the list at `slot`. missing is fine.
+    ///
+    /// # Errors
+    ///
+    /// as [`Platform::add_item`].
+    fn remove_item(&self, slot: &Slot, item: &Value) -> Result<(), String> {
+        match slot {
+            Slot::Json { file, key } => json::remove(file, key, &item.0),
+            _ => Err(format!("{slot}: not a list on this OS")),
+        }
+    }
 
     /// the inbound firewall rule called `name`, if there is one.
     ///
@@ -196,6 +246,25 @@ pub trait Platform {
     ///
     /// when it exists but cannot be removed.
     fn unregister(&self, scope: Scope, key: &str) -> Result<(), String>;
+}
+
+/// the value at `key` in the JSON file `file`, for platforms that keep
+/// other places themselves.
+///
+/// # Errors
+///
+/// when the file cannot be read or is not a JSON object.
+pub fn json_value(file: &Path, key: &[String]) -> Result<Option<Value>, String> {
+    Ok(json::value(file, key)?.map(Value))
+}
+
+/// sets `key` in the JSON file `file`, or removes it for `None`.
+///
+/// # Errors
+///
+/// when the file cannot be read or written.
+pub fn set_json_value(file: &Path, key: &[String], value: Option<&Value>) -> Result<(), String> {
+    json::set(file, key, value.map(|v| &v.0))
 }
 
 /// the platform kago is running on.
