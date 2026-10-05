@@ -108,6 +108,8 @@ impl Manifest {
     /// as `parse`, with `version from` and relative paths under `base`.
     #[must_use]
     pub fn parse_in(file: &str, source: &str, base: &Path) -> (Option<Self>, Diagnostics) {
+        // Windows editors and PowerShell often start the file with a BOM.
+        let source = source.strip_prefix('\u{feff}').unwrap_or(source);
         let nodes = match kagofile::parse(file, source) {
             Ok(nodes) => nodes,
             Err(d) => return (None, Diagnostics(vec![d])),
@@ -371,6 +373,12 @@ require steamvr
 ",
         ));
         assert_eq!(codes, vec![diagnostic::MANIFEST_VALUE]);
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_skipped() {
+        let (m, d) = Manifest::parse("Kagofile", "\u{feff}package dev.x.y\n  version 1.0.0\n");
+        assert!(m.is_some(), "{d:?}");
     }
 
     #[test]
