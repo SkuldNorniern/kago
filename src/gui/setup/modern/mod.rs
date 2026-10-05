@@ -3,6 +3,9 @@
 //! a progress bar that eases to where the install is.
 
 mod pen;
+mod uninstall;
+
+pub(super) use uninstall::run as uninstall;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -431,14 +434,31 @@ impl Frame<'_> {
 
 /// the app's mark, name and version, the same on every page. the mark is
 /// the brand logo or app icon when there is one, else the first letter.
+fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
+    let info = &s.info;
+    let mut sub = info.version.clone();
+    if let Some(publisher) = &info.publisher {
+        sub = format!("{sub}  \u{b7}  {publisher}");
+    }
+    let marks = (s.art.logo.as_ref(), s.art.header.as_ref());
+    title(pen, marks, (&info.name, &sub), left, w)
+}
+
+/// the mark, the name and the line under it, with the brand's header
+/// image on the right when there is one.
 #[allow(
     clippy::cast_precision_loss,
     reason = "image sides are a few hundred pixels"
 )]
-fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
-    let info = &s.info;
+fn title(
+    pen: &mut Pen<'_>,
+    (logo, banner): (Option<&Image>, Option<&Image>),
+    (name, sub): (&str, &str),
+    left: f32,
+    w: f32,
+) -> AureaResult<()> {
     let mark = Area::new(left + MARGIN, MARGIN, 52.0, 52.0);
-    if let Some(logo) = &s.art.logo {
+    if let Some(logo) = logo {
         // fitted in 52x52 keeping its shape: center the shorter side.
         let scale = 52.0 / logo.width.max(logo.height) as f32;
         let (lw, lh) = (logo.width as f32 * scale, logo.height as f32 * scale);
@@ -451,7 +471,7 @@ fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
         pen.ctx.draw_image_rect(logo, at)?;
     } else {
         pen.round(mark, 14.0, pen.accent)?;
-        let initial: String = info.name.chars().take(1).collect();
+        let initial: String = name.chars().take(1).collect();
         pen.centred(
             &initial.to_uppercase(),
             mark,
@@ -460,7 +480,7 @@ fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
         )?;
     }
     let mut right = w - MARGIN;
-    if let Some(image) = &s.art.header {
+    if let Some(image) = banner {
         let scale = (150.0 / image.width as f32).min(57.0 / image.height as f32);
         let (iw, ih) = (image.width as f32 * scale, image.height as f32 * scale);
         right -= iw;
@@ -471,17 +491,13 @@ fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
     let x = mark.right() + 16.0;
     let text_w = (right - x).max(0.0);
     pen.clipped(
-        &info.name,
+        name,
         Area::new(x, MARGIN + 2.0, text_w, 28.0),
         &pen.bold(22.0),
         color::TEXT,
     )?;
-    let mut sub = info.version.clone();
-    if let Some(publisher) = &info.publisher {
-        sub = format!("{sub}  \u{b7}  {publisher}");
-    }
     pen.clipped(
-        &sub,
+        sub,
         Area::new(x, MARGIN + 32.0, text_w, 18.0),
         &pen.font(13.0),
         color::DIM,

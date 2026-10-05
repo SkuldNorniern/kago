@@ -12,7 +12,7 @@ use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
     Detect, Downgrade, File, HookPhase, HookPrivilege, Manifest, ResourceScope, ScopeChoice,
-    SemanticPath,
+    SemanticPath, SetupLook,
 };
 use crate::package::{PackageId, Target, Version};
 
@@ -58,6 +58,9 @@ pub struct InstallPlan {
     /// left out from one that is new.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub offered: Vec<String>,
+    /// how the setup looked, so the uninstaller looks the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<Look>,
     /// `{app}` somewhere other than the platform's default, chosen at
     /// install. upgrades keep the folder of the install they replace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,6 +68,18 @@ pub struct InstallPlan {
     /// what the machine must have before anything changes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<Need>,
+}
+
+/// the look of the setup and of the uninstaller it leaves.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Look {
+    pub setup: SetupLook,
+    /// the brand's main color, as RGB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent: Option<[u8; 3]>,
+    /// the brand's small text at the bottom left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// an optional component the setup can offer as a tick box.
@@ -180,6 +195,11 @@ impl InstallPlan {
             operations,
             choices,
             offered: Vec::new(),
+            look: Some(Look {
+                setup: manifest.install.look,
+                accent: manifest.brand.accent,
+                text: manifest.brand.text.clone(),
+            }),
             location: None,
             needs,
         };

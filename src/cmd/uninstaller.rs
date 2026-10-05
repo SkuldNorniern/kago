@@ -158,10 +158,18 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let look = receipt.look.clone();
         let info = kago::gui::setup::Removing {
             name: receipt.name.clone(),
             version: receipt.version.to_string(),
             location: receipt.roots.get(&Root::App).cloned(),
+            // receipts from before the look was kept get the classic one.
+            look: look
+                .as_ref()
+                .map_or(kago::manifest::SetupLook::Native, |l| l.setup),
+            accent: look.as_ref().and_then(|l| l.accent),
+            text: look.and_then(|l| l.text),
+            logo: installed_icon(&receipt),
         };
         let package = package.clone();
         let work = move || {
@@ -198,6 +206,22 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// the app's installed `.ico` as an image, for the modern window.
+#[cfg(feature = "gui")]
+fn installed_icon(receipt: &kago::receipt::Receipt) -> Option<kago::format::image::Rgba> {
+    use kago::format::{ico, image};
+    let path = receipt.resources.iter().find_map(|r| match r {
+        kago::receipt::Resource::File { path, .. }
+            if path.to_string().to_ascii_lowercase().ends_with(".ico") =>
+        {
+            receipt.absolute(path)
+        }
+        _ => None,
+    })?;
+    let icon = ico::parse(&std::fs::read(path).ok()?).ok()?;
+    image::decode_png(&image::logo_from_icon(&icon)?).ok()
 }
 
 /// uninstalls, then tries again for a few seconds whatever was in use,

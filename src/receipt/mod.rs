@@ -28,6 +28,9 @@ pub struct Receipt {
     /// were left out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub offered: Vec<String>,
+    /// how the setup looked, for the uninstaller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub look: Option<crate::install::Look>,
     /// absolute location each used root had at install time.
     pub roots: BTreeMap<Root, PathBuf>,
     pub resources: Vec<Resource>,
@@ -123,6 +126,7 @@ mod tests {
             scope: Scope::User,
             components: vec!["core".into()],
             offered: Vec::new(),
+            look: None,
             roots: BTreeMap::from([(
                 Root::App,
                 PathBuf::from("C:/Users/x/AppData/Local/Programs/Ozone"),

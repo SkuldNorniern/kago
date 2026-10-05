@@ -1,10 +1,11 @@
 //! the uninstaller's window, like an NSIS uninstaller: asks first, shows it
-//! working, then says what is gone and what stayed. the removal itself runs
-//! on a worker thread and reports back over a channel; this module never
+//! working, then says what is gone and what stayed. it takes the look of
+//! the setup that installed the package. the removal itself runs on a
+//! worker thread and reports back over a channel; this module never
 //! touches the machine.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -14,6 +15,8 @@ use aurea::elements::{
 use aurea::{AureaResult, Window, WindowEvent};
 
 use super::text::{Lang, Line};
+use crate::format::image::Rgba;
+use crate::manifest::SetupLook;
 
 const WIDTH: i32 = 480;
 const HEIGHT: i32 = 300;
@@ -24,6 +27,13 @@ pub struct Removing {
     pub name: String,
     pub version: String,
     pub location: Option<PathBuf>,
+    /// the look of the setup that installed it.
+    pub look: SetupLook,
+    pub accent: Option<[u8; 3]>,
+    /// small text at the bottom left.
+    pub text: Option<String>,
+    /// the app's icon, for the modern look.
+    pub logo: Option<Rgba>,
 }
 
 /// what an uninstall left behind.
@@ -35,17 +45,76 @@ pub struct Removed {
     pub failed: Vec<String>,
 }
 
-enum Message {
-    Remove,
-    Finished(Result<Removed, String>),
-    Close,
-}
-
-enum Page {
+pub(super) enum Page {
     Ask,
     Working,
     Done(Removed),
     Failed(String),
+}
+
+type Work = Box<dyn FnOnce() -> Result<Removed, String> + Send>;
+
+/// the removal and how far it is, the same for both looks.
+pub(super) struct Removal {
+    pub page: Page,
+    work: Option<Work>,
+    tx: Sender<Result<Removed, String>>,
+    rx: Receiver<Result<Removed, String>>,
+}
+
+impl Removal {
+    fn new(work: Work) -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            page: Page::Ask,
+            work: Some(work),
+            tx,
+            rx,
+        }
+    }
+
+    /// the person said yes: removing starts.
+    pub fn confirm(&mut self) {
+        if let (Page::Ask, Some(work)) = (&self.page, self.work.take()) {
+            let tx = self.tx.clone();
+            thread::spawn(move || {
+                let _ = tx.send(work());
+            });
+            self.page = Page::Working;
+        }
+    }
+
+    /// takes the result once there is one. true when the page changed.
+    pub fn pump(&mut self) -> bool {
+        match self.rx.try_recv() {
+            Ok(Ok(done)) => self.page = Page::Done(done),
+            Ok(Err(e)) => self.page = Page::Failed(e),
+            Err(_) => return false,
+        }
+        true
+    }
+
+    pub const fn closable(&self) -> bool {
+        !matches!(self.page, Page::Working)
+    }
+
+    pub const fn removed(&self) -> bool {
+        matches!(self.page, Page::Done(_))
+    }
+
+    /// what stayed and what could not go, one per line, under headings.
+    pub fn notes(lang: Lang, done: &Removed) -> Vec<String> {
+        let mut notes = Vec::new();
+        if !done.failed.is_empty() {
+            notes.push(lang.line(Line::NotRemoved).to_owned());
+            notes.extend(done.failed.iter().cloned());
+        }
+        if !done.kept.is_empty() {
+            notes.push(lang.line(Line::Kept).to_owned());
+            notes.extend(done.kept.iter().cloned());
+        }
+        notes
+    }
 }
 
 /// shows the uninstaller until it is closed. `remove` runs once, on a
@@ -60,45 +129,46 @@ where
     F: FnOnce() -> Result<Removed, String> + Send + 'static,
 {
     let lang = Lang::detect();
+    let removal = Removal::new(Box::new(remove));
+    match info.look {
+        SetupLook::Modern => super::modern::uninstall(info, lang, removal),
+        SetupLook::Native => native(info, lang, removal),
+    }
+}
+
+enum Message {
+    Remove,
+    Close,
+}
+
+fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool> {
     let mut window = Window::new(
         &lang.fill(Line::UninstallTitle, &[("name", &info.name)]),
         WIDTH,
         HEIGHT,
     )?;
     let (tx, rx) = mpsc::channel();
-    let mut remove = Some(remove);
-    let mut page = Page::Ask;
-    window.set_content(render(info, lang, &page, &tx)?)?;
+    window.set_content(render(info, lang, &removal.page, &tx)?)?;
     window.show();
     loop {
         for event in window.poll_events() {
-            if matches!(event, WindowEvent::CloseRequested) && !matches!(page, Page::Working) {
-                return Ok(matches!(page, Page::Done(_)));
+            if matches!(event, WindowEvent::CloseRequested) && removal.closable() {
+                return Ok(removal.removed());
             }
         }
         window.process_frames()?;
-        let next = match (rx.try_recv(), &page) {
-            (Ok(Message::Remove), Page::Ask) => remove.take().map(|work| {
-                let tx = tx.clone();
-                thread::spawn(move || {
-                    let _ = tx.send(Message::Finished(work()));
-                });
-                Page::Working
-            }),
-            (Ok(Message::Finished(Ok(done))), Page::Working) => Some(Page::Done(done)),
-            (Ok(Message::Finished(Err(e))), Page::Working) => Some(Page::Failed(e)),
-            (Ok(Message::Close), Page::Ask | Page::Done(_) | Page::Failed(_)) => {
-                return Ok(matches!(page, Page::Done(_)));
+        let changed = match rx.try_recv() {
+            Ok(Message::Remove) => {
+                removal.confirm();
+                true
             }
-            (Ok(_), _) => None,
-            (Err(_), _) => {
-                thread::sleep(Duration::from_millis(15));
-                None
-            }
+            Ok(Message::Close) if removal.closable() => return Ok(removal.removed()),
+            _ => removal.pump(),
         };
-        if let Some(next) = next {
-            page = next;
-            window.set_content(render(info, lang, &page, &tx)?)?;
+        if changed {
+            window.set_content(render(info, lang, &removal.page, &tx)?)?;
+        } else {
+            thread::sleep(Duration::from_millis(15));
         }
     }
 }
@@ -120,7 +190,7 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
     let mut window = Stack::new(Orientation::Vertical)?;
     let mut body = Stack::new(Orientation::Vertical)?;
     let mut buttons = Stack::new(Orientation::Horizontal)?;
-    buttons.add(Label::new("Kago")?)?;
+    buttons.add(Label::new(info.text.as_deref().unwrap_or("Kago"))?)?;
     buttons.add_spacer(1.0)?;
     match page {
         Page::Ask => {
@@ -142,15 +212,7 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
         }
         Page::Done(done) => {
             body.add(Label::new(&fill(Line::Removed))?)?;
-            let mut notes = Vec::new();
-            if !done.failed.is_empty() {
-                notes.push(lang.line(Line::NotRemoved).to_owned());
-                notes.extend(done.failed.iter().cloned());
-            }
-            if !done.kept.is_empty() {
-                notes.push(lang.line(Line::Kept).to_owned());
-                notes.extend(done.kept.iter().cloned());
-            }
+            let notes = Removal::notes(lang, done);
             if notes.is_empty() {
                 body.add_spacer(1.0)?;
             } else {
