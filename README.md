@@ -155,6 +155,7 @@ A download is only used when its sha256 matches. Leave the `sha256` line out at 
 | `service <app> [arguments]` | starts the app when the user signs in; `name "..."` under it |
 | `hook post-install <app> [arguments]` | runs one of your own programs after the files are in; if it fails, the install is undone |
 | `hook pre-uninstall <app> [arguments]` | runs first on uninstall |
+| `firewall <app> ["Rule name"] [public]` | lets the app accept connections through Windows Firewall on private networks (and public ones with `public`), so Windows does not ask the first time it listens; installs for everyone only, the uninstall removes the rule |
 | `require windows 10.0.17763` | refuses to install on older Windows; nothing changes |
 | `require steamvr` | refuses to install without SteamVR |
 
