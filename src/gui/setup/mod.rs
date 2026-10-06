@@ -29,6 +29,8 @@ pub struct Info {
     pub name: String,
     pub version: String,
     pub publisher: Option<String>,
+    /// what the package is, in a line.
+    pub description: Option<String>,
     /// where it goes and what is there already.
     pub place: Place,
     /// installing for everyone rather than just this user.
@@ -576,6 +578,7 @@ mod tests {
             name: "Ozone".into(),
             version: "1.0.0".into(),
             publisher: None,
+            description: None,
             place: Place {
                 location: Some(PathBuf::from("/apps/Ozone")),
                 existing: Existing::None,

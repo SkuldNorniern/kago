@@ -168,6 +168,7 @@ fn presentation(loaded: &Loaded, target: Target) -> Result<Setup, String> {
             finish: brand.finish.clone(),
             link: brand.link.clone(),
         },
+        description: loaded.manifest.package.description.clone(),
     })
 }
 

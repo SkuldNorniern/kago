@@ -64,6 +64,9 @@ pub struct Setup {
     pub folder: FolderChoice,
     #[serde(default)]
     pub brand: SetupBrand,
+    /// what the package is, in a line, shown under its name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 const fn choose() -> FolderChoice {
@@ -77,6 +80,7 @@ impl Default for Setup {
             license: None,
             folder: FolderChoice::Choose,
             brand: SetupBrand::default(),
+            description: None,
         }
     }
 }

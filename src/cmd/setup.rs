@@ -312,6 +312,7 @@ fn window(
                 name: plan.name.clone(),
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
+                description: c.header.setup.description.clone(),
                 place: here,
                 for_everyone: scope == Scope::Machine,
                 other: open.then_some(there),

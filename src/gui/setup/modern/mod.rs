@@ -24,9 +24,10 @@ use pen::{Anim, Area, Pen, color, smooth};
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 440;
-/// a components caption and one row per component.
-const COMPONENTS_CAPTION: f32 = 24.0;
-const COMPONENT_ROW: f32 = 30.0;
+/// the components card around its caption and rows, and one row per
+/// component.
+const COMPONENTS_CAPTION: f32 = 54.0;
+const COMPONENT_ROW: f32 = 32.0;
 /// the everyone / just me switch with its caption and note.
 const SCOPE_ROW: f32 = 92.0;
 const MARGIN: f32 = 32.0;
@@ -241,6 +242,12 @@ impl State {
 }
 
 pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool> {
+    // a license to accept adds its tick row; reading it is in the footer.
+    let base = if info.license.as_ref().is_some_and(|l| l.accept) {
+        HEIGHT
+    } else {
+        HEIGHT - 40
+    };
     // the welcome page grows by the component rows it lists.
     #[allow(
         clippy::cast_possible_truncation,
@@ -248,9 +255,9 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
         clippy::cast_precision_loss
     )]
     let height = if info.components.is_empty() {
-        HEIGHT
+        base
     } else {
-        HEIGHT + (COMPONENTS_CAPTION + COMPONENT_ROW * info.components.len() as f32).ceil() as u32
+        base + (COMPONENTS_CAPTION + COMPONENT_ROW * info.components.len() as f32).ceil() as u32
     };
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let height = if info.other.is_some() {
@@ -511,6 +518,8 @@ fn title(
 enum Tone {
     Main,
     Quiet,
+    /// no fill until hovered, for the way out.
+    Ghost,
     Off,
 }
 
@@ -533,6 +542,10 @@ fn pill(
             color::mix(color::RAISED, color::HOVER, t),
             color::mix(color::DIM, color::TEXT, t),
         ),
+        Tone::Ghost => (
+            color::mix(color::BACKGROUND, color::RAISED, t),
+            color::mix(color::DIM, color::TEXT, t),
+        ),
         Tone::Off => (color::SURFACE, color::FAINT),
     };
     let bg = if frame.pressed(hit) {
@@ -541,7 +554,7 @@ fn pill(
         bg
     };
     pen.round(a, 10.0, bg)?;
-    if tone != Tone::Main {
+    if matches!(tone, Tone::Quiet | Tone::Off) {
         pen.outline(a, 10.0, 1.0, color::mix(color::BORDER, color::DIM, t * 0.4))?;
     }
     let font = pen.bold(14.0);
@@ -567,7 +580,7 @@ fn buttons(
     if let Some(second) = second {
         let w = (pen.width(second, &pen.bold(14.0)) + 40.0).max(104.0);
         let b = Area::new(a.x - 12.0 - w, footer.y, w, footer.h);
-        pill(pen, frame, b, second, Hit::Secondary, Tone::Quiet)?;
+        pill(pen, frame, b, second, Hit::Secondary, Tone::Ghost)?;
     }
     Ok(())
 }
@@ -702,8 +715,9 @@ fn location_card(
     Ok(card.bottom())
 }
 
-/// the components caption and one tick row each; returns where the next
-/// thing goes.
+/// the components in a card: a tick row each, with what it is beside the
+/// name and its size at the right. returns where the next thing goes.
+#[allow(clippy::cast_precision_loss, reason = "a handful of rows")]
 fn component_rows(
     pen: &mut Pen<'_>,
     frame: &mut Frame<'_>,
@@ -712,10 +726,22 @@ fn component_rows(
 ) -> AureaResult<f32> {
     let lang = s.lang;
     let wizard = &s.session.wizard;
-    let body = at;
-    let mut y = at.y;
-    caption(pen, lang.line(Line::Components), body.x, y)?;
-    y += COMPONENTS_CAPTION;
+    let count = s.info.components.len() as f32;
+    let card = Area::new(
+        at.x,
+        at.y,
+        at.w,
+        COMPONENTS_CAPTION - 16.0 + COMPONENT_ROW * count,
+    );
+    panel(pen, card)?;
+    caption(
+        pen,
+        lang.line(Line::Components),
+        card.x + 16.0,
+        card.y + 12.0,
+    )?;
+    let mut y = card.y + 34.0;
+    let small = pen.font(13.0);
     for (i, component) in s.info.components.iter().enumerate() {
         #[allow(clippy::cast_possible_truncation)]
         let index = i as u32;
@@ -724,25 +750,35 @@ fn component_rows(
         let row = tick(
             pen,
             frame,
-            (body.x, y),
+            (card.x + 16.0, y),
             (
                 &component.name,
                 (!wizard.locked(i)).then_some(Hit::Component(index)),
             ),
             on,
         )?;
-        let (note, warn) = component.note(lang);
+        let mut right = card.right() - 16.0;
+        if component.missing.is_none() && component.size > 0 {
+            let size = lang.size(component.size);
+            let w = pen.width(&size, &small);
+            right -= w;
+            pen.clipped(&size, Area::new(right, y, w, 24.0), &small, color::FAINT)?;
+            right -= 16.0;
+        }
+        let (note, warn) = match &component.missing {
+            Some(missing) => (lang.fill(Line::NotFound, &[("item", missing)]), true),
+            None => (component.description.clone().unwrap_or_default(), false),
+        };
         let left = row.right() + 12.0;
         pen.clipped(
             &note,
-            Area::new(left, y, (body.right() - left).max(0.0), 24.0),
-            &pen.font(13.0),
+            Area::new(left, y, (right - left).max(0.0), 24.0),
+            &small,
             if warn { color::WARN } else { color::FAINT },
         )?;
         y += COMPONENT_ROW;
     }
-    y += 6.0;
-    Ok(y)
+    Ok(card.bottom() + 16.0)
 }
 
 /// for everyone or just me, as two halves of one track with the pick
@@ -752,7 +788,7 @@ fn scope_switch(pen: &mut Pen<'_>, frame: &mut Frame<'_>, s: &State, at: Area) -
     let lang = s.lang;
     let everyone = s.session.wizard.for_everyone;
     caption(pen, lang.line(Line::InstallFor), at.x, at.y)?;
-    let track = Area::new(at.x, at.y + 22.0, at.w.min(420.0), 36.0);
+    let track = Area::new(at.x, at.y + 22.0, at.w, 36.0);
     pen.round(track, 10.0, color::SURFACE)?;
     pen.outline(
         track,
@@ -823,19 +859,21 @@ fn welcome(
         )
     };
     let font = pen.font(14.0);
+    // the brand's words, else what the package is, else the stock line.
     let intro = s
         .info
         .brand
         .welcome
         .clone()
+        .or_else(|| s.info.description.clone())
         .unwrap_or_else(|| fill(Line::WelcomeBody));
     let used = pen.wrapped(
         &intro,
         Area::new(body.x, body.y, body.w, 44.0),
         &font,
-        color::TEXT,
+        color::DIM,
     )?;
-    let mut y = body.y + used + 12.0;
+    let mut y = body.y + used + 16.0;
     if let Some(state) = s
         .session
         .wizard
@@ -875,24 +913,26 @@ fn welcome(
         y = component_rows(pen, frame, s, Area::new(body.x, y, body.w, 0.0))?;
     }
     if wizard.has_license {
-        let mut left = body.x;
         if wizard.must_accept {
             let on = frame.anim.to(key::ACCEPT, f32::from(wizard.accepted), 16.0);
-            let ticked = tick(
+            tick(
                 pen,
                 frame,
-                (left, y),
+                (body.x, y),
                 (lang.line(Line::LicenseAccept), Some(Hit::Accept)),
                 on,
             )?;
-            left = ticked.right() + 16.0;
         }
+        // a quiet link at the bottom left, beside the brand text.
         let link = lang.line(Line::LicenseRead);
-        let link_font = pen.bold(14.0);
+        let link_font = pen.bold(13.0);
         let link_w = pen.width(link, &link_font);
-        let link_area = Area::new(left, y, link_w, 24.0);
+        let left = s.info.brand.text.as_ref().map_or(footer.x, |text| {
+            footer.x + pen.width(text, &pen.font(12.0)).min(footer.w - 280.0) + 20.0
+        });
+        let link_area = Area::new(left, footer.y, link_w, footer.h);
         let hover = frame.hover(Hit::License);
-        let tone = color::mix(pen.accent, color::TEXT, 0.35 + hover * 0.4);
+        let tone = color::mix(color::DIM, pen.accent, 0.5 + hover * 0.5);
         pen.clipped(link, link_area, &link_font, tone)?;
         frame.hits.push((link_area, Hit::License));
     }
