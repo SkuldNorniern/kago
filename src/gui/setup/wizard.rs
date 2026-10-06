@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Component, Existing, Installed, Place, Step};
 use crate::install::LocationError;
+use crate::manifest::{Field, InputPage, Problem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -14,6 +15,8 @@ pub enum Page {
     Scope,
     Components,
     Directory,
+    /// one of the package's own pages, by index.
+    Input(usize),
     /// programs use the installed files; installing closes them.
     Running,
     Installing,
@@ -111,6 +114,17 @@ pub struct Wizard {
     pub launch: Option<PathBuf>,
     pub open_after: bool,
     pub error: Option<String>,
+    /// the package's own pages.
+    pub inputs: Vec<InputPage>,
+    /// the answer to every field of `inputs`, in page order.
+    pub answers: Vec<String>,
+    /// the text field typing goes into.
+    pub focus: Option<usize>,
+    /// a field whose answer does not fit, and why.
+    pub problem: Option<(usize, Problem)>,
+    /// the modern look: one welcome page picks everything else, so only
+    /// the license and the package's own pages follow it.
+    pub compact: bool,
 }
 
 impl Wizard {
@@ -155,6 +169,11 @@ impl Wizard {
             launch: None,
             open_after: true,
             error: None,
+            inputs: Vec::new(),
+            answers: Vec::new(),
+            focus: None,
+            problem: None,
+            compact: false,
         };
         for i in 0..wizard.chosen.len() {
             if wizard.locked(i) {
@@ -169,6 +188,96 @@ impl Wizard {
     pub fn offer_scope(&mut self, for_everyone: bool, other: Place) {
         self.for_everyone = for_everyone;
         self.other = Some(other);
+    }
+
+    /// the package's own pages, each field starting at `earlier`'s answer
+    /// when it fits, else its default.
+    pub fn ask(
+        &mut self,
+        inputs: Vec<InputPage>,
+        earlier: &std::collections::BTreeMap<String, String>,
+    ) {
+        self.answers = inputs
+            .iter()
+            .flat_map(|p| &p.fields)
+            .map(|f| {
+                earlier
+                    .get(&f.id)
+                    .filter(|a| !f.secret() && f.check(a).is_ok())
+                    .cloned()
+                    .unwrap_or_else(|| f.default.clone())
+            })
+            .collect();
+        self.inputs = inputs;
+    }
+
+    /// every field with its index into `answers`, page by page.
+    pub fn fields(&self) -> impl Iterator<Item = (usize, &Field)> {
+        self.inputs.iter().flat_map(|p| &p.fields).enumerate()
+    }
+
+    /// the fields of page `page`, with their indexes into `answers`.
+    #[must_use]
+    pub fn page_fields(&self, page: usize) -> Vec<(usize, &Field)> {
+        let start: usize = self.inputs.iter().take(page).map(|p| p.fields.len()).sum();
+        self.inputs
+            .get(page)
+            .map(|p| {
+                p.fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| (start + i, f))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// the answers by field id, for the install.
+    #[must_use]
+    pub fn answers_by_id(&self) -> std::collections::BTreeMap<String, String> {
+        self.fields()
+            .map(|(i, f)| (f.id.clone(), self.answers[i].clone()))
+            .collect()
+    }
+
+    /// sets the answer of field `index`, like a picked option.
+    pub fn set_answer(&mut self, index: usize, answer: String) {
+        if let Some(a) = self.answers.get_mut(index) {
+            *a = answer;
+            if self.problem.is_some_and(|(i, _)| i == index) {
+                self.problem = None;
+            }
+        }
+    }
+
+    /// typing goes into field `index`.
+    pub fn focus(&mut self, index: usize) {
+        self.focus = Some(index);
+    }
+
+    /// typed text, into the focused field.
+    pub fn type_text(&mut self, text: &str) {
+        if let Some(i) = self.focus {
+            let mut answer = self.answers.get(i).cloned().unwrap_or_default();
+            answer.push_str(text);
+            self.set_answer(i, answer);
+        }
+    }
+
+    /// Backspace in the focused field.
+    pub fn erase(&mut self) {
+        if let Some(i) = self.focus {
+            let mut answer = self.answers.get(i).cloned().unwrap_or_default();
+            answer.pop();
+            self.set_answer(i, answer);
+        }
+    }
+
+    /// the first field on input page `page` whose answer does not fit.
+    fn page_problem(&self, page: usize) -> Option<(usize, Problem)> {
+        self.page_fields(page)
+            .into_iter()
+            .find_map(|(i, f)| f.check(&self.answers[i]).err().map(|p| (i, p)))
     }
 
     /// whether the person may pick between everyone and just them.
@@ -238,6 +347,10 @@ impl Wizard {
     /// the pages before installing, in order. which there are depends on
     /// the package and, for the folder, on what is installed already.
     fn pages(&self) -> Vec<Page> {
+        let inputs = (0..self.inputs.len()).map(Page::Input);
+        if self.compact {
+            return std::iter::once(Page::Welcome).chain(inputs).collect();
+        }
         let mut pages = vec![Page::Welcome];
         if self.has_license {
             pages.push(Page::License);
@@ -251,17 +364,42 @@ impl Wizard {
         if self.folder_open {
             pages.push(Page::Directory);
         }
+        pages.extend(inputs);
         pages
+    }
+
+    /// the package's own pages when there are any, else installing: what
+    /// comes after the modern look's welcome page and license.
+    fn after_choices(&mut self) -> Outcome {
+        if self.inputs.is_empty() {
+            self.start()
+        } else {
+            self.show(Page::Input(0))
+        }
     }
 
     /// whether Next on this page starts installing.
     #[must_use]
     pub fn installs_next(&self) -> bool {
+        if self.compact && self.page == Page::License {
+            return self.inputs.is_empty();
+        }
         self.pages().last() == Some(&self.page)
     }
 
     /// the page after this one, or installing after the last.
     fn next(&mut self) -> Outcome {
+        if let Page::Input(page) = self.page
+            && let Some(problem) = self.page_problem(page)
+        {
+            self.problem = Some(problem);
+            self.focus = Some(problem.0);
+            return Outcome::Stay;
+        }
+        self.problem = None;
+        if self.compact && matches!(self.page, Page::Welcome | Page::License) {
+            return self.after_choices();
+        }
         let pages = self.pages();
         let at = pages.iter().position(|p| *p == self.page);
         match at.and_then(|i| pages.get(i + 1)) {
@@ -271,6 +409,8 @@ impl Wizard {
     }
 
     fn back(&mut self) -> Outcome {
+        self.problem = None;
+        self.focus = None;
         let pages = self.pages();
         if let Some(i) = pages.iter().position(|p| *p == self.page)
             && i > 0
@@ -284,7 +424,12 @@ impl Wizard {
     const fn choosing(&self) -> bool {
         matches!(
             self.page,
-            Page::Welcome | Page::License | Page::Scope | Page::Components | Page::Directory
+            Page::Welcome
+                | Page::License
+                | Page::Scope
+                | Page::Components
+                | Page::Directory
+                | Page::Input(_)
         )
     }
 
@@ -306,7 +451,7 @@ impl Wizard {
             (_, Action::Back) if choosing => self.back(),
             (Page::Welcome | Page::License, Action::Install) => {
                 if self.accepted || !self.must_accept {
-                    self.start()
+                    self.after_choices()
                 } else {
                     self.show(Page::License)
                 }
@@ -395,6 +540,20 @@ impl Wizard {
 
     fn show(&mut self, page: Page) -> Outcome {
         self.page = page;
+        // typing goes into the first text field of the page right away.
+        if let Page::Input(index) = page {
+            self.focus = self
+                .page_fields(index)
+                .into_iter()
+                .find(|(_, f)| {
+                    matches!(
+                        f.kind,
+                        crate::manifest::FieldKind::Text { .. }
+                            | crate::manifest::FieldKind::Number { .. }
+                    )
+                })
+                .map(|(i, _)| i);
+        }
         Outcome::Stay
     }
 
@@ -502,6 +661,73 @@ mod tests {
             missing: None,
             required: false,
         }
+    }
+
+    fn asking() -> Wizard {
+        let mut w = plain(None);
+        let page = |id: &str, field: Field| InputPage {
+            id: id.into(),
+            title: id.into(),
+            about: None,
+            fields: vec![field],
+        };
+        let text = |id: &str, required: bool| Field {
+            id: id.into(),
+            label: id.into(),
+            kind: crate::manifest::FieldKind::Text { secret: false },
+            default: String::new(),
+            required,
+        };
+        let earlier = std::collections::BTreeMap::from([("b".to_owned(), "kept".to_owned())]);
+        w.ask(
+            vec![page("one", text("a", true)), page("two", text("b", false))],
+            &earlier,
+        );
+        w
+    }
+
+    #[test]
+    fn the_modern_look_asks_its_pages_after_welcome() {
+        let mut w = asking();
+        w.compact = true;
+        assert_eq!(
+            w.answers,
+            ["", "kept"],
+            "an update starts from the earlier answers"
+        );
+        assert_eq!(w.act(Action::Install), Outcome::Stay);
+        assert_eq!(w.page, Page::Input(0));
+        assert!(!w.installs_next());
+        // required and empty: stays, says why, typing goes there.
+        assert_eq!(w.act(Action::Next), Outcome::Stay);
+        assert_eq!(w.page, Page::Input(0));
+        assert_eq!(w.problem, Some((0, Problem::Empty)));
+        w.type_text("hos");
+        w.type_text("tt");
+        w.erase();
+        assert_eq!(w.answers[0], "host");
+        assert_eq!(w.problem, None);
+        w.act(Action::Next);
+        assert_eq!(w.page, Page::Input(1));
+        assert!(w.installs_next());
+        w.act(Action::Back);
+        w.act(Action::Back);
+        assert_eq!(w.page, Page::Welcome);
+        w.act(Action::Install);
+        w.act(Action::Next);
+        assert_eq!(w.act(Action::Next), Outcome::Start);
+        assert_eq!(w.answers_by_id()["a"], "host");
+    }
+
+    #[test]
+    fn the_classic_look_asks_its_pages_last() {
+        let mut w = asking();
+        w.set_answer(0, "x".into());
+        w.act(Action::Next);
+        assert_eq!(w.page, Page::Input(0));
+        w.act(Action::Next);
+        assert_eq!(w.page, Page::Input(1));
+        assert_eq!(w.act(Action::Next), Outcome::Start);
     }
 
     #[test]

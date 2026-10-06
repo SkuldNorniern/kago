@@ -31,6 +31,10 @@ pub struct Info {
     pub publisher: Option<String>,
     /// what the package is, in a line.
     pub description: Option<String>,
+    /// the package's own pages.
+    pub inputs: Vec<crate::manifest::InputPage>,
+    /// answers given for them before, by field id.
+    pub answers: std::collections::BTreeMap<String, String>,
     /// where it goes and what is there already.
     pub place: Place,
     /// installing for everyone rather than just this user.
@@ -235,6 +239,8 @@ pub struct Picked {
     pub location: Option<PathBuf>,
     /// for everyone rather than just this user.
     pub for_everyone: bool,
+    /// answers to the package's own fields, by id.
+    pub answers: std::collections::BTreeMap<String, String>,
 }
 
 /// what a finished install reports.
@@ -366,6 +372,7 @@ impl Session {
         if let Some(other) = &info.other {
             wizard.offer_scope(info.for_everyone, other.clone());
         }
+        wizard.ask(info.inputs.clone(), &info.answers);
         let mut session = Self {
             wizard,
             folder,
@@ -396,6 +403,14 @@ impl Session {
         // the window that asked for administrator rights asked this too.
         self.wizard.close_ok = true;
         self.wizard.pick(&picked.components);
+        let given: Vec<(usize, String)> = self
+            .wizard
+            .fields()
+            .filter_map(|(i, f)| picked.answers.get(&f.id).map(|a| (i, a.clone())))
+            .collect();
+        for (i, answer) in given {
+            self.wizard.set_answer(i, answer);
+        }
         if let Some(dir) = &picked.location {
             self.set_location(dir);
         }
@@ -423,6 +438,7 @@ impl Session {
                     components: self.wizard.chosen_ids(),
                     location: self.wizard.chosen_location(),
                     for_everyone: self.wizard.for_everyone,
+                    answers: self.wizard.answers_by_id(),
                 };
                 if !self.wizard.close_ok
                     && let Some(running) = &self.running
@@ -581,6 +597,8 @@ mod tests {
             version: "1.0.0".into(),
             publisher: None,
             description: None,
+            inputs: Vec::new(),
+            answers: std::collections::BTreeMap::new(),
             place: Place {
                 location: Some(PathBuf::from("/apps/Ozone")),
                 existing: Existing::None,

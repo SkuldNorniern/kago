@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
@@ -11,8 +11,8 @@ use super::operation::{Digest, Operation};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
-    Check, Detect, Downgrade, File, Manifest, Place, ResourceScope, ScopeChoice, SemanticPath,
-    SetupLook,
+    Check, Detect, Downgrade, Field, File, InputPage, Manifest, Place, ResourceScope, ScopeChoice,
+    SemanticPath, SetupLook, Value,
 };
 use crate::package::{PackageId, Target, Version};
 
@@ -74,6 +74,13 @@ pub struct InstallPlan {
     /// what the machine must have before anything changes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<Need>,
+    /// the package's own setup pages and their fields.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<InputPage>,
+    /// what was filled in, by field id, once [`InstallPlan::answered`]
+    /// put the answers into the operations.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub answers: BTreeMap<String, String>,
 }
 
 /// the look of the setup and of the uninstaller it leaves.
@@ -214,6 +221,7 @@ impl InstallPlan {
         steps.runs(resolved, scope, scope_open, &mut diagnostics);
         expected(resolved, sources, &mut diagnostics);
         let needs = needs(resolved, &mut diagnostics);
+        unknown_inputs(manifest, &steps.operations, &mut diagnostics);
         let prerequisites = prerequisites(manifest, target, sources, &mut diagnostics);
         if diagnostics.has_errors() {
             return (None, diagnostics);
@@ -242,6 +250,8 @@ impl InstallPlan {
             update: manifest.update.as_ref().map(|u| u.feed.clone()),
             location: None,
             needs,
+            inputs: manifest.inputs.clone(),
+            answers: BTreeMap::new(),
         };
         (Some(plan), diagnostics)
     }
@@ -320,6 +330,97 @@ impl InstallPlan {
             offered,
             ..self.clone()
         }
+    }
+
+    /// every field of the package's pages.
+    pub fn fields(&self) -> impl Iterator<Item = &Field> {
+        self.inputs.iter().flat_map(|p| &p.fields)
+    }
+
+    /// the plan with an answer for every field put in where its
+    /// `{input.<id>}` is: from `given`, else `earlier` (the installed
+    /// version's), else the field's default.
+    ///
+    /// # Errors
+    ///
+    /// when `given` names a field there is not, or an answer does not fit.
+    pub fn answered(
+        &self,
+        given: &BTreeMap<String, String>,
+        earlier: &BTreeMap<String, String>,
+    ) -> Result<Self, String> {
+        if let Some(unknown) = given.keys().find(|k| !self.fields().any(|f| &f.id == *k)) {
+            let known: Vec<&str> = self.fields().map(|f| f.id.as_str()).collect();
+            return Err(format!(
+                "no field `{unknown}`; this package has {}",
+                if known.is_empty() {
+                    "none".to_owned()
+                } else {
+                    known.join(", ")
+                }
+            ));
+        }
+        let mut answers = BTreeMap::new();
+        for field in self.fields() {
+            let answer = given
+                .get(&field.id)
+                .or_else(|| earlier.get(&field.id).filter(|a| field.check(a).is_ok()))
+                .cloned()
+                .unwrap_or_else(|| field.default.clone());
+            field
+                .check(&answer)
+                .map_err(|problem| format!("{}: {problem}", field.label))?;
+            answers.insert(field.id.clone(), answer);
+        }
+        let fill = |text: &str| fill_inputs(text, &answers);
+        let operations = self
+            .operations
+            .iter()
+            .map(|op| {
+                let mut op = op.clone();
+                match &mut op {
+                    Operation::Change { value, .. } => {
+                        let whole = value
+                            .as_str()
+                            .and_then(|t| t.strip_prefix("{input."))
+                            .and_then(|t| t.strip_suffix('}'))
+                            .and_then(|id| self.fields().find(|f| f.id == id));
+                        *value = match whole {
+                            Some(field) => field.value(&answers[&field.id]),
+                            None => value
+                                .as_str()
+                                .map_or_else(|| value.clone(), |t| Value::text(fill(t))),
+                        };
+                    }
+                    Operation::Run { command, undo, .. } => {
+                        for c in std::iter::once(command).chain(undo.as_mut()) {
+                            c.arguments = c.arguments.iter().map(|a| fill(a)).collect();
+                        }
+                    }
+                    Operation::CreateShortcut { arguments, .. }
+                    | Operation::InstallService { arguments, .. } => {
+                        *arguments = arguments.iter().map(|a| fill(a)).collect();
+                    }
+                    _ => {}
+                }
+                op
+            })
+            .collect();
+        Ok(Self {
+            operations,
+            answers,
+            ..self.clone()
+        })
+    }
+
+    /// the answers to remember for an update: all but secret ones.
+    #[must_use]
+    pub fn kept_answers(&self) -> BTreeMap<String, String> {
+        self.answers
+            .iter()
+            .filter(|(id, _)| self.fields().any(|f| &f.id == *id && !f.secret()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// the plan installing `{app}` into `dir`.
@@ -718,6 +819,64 @@ fn prerequisites<S: Sources + ?Sized>(
     out
 }
 
+/// `{input.<id>}` in `text` replaced by the answer for that field.
+fn fill_inputs(text: &str, answers: &BTreeMap<String, String>) -> String {
+    let mut out = text.to_owned();
+    for (id, answer) in answers {
+        out = out.replace(&format!("{{input.{id}}}"), answer);
+    }
+    out
+}
+
+/// the field ids `text` uses as `{input.<id>}`.
+fn input_ids(text: &str) -> Vec<&str> {
+    text.match_indices("{input.")
+        .filter_map(|(i, m)| {
+            let rest = &text[i + m.len()..];
+            rest.find('}').map(|end| &rest[..end])
+        })
+        .collect()
+}
+
+/// an error for each `{input.<id>}` with no such field.
+fn unknown_inputs(manifest: &Manifest, operations: &[Operation], diagnostics: &mut Diagnostics) {
+    let known = |id: &str| {
+        manifest
+            .inputs
+            .iter()
+            .flat_map(|p| &p.fields)
+            .any(|f| f.id == id)
+    };
+    let mut texts: Vec<&str> = Vec::new();
+    for op in operations {
+        match op {
+            Operation::Change { value, .. } => texts.extend(value.as_str()),
+            Operation::Run { command, undo, .. } => {
+                for c in std::iter::once(command).chain(undo) {
+                    texts.extend(c.arguments.iter().map(String::as_str));
+                }
+            }
+            Operation::CreateShortcut { arguments, .. }
+            | Operation::InstallService { arguments, .. } => {
+                texts.extend(arguments.iter().map(String::as_str));
+            }
+            _ => {}
+        }
+    }
+    let mut reported = BTreeSet::new();
+    for id in texts.into_iter().flat_map(input_ids) {
+        if !known(id) && reported.insert(id) {
+            diagnostics.push(
+                Diagnostic::error(
+                    diagnostic::MANIFEST_REFERENCE,
+                    format!("`{{input.{id}}}`: no field `{id}` on any `page`"),
+                )
+                .help("add it to a page, like `page settings` then `text <id> \"Label\"`"),
+            );
+        }
+    }
+}
+
 /// what the resolved requirements need, with a diagnostic for each kago
 /// cannot check yet.
 fn needs(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Need> {
@@ -1069,6 +1228,65 @@ component docs Documentation off
                 .contains("file      {app}/docs/guide/intro.md")
         );
         assert!(!everything.to_string().contains("path      "));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn answers_go_where_their_fields_are_used() {
+        let dir = payload_dir("answers");
+        let build = |extra: &str| {
+            let src = format!(
+                "{AUREA}\npage server \"Server\"\n  text host \"Address\" default=localhost\n  number port \"Port\" default=9000 min=1\n  check telemetry \"Usage data\" off\n  text key \"Key\" secret\n{extra}"
+            );
+            let m = Manifest::parse("Kagofile", &src).0.unwrap();
+            let target: Target = "windows-x86_64".parse().unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+        };
+        let (plan, d) = build(
+            "json {config}/s.json\n  set port {input.port}\n  set url http://{input.host}:{input.port}\n  set on {input.telemetry}\nrun main-executable --key={input.key}\n",
+        );
+        assert!(d.is_empty(), "{d:?}");
+        let plan = plan.unwrap();
+        let given = BTreeMap::from([
+            ("host".to_owned(), "example.com".to_owned()),
+            ("key".to_owned(), "s3cret".to_owned()),
+        ]);
+        let earlier = BTreeMap::from([("port".to_owned(), "8080".to_owned())]);
+        let answered = plan.answered(&given, &earlier).unwrap();
+        let values: Vec<&Value> = answered
+            .operations
+            .iter()
+            .filter_map(|op| match op {
+                Operation::Change { value, .. } => Some(value),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(*values[0], Value(8080.into()), "a number stays a number");
+        assert_eq!(values[1].as_str(), Some("http://example.com:8080"));
+        assert_eq!(*values[2], Value(false.into()));
+        assert!(answered.to_string().contains("--key=s3cret"));
+        let kept = answered.kept_answers();
+        assert!(!kept.contains_key("key"), "secrets are not kept");
+        assert_eq!(kept["host"], "example.com");
+
+        let wrong = BTreeMap::from([("nope".to_owned(), "x".to_owned())]);
+        assert!(
+            plan.answered(&wrong, &BTreeMap::new())
+                .unwrap_err()
+                .contains("no field `nope`")
+        );
+        let bad = BTreeMap::from([("port".to_owned(), "0".to_owned())]);
+        assert!(plan.answered(&bad, &BTreeMap::new()).is_err());
+
+        let (plan, d) = build("env set X {input.missing}\n");
+        assert!(plan.is_none());
+        assert_eq!(
+            d.iter().map(|d| d.code).collect::<Vec<_>>(),
+            [diagnostic::MANIFEST_REFERENCE]
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

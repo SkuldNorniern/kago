@@ -34,6 +34,10 @@ pub struct Receipt {
     /// where `kago update` looks for newer versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update: Option<String>,
+    /// what was filled in on the package's own pages, secrets left out,
+    /// to start from in an update.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub answers: BTreeMap<String, String>,
     /// absolute location each used root had at install time.
     pub roots: BTreeMap<Root, PathBuf>,
     pub resources: Vec<Resource>,
@@ -182,6 +186,7 @@ mod tests {
             offered: Vec::new(),
             look: None,
             update: None,
+            answers: BTreeMap::new(),
             roots: BTreeMap::from([(
                 Root::App,
                 PathBuf::from("C:/Users/x/AppData/Local/Programs/Ozone"),

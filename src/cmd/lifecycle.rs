@@ -53,6 +53,19 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
         ));
     }
     let (platform, store) = open(plan.scope)?;
+    let mut given = std::collections::BTreeMap::new();
+    for set in args.all("--set") {
+        let (id, value) = set
+            .split_once('=')
+            .ok_or_else(|| format!("`--set {set}`: expected <field>=<value>"))?;
+        given.insert(id.to_owned(), value.to_owned());
+    }
+    let earlier = store
+        .read_receipt(&plan.package)
+        .map_err(|e| e.to_string())?
+        .map(|r| r.answers)
+        .unwrap_or_default();
+    let plan = plan.answered(&given, &earlier)?;
     let plan = match args.value("--location") {
         None => plan,
         Some(_) if loaded.manifest.install.folder == FolderChoice::Fixed => {

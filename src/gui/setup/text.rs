@@ -101,6 +101,13 @@ pub enum Line {
     Service,
     Prerequisite,
     Firewall,
+    /// Next without the arrow, for the modern look.
+    Continue,
+    FieldRequired,
+    FieldNumber,
+    FieldMin,
+    FieldMax,
+    FieldOption,
 }
 
 impl Lang {
@@ -164,6 +171,19 @@ impl Lang {
             format!("{value:.0} {}", UNITS[unit])
         } else {
             format!("{value:.1} {}", UNITS[unit])
+        }
+    }
+
+    /// why an answer does not fit its field, in this language.
+    #[must_use]
+    pub fn problem(self, problem: crate::manifest::Problem) -> String {
+        use crate::manifest::Problem;
+        match problem {
+            Problem::Empty => self.line(Line::FieldRequired).to_owned(),
+            Problem::NotNumber => self.line(Line::FieldNumber).to_owned(),
+            Problem::TooSmall(n) => self.fill(Line::FieldMin, &[("item", &n.to_string())]),
+            Problem::TooBig(n) => self.fill(Line::FieldMax, &[("item", &n.to_string())]),
+            Problem::NotAnOption => self.line(Line::FieldOption).to_owned(),
         }
     }
 
@@ -527,6 +547,32 @@ const fn table(line: Line) -> [&'static str; 3] {
             "Firewall rule: {item}",
             "방화벽 규칙: {item}",
             "ファイアウォール規則: {item}",
+        ],
+        Line::Continue => ["Next", "다음", "次へ"],
+        Line::FieldRequired => [
+            "Fill this in to go on.",
+            "계속하려면 입력하세요.",
+            "続けるには入力してください。",
+        ],
+        Line::FieldNumber => [
+            "Enter a whole number.",
+            "정수를 입력하세요.",
+            "整数を入力してください。",
+        ],
+        Line::FieldMin => [
+            "Enter {item} or more.",
+            "{item} 이상을 입력하세요.",
+            "{item} 以上を入力してください。",
+        ],
+        Line::FieldMax => [
+            "Enter {item} or less.",
+            "{item} 이하를 입력하세요.",
+            "{item} 以下を入力してください。",
+        ],
+        Line::FieldOption => [
+            "Pick one of the options.",
+            "선택지 중 하나를 고르세요.",
+            "選択肢から選んでください。",
         ],
     }
 }

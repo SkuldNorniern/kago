@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use aurea::elements::{
-    Button, Checkbox, Container, Divider, Element, Label, Orientation, ProgressBar, Stack,
-    TextField, TextView,
+    Button, Checkbox, ComboBox, Container, Divider, Element, Label, Orientation, ProgressBar,
+    Stack, TextField, TextView,
 };
 use aurea::render::{Canvas, Color, Image, Rect, RendererBackend};
 use aurea::{AureaResult, Window, WindowEvent};
@@ -26,11 +26,31 @@ const HEIGHT: i32 = 390;
 /// fastest the details list is rewritten while installing.
 const LOG_EVERY: Duration = Duration::from_millis(80);
 
+/// the window's height: the stock pages', or more when the tallest page
+/// of the package's own needs it.
+fn height(info: &Info) -> i32 {
+    let fields = info
+        .inputs
+        .iter()
+        .map(|p| {
+            p.fields
+                .iter()
+                .map(|f| match f.kind {
+                    crate::manifest::FieldKind::Check => 28,
+                    _ => 64,
+                })
+                .sum::<i32>()
+        })
+        .max()
+        .unwrap_or(0);
+    HEIGHT.max(210 + fields)
+}
+
 pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<bool> {
     let mut window = Window::new(
         &lang.fill(Line::WindowTitle, &[("name", &info.name)]),
         WIDTH,
-        HEIGHT,
+        height(info),
     )?;
     let (tx, rx) = mpsc::channel();
     let mut page = session.wizard.page;
@@ -70,6 +90,13 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
                 for (i, tick) in live.components.iter().enumerate() {
                     session.act(Action::SetComponent(i, tick.0.borrow().get_checked()));
                 }
+            }
+            if matches!(page, Page::Input(_)) {
+                // the fields are read when leaving the page, either way.
+                for (index, input) in &live.fields {
+                    session.wizard.set_answer(*index, input.answer()?);
+                }
+                redraw = true;
             }
             if page == Page::Directory {
                 if let Some(field) = &live.folder {
@@ -156,6 +183,29 @@ struct Live {
     folder: Option<Kept<TextField>>,
     /// for everyone, just me.
     scope: Option<(Kept<Checkbox>, Kept<Checkbox>)>,
+    /// the fields of a page of the package's own, by answer index.
+    fields: Vec<(usize, Input)>,
+}
+
+/// the widget of one field.
+enum Input {
+    Text(Kept<TextField>),
+    Choice(Kept<ComboBox>, Vec<String>),
+    Check(Kept<Checkbox>),
+}
+
+impl Input {
+    /// what the widget holds now, as an answer.
+    fn answer(&self) -> AureaResult<String> {
+        Ok(match self {
+            Self::Text(field) => field.0.borrow().get_content()?,
+            Self::Choice(combo, options) => {
+                let picked = usize::try_from(combo.0.borrow().get_selected()).unwrap_or(0);
+                options.get(picked).cloned().unwrap_or_default()
+            }
+            Self::Check(tick) => tick.0.borrow().get_checked().to_string(),
+        })
+    }
 }
 
 /// a widget still reachable after a container took it.
@@ -401,6 +451,56 @@ fn render(
             ))?)?;
             if let Some(free) = wizard.free {
                 body.add(Label::new(&size(Line::SpaceAvailable, free))?)?;
+            }
+            body.add_spacer(1.0)?;
+            buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;
+            buttons.add(button(lang.line(next), tx, Action::Next)?)?;
+            buttons.add(button(lang.line(Line::Cancel), tx, Action::Cancel)?)?;
+        }
+        Page::Input(index) => {
+            let page = &wizard.inputs[index];
+            let mut text = Stack::new(Orientation::Vertical)?;
+            text.add(Label::new(&page.title)?)?;
+            if let Some(about) = &page.about {
+                text.add(Label::new(&format!("    {about}"))?)?;
+            }
+            let mut head = Stack::new(Orientation::Horizontal)?;
+            head.add_weighted(text, 1.0)?;
+            if let Some(image) = &art.header {
+                head.add(art.canvas(image)?)?;
+            }
+            window.add(head)?;
+            window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
+            for (i, field) in wizard.page_fields(index) {
+                let answer = &wizard.answers[i];
+                let input = match &field.kind {
+                    crate::manifest::FieldKind::Check => {
+                        let tick =
+                            Kept::new(Checkbox::with_checked(&field.label, answer == "true")?);
+                        body.add(tick.share())?;
+                        Input::Check(tick)
+                    }
+                    crate::manifest::FieldKind::Choice { options } => {
+                        body.add(Label::new(&field.label)?)?;
+                        let at = options.iter().position(|o| o == answer).unwrap_or(0);
+                        let combo = Kept::new(ComboBox::with_items_selected(
+                            options.iter().map(String::as_str),
+                            i32::try_from(at).unwrap_or(0),
+                        )?);
+                        body.add(combo.share())?;
+                        Input::Choice(combo, options.clone())
+                    }
+                    _ => {
+                        body.add(Label::new(&field.label)?)?;
+                        let typed = Kept::new(TextField::with_content(answer)?);
+                        body.add(typed.share())?;
+                        Input::Text(typed)
+                    }
+                };
+                if let Some((_, problem)) = wizard.problem.filter(|(at, _)| *at == i) {
+                    body.add(Label::new(&lang.problem(problem))?)?;
+                }
+                live.fields.push((i, input));
             }
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Back), tx, Action::Back)?)?;

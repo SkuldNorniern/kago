@@ -207,6 +207,32 @@ A program run at uninstall is best effort: when it fails, the uninstall goes on.
 
 A `run` that fails at install undoes the install. Prefer a building block above when one fits: kago can check and roll those back itself, but it cannot know what a program did. An install for everyone only runs programs from the package, never ones from the machine.
 
+### setup pages of your own
+
+Ask the person installing for what your app needs, on pages after the welcome page:
+
+```
+page server "Server settings"
+  about Where Aira Studio sends tracker data.
+  text host "Server address" default=localhost required
+  number port "Port" default=9000 min=1 max=65535
+  choice mode "Mode" local cloud            # the first option is the default, or default=cloud
+  text key "Access key" secret              # shown as dots, not remembered for updates
+  check telemetry "Send usage data" off     # a tick box, off or on
+
+json {config}/settings.json
+  set server.host {input.host}
+  set server.port {input.port}              # a number field gives a number, a tick box true or false
+run app --register {input.key}
+```
+
+- `{input.<id>}` works in `json`, `registry` and `env` values, and in the arguments of `run`, `shortcut` and `service`. `kago check` says when an id has no field.
+- Next checks every field on the page: required ones filled in, numbers whole and in range.
+- An update or repair starts each field at the answer given last time. Secret fields start empty.
+- Silent installs take answers with `--set host=example.com`, for the setup and for `kago install`; fields left out keep their last answer or default.
+
+A secret field is only hidden on screen. Its value ends up wherever you use it, like a settings file or a program's arguments, and in the receipt that lets uninstall put things back.
+
 ### checks
 
 A `check` tells whether something is on the machine. `require`, a component's `detect` and a `prerequisite` use them:
@@ -385,7 +411,7 @@ For rollouts with Intune, SCCM, a script or similar:
 ```
 <setup>.exe                                   the window
 <setup>.exe --silent                          no window, defaults (also /S, like NSIS)
-<setup>.exe --silent --components steamvr,docs --location D:\Apps\Aira
+<setup>.exe --silent --components steamvr,docs --location D:\Apps\Aira --set host=example.com
 <setup>.exe --silent --scope user             with scope choose: just this user
 <setup>.exe --help
 ```

@@ -106,6 +106,7 @@ pub(super) fn install(
         offered: plan.offered.clone(),
         look: plan.look.clone(),
         update: plan.update.clone(),
+        answers: plan.kept_answers(),
         roots: roots.used(&used),
         resources,
     };

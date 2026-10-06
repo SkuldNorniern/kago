@@ -31,6 +31,8 @@ const COMPONENT_ROW: f32 = 32.0;
 /// the everyone / just me switch with its caption and note.
 const SCOPE_ROW: f32 = 92.0;
 const MARGIN: f32 = 32.0;
+/// a text, number or choice field with its label and room for a problem.
+const FIELD_H: f32 = 90.0;
 const BUTTON_H: f32 = 40.0;
 
 /// eased value keys.
@@ -41,6 +43,8 @@ mod key {
     pub const SCROLL: u32 = 4;
     /// 1 for everyone, 0 for just me.
     pub const SCOPE: u32 = 5;
+    /// tick boxes of the package's own pages, plus the answer index.
+    pub const FIELD: u32 = 5000;
 
     pub const fn hover(hit: super::Hit) -> u32 {
         match hit {
@@ -53,6 +57,8 @@ mod key {
             super::Hit::Scope(true) => 106,
             super::Hit::Scope(false) => 107,
             super::Hit::Component(i) => 200 + i,
+            super::Hit::Field(i) => 600 + i,
+            super::Hit::Option(f, o) => 1000 + f * 32 + o,
         }
     }
 
@@ -75,6 +81,11 @@ enum Hit {
     Link,
     /// install for everyone (true) or just this user.
     Scope(bool),
+    /// a field of the package's own pages, by answer index: typing goes
+    /// into a text field, a tick box flips.
+    Field(u32),
+    /// option `1` of the choice field `0`.
+    Option(u32, u32),
 }
 
 struct State {
@@ -167,7 +178,35 @@ impl State {
             (Page::Welcome, Hit::License) | (Page::Done | Page::Running, Hit::Primary) => {
                 Action::Next
             }
-            (Page::License | Page::Running, Hit::Secondary) => Action::Back,
+            (Page::License | Page::Running | Page::Input(_), Hit::Secondary) => Action::Back,
+            (Page::Input(_), Hit::Primary) => Action::Next,
+            (_, Hit::Field(i)) => {
+                let i = i as usize;
+                let wizard = &mut self.session.wizard;
+                let tick = wizard
+                    .fields()
+                    .any(|(at, f)| at == i && f.kind == crate::manifest::FieldKind::Check);
+                if tick {
+                    let on = wizard.answers.get(i).is_some_and(|a| a == "true");
+                    wizard.set_answer(i, (!on).to_string());
+                } else {
+                    wizard.focus(i);
+                }
+                return;
+            }
+            (_, Hit::Option(f, o)) => {
+                let wizard = &mut self.session.wizard;
+                let picked = wizard.fields().find_map(|(at, field)| match &field.kind {
+                    crate::manifest::FieldKind::Choice { options } if at == f as usize => {
+                        options.get(o as usize).cloned()
+                    }
+                    _ => None,
+                });
+                if let Some(option) = picked {
+                    wizard.set_answer(f as usize, option);
+                }
+                return;
+            }
             (_, Hit::Accept) => Action::ToggleAccept,
             (_, Hit::Browse) => {
                 self.want_browse = true;
@@ -192,6 +231,36 @@ impl State {
             _ => return,
         };
         self.close |= self.session.act(action);
+    }
+
+    /// typing moves to the next text field on the page, round to the first.
+    fn focus_next(&mut self) {
+        let wizard = &mut self.session.wizard;
+        let Page::Input(page) = wizard.page else {
+            return;
+        };
+        let typed: Vec<usize> = wizard
+            .page_fields(page)
+            .into_iter()
+            .filter(|(_, f)| {
+                matches!(
+                    f.kind,
+                    crate::manifest::FieldKind::Text { .. }
+                        | crate::manifest::FieldKind::Number { .. }
+                )
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let next = match wizard
+            .focus
+            .and_then(|f| typed.iter().position(|i| *i == f))
+        {
+            Some(at) => typed.get(at + 1).or(typed.first()),
+            None => typed.first(),
+        };
+        if let Some(i) = next {
+            wizard.focus(*i);
+        }
     }
 
     /// handles one event. true when the canvas should redraw.
@@ -235,10 +304,19 @@ impl State {
                 self.scroll = (self.scroll - step).clamp(0.0, self.scroll_max);
                 true
             }
+            WindowEvent::TextInput { ref text }
+                if matches!(self.session.wizard.page, Page::Input(_)) =>
+            {
+                self.session.wizard.type_text(text);
+                true
+            }
             WindowEvent::KeyInput {
                 key, pressed: true, ..
             } => {
+                let typing = matches!(self.session.wizard.page, Page::Input(_));
                 match key {
+                    KeyCode::Backspace if typing => self.session.wizard.erase(),
+                    KeyCode::Tab if typing => self.focus_next(),
                     KeyCode::Enter => self.click(Hit::Primary),
                     KeyCode::Escape if self.session.closable() => {
                         self.close |= self.session.act(Action::Cancel);
@@ -290,10 +368,31 @@ fn window_size(info: &Info) -> (u32, u32) {
     } else {
         WIDTH
     };
-    (width, height)
+    // a page of the package's own may need more room than the welcome.
+    let field_h = |f: &crate::manifest::Field| match f.kind {
+        crate::manifest::FieldKind::Check => 34.0,
+        _ => FIELD_H,
+    };
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a few hundred points"
+    )]
+    let inputs = info
+        .inputs
+        .iter()
+        .map(|p| {
+            let fields: f32 = p.fields.iter().map(field_h).sum();
+            let about = if p.about.is_some() { 40.0 } else { 0.0 };
+            (112.0 + 40.0 + about + fields + MARGIN + BUTTON_H + 40.0).ceil() as u32
+        })
+        .max()
+        .unwrap_or(0);
+    (width, height.max(inputs))
 }
 
-pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool> {
+pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<bool> {
+    session.wizard.compact = true;
     let (width, height) = window_size(info);
     let mut window = Window::new(
         &lang.fill(Line::WindowTitle, &[("name", &info.name)]),
@@ -462,6 +561,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
             welcome(&mut pen, &mut frame, s, body, footer)?;
         }
         Page::License => license(&mut pen, &mut frame, s, body, footer)?,
+        Page::Input(index) => input_page(&mut pen, &mut frame, s, index, body, footer)?,
         Page::Running => running(&mut pen, &mut frame, s, body, footer)?,
         Page::Installing => installing(&mut pen, &mut frame, s, body)?,
         Page::Done => done(&mut pen, &mut frame, s, body, footer)?,
@@ -1000,10 +1100,181 @@ fn welcome(
         frame,
         footer,
         (
-            lang.line(wizard.existing.verb()),
+            lang.line(if wizard.inputs.is_empty() {
+                wizard.existing.verb()
+            } else {
+                Line::Continue
+            }),
             wizard.folder_error.is_none() && !wizard.blocked && !wizard.short_of_space(),
         ),
         Some(lang.line(Line::Cancel)),
+    )
+}
+
+/// one field at the top of `at`: a tick box, a row of options or a text
+/// box, with what is wrong with its answer under it. returns its height.
+fn field_box(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    s: &State,
+    (index, field): (usize, &crate::manifest::Field),
+    at: Area,
+) -> AureaResult<f32> {
+    use crate::manifest::FieldKind;
+    let wizard = &s.session.wizard;
+    #[allow(clippy::cast_possible_truncation, reason = "a handful of fields")]
+    let hit = index as u32;
+    let answer = &wizard.answers[index];
+    let problem = wizard
+        .problem
+        .filter(|(at, _)| *at == index)
+        .map(|(_, p)| p);
+    match &field.kind {
+        FieldKind::Check => {
+            let on = frame
+                .anim
+                .to(key::FIELD + hit, f32::from(answer == "true"), 16.0);
+            tick(
+                pen,
+                frame,
+                (at.x, at.y),
+                (&field.label, Some(Hit::Field(hit))),
+                on,
+            )?;
+            return Ok(34.0);
+        }
+        FieldKind::Choice { options } => {
+            caption(pen, &field.label, at.x, at.y)?;
+            let mut left = at.x;
+            for (o, option) in options.iter().enumerate() {
+                #[allow(clippy::cast_possible_truncation, reason = "a few options")]
+                let pick = Hit::Option(hit, o as u32);
+                let width = pen.width(option, &pen.bold(13.0)) + 36.0;
+                let pill = Area::new(left, at.y + 22.0, width, 34.0);
+                let picked = option == answer;
+                let hover = frame.hover(pick);
+                let fill = if picked {
+                    pen.accent
+                } else {
+                    color::mix(color::SURFACE, color::HOVER, hover)
+                };
+                pen.round(pill, 9.0, fill)?;
+                if !picked {
+                    pen.outline(
+                        pill,
+                        9.0,
+                        1.0,
+                        color::mix(color::SURFACE, color::BORDER, 0.6),
+                    )?;
+                }
+                let tone = if picked { pen.on_accent } else { color::DIM };
+                pen.centred(option, pill, &pen.bold(13.0), tone)?;
+                frame.hits.push((pill, pick));
+                left = pill.right() + 8.0;
+            }
+        }
+        FieldKind::Text { .. } | FieldKind::Number { .. } => {
+            caption(pen, &field.label, at.x, at.y)?;
+            let input = Area::new(at.x, at.y + 22.0, at.w, 36.0);
+            let focused = wizard.focus == Some(index);
+            let hover = frame.hover(Hit::Field(hit));
+            pen.round(input, 9.0, color::mix(color::SURFACE, color::RAISED, hover))?;
+            let edge = if problem.is_some() {
+                color::BAD
+            } else if focused {
+                pen.accent
+            } else {
+                color::mix(color::SURFACE, color::BORDER, 0.6)
+            };
+            pen.outline(input, 9.0, if focused { 1.5 } else { 1.0 }, edge)?;
+            let shown = if field.secret() {
+                "\u{2022}".repeat(answer.chars().count())
+            } else {
+                answer.clone()
+            };
+            let font = pen.font(14.0);
+            let inner = Area::new(input.x + 12.0, input.y, input.w - 24.0, input.h);
+            pen.clipped(&shown, inner, &font, color::TEXT)?;
+            if focused {
+                let caret = (inner.x + pen.width(&shown, &font) + 1.0).min(inner.right());
+                pen.line(
+                    (caret, input.y + 9.0),
+                    (caret, input.bottom() - 9.0),
+                    1.5,
+                    pen.accent,
+                )?;
+            }
+            frame.hits.push((input, Hit::Field(hit)));
+        }
+    }
+    if let Some(problem) = problem {
+        pen.clipped(
+            &s.lang.problem(problem),
+            Area::new(at.x, at.y + 62.0, at.w, 16.0),
+            &pen.font(12.0),
+            color::BAD,
+        )?;
+    }
+    Ok(FIELD_H)
+}
+
+/// one of the package's own pages: its title, what it is about and its
+/// fields, with Back and Next.
+fn input_page(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    s: &State,
+    index: usize,
+    body: Area,
+    footer: Area,
+) -> AureaResult<()> {
+    let lang = s.lang;
+    let wizard = &s.session.wizard;
+    let page = &wizard.inputs[index];
+    pen.clipped(
+        &page.title,
+        Area::new(body.x, body.y, body.w, 26.0),
+        &pen.bold(18.0),
+        color::TEXT,
+    )?;
+    let mut top = body.y + 34.0;
+    if let Some(about) = &page.about {
+        let used = pen.wrapped(
+            about,
+            Area::new(body.x, top, body.w, 40.0),
+            &pen.font(13.0),
+            color::DIM,
+        )?;
+        top += used + 14.0;
+    }
+    for (index, field) in wizard.page_fields(index) {
+        top += field_box(
+            pen,
+            frame,
+            s,
+            (index, field),
+            Area::new(body.x, top, body.w, 0.0),
+        )?;
+    }
+    if let Some(notice) = &wizard.notice {
+        pen.wrapped(
+            notice,
+            Area::new(body.x, footer.y - 44.0, body.w, 40.0),
+            &pen.font(13.0),
+            color::BAD,
+        )?;
+    }
+    let main = if wizard.installs_next() {
+        wizard.existing.verb()
+    } else {
+        Line::Continue
+    };
+    buttons(
+        pen,
+        frame,
+        footer,
+        (lang.line(main), true),
+        Some(lang.line(Line::Return)),
     )
 }
 
@@ -1062,7 +1333,14 @@ fn license(
         pen,
         frame,
         footer,
-        (lang.line(wizard.existing.verb()), wizard.can_go_on()),
+        (
+            lang.line(if wizard.installs_next() {
+                wizard.existing.verb()
+            } else {
+                Line::Continue
+            }),
+            wizard.can_go_on(),
+        ),
         Some(lang.line(Line::Return)),
     )
 }

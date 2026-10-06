@@ -34,7 +34,9 @@ commands:
                 executable (default out: dist), signed when the Kagofile
                 has a `sign` block
   install [manifest] [--scope user|machine] [--components <a,b>] [--location <dir>]
-                install the manifest on this machine
+          [--set <field>=<value>]...
+                install the manifest on this machine; --set answers a
+                field of the package's own pages
   uninstall <package-id> [--scope user|machine]
                 remove everything the install owns
   verify <package-id> [--scope user|machine]
@@ -72,7 +74,7 @@ pub fn run() -> ExitCode {
             &["--no-sign", "--no-build"],
         )
         .and_then(|a| build::run(&a)),
-        "install" => Args::parse(rest, &["--scope", "--components", "--location"])
+        "install" => Args::parse(rest, &["--scope", "--components", "--location", "--set"])
             .and_then(|a| lifecycle::install(&a)),
         "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),

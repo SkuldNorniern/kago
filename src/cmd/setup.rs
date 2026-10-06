@@ -15,7 +15,7 @@ use kago::transaction;
 
 const SETUP_USAGE: &str = "\
 usage: <setup>.exe [--silent | /S] [--components <a,b>] [--location <dir>]
-                   [--scope user|machine]
+                   [--scope user|machine] [--set <field>=<value>]...
 
   (nothing)           open the setup window
   --silent, /S        install without a window, with the defaults
@@ -24,6 +24,10 @@ usage: <setup>.exe [--silent | /S] [--components <a,b>] [--location <dir>]
   --location <dir>    with --silent: install into this folder
   --scope <s>         with --silent, for a package that lets you pick:
                       machine (for everyone, the default) or user
+  --set <field>=<value>
+                      with --silent: answer a field of the package's own
+                      pages; the rest keep the installed version's answer,
+                      else their default
 
 exit code 0 when installed, 1 otherwise; errors go to stderr.
 ";
@@ -35,6 +39,8 @@ struct SetupArgs {
     components: Option<Vec<String>>,
     location: Option<PathBuf>,
     scope: Option<Scope>,
+    /// answers to the package's own fields, by id.
+    answers: std::collections::BTreeMap<String, String>,
     /// started by the setup window with administrator rights, to install
     /// for everyone what was picked there.
     elevated: bool,
@@ -71,14 +77,23 @@ fn setup_args(args: &[String]) -> Option<Result<SetupArgs, String>> {
                 Some(Err(e)) => return Some(Err(e)),
                 None => return Some(Err("`--scope` needs user or machine".to_owned())),
             },
+            "--set" => match it.next().and_then(|a| a.split_once('=')) {
+                Some((id, value)) => {
+                    out.answers.insert(id.to_owned(), value.to_owned());
+                }
+                None => return Some(Err("`--set` needs <field>=<value>".to_owned())),
+            },
             "--elevated" => out.elevated = true,
             _ => return None,
         }
     }
-    let picked = out.components.is_some() || out.location.is_some() || out.scope.is_some();
+    let picked = out.components.is_some()
+        || out.location.is_some()
+        || out.scope.is_some()
+        || !out.answers.is_empty();
     if !out.silent && !out.elevated && picked {
         return Some(Err(
-            "`--components`, `--location` and `--scope` go with `--silent`; the window asks for them"
+            "`--components`, `--location`, `--scope` and `--set` go with `--silent`; the window asks for them"
                 .to_owned(),
         ));
     }
@@ -164,6 +179,7 @@ pub fn run_embedded() -> Option<ExitCode> {
         components: parsed.components.as_deref(),
         location: location.as_deref(),
         scope,
+        answers: &parsed.answers,
     };
     Some(match install(&exe, embedded, &choice, &mut |_, _| {}) {
         Ok(done) => {
@@ -273,11 +289,13 @@ fn window(
                 Scope::User => Scope::Machine,
             };
             let (here, folder_now) = place(host, plan, scope);
-            // an update or repair starts with what is installed ticked.
-            let kept = host
-                .and_then(|p| transaction::store(p, scope).ok())
-                .and_then(|store| store.read_receipt(&plan.package).ok().flatten())
+            // an update or repair starts with what is installed ticked,
+            // and the answers given then.
+            let receipt = installed(host, plan, scope);
+            let kept = receipt
+                .as_ref()
                 .map(|r| plan.kept_choices(&r.components, &r.offered));
+            let earlier = receipt.map(|r| r.answers).unwrap_or_default();
             let (there, folder_other) = place(host, plan, other_scope);
             // the elevated setup installs for everyone only.
             let open = plan.scope_open && !parsed.elevated;
@@ -297,22 +315,14 @@ fn window(
                     }),
                 }
             });
-            let picked = parsed.elevated.then(|| Picked {
-                components: parsed.components.clone().unwrap_or_else(|| {
-                    plan.choices
-                        .iter()
-                        .filter(|c| c.default)
-                        .map(|c| c.id.clone())
-                        .collect()
-                }),
-                location: parsed.location.clone(),
-                for_everyone: true,
-            });
+            let picked = parsed.elevated.then(|| handed(parsed, plan));
             let info = Info {
                 name: plan.name.clone(),
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
                 description: c.header.setup.description.clone(),
+                inputs: plan.inputs.clone(),
+                answers: earlier,
                 place: here,
                 for_everyone: scope == Scope::Machine,
                 other: open.then_some(there),
@@ -340,6 +350,7 @@ fn window(
             |fraction, stage: Stage<'_>| reporter.report(fraction, window_step(&stage));
         let choice = Choice {
             components: Some(&picked.components),
+            answers: &picked.answers,
             location: picked.location.as_deref(),
             scope: if picked.for_everyone {
                 Scope::Machine
@@ -377,8 +388,40 @@ fn handoff(exe: PathBuf) -> kago::gui::setup::Elevate {
         if let Some(dir) = &picked.location {
             args.extend(["--location".to_owned(), dir.display().to_string()]);
         }
+        for (id, value) in &picked.answers {
+            args.extend(["--set".to_owned(), format!("{id}={value}")]);
+        }
         platform::run_elevated(&exe, &args, false).map(|_| ())
     })
+}
+
+/// what the window that asked for administrator rights picked, as its
+/// arguments say.
+#[cfg(feature = "gui")]
+fn handed(parsed: &SetupArgs, plan: &InstallPlan) -> kago::gui::setup::Picked {
+    kago::gui::setup::Picked {
+        components: parsed.components.clone().unwrap_or_else(|| {
+            plan.choices
+                .iter()
+                .filter(|c| c.default)
+                .map(|c| c.id.clone())
+                .collect()
+        }),
+        location: parsed.location.clone(),
+        for_everyone: true,
+        answers: parsed.answers.clone(),
+    }
+}
+
+/// the receipt of `plan`'s package installed in `scope`, if it is.
+#[cfg(feature = "gui")]
+fn installed(
+    host: Option<&dyn kago::platform::Platform>,
+    plan: &InstallPlan,
+    scope: Scope,
+) -> Option<kago::receipt::Receipt> {
+    let store = transaction::store(host?, scope).ok()?;
+    store.read_receipt(&plan.package).ok().flatten()
 }
 
 /// the setup's brand with its images decoded. an image that does not
@@ -535,6 +578,11 @@ fn chosen(
         }
         (None, None) => plan.with_defaults(),
     };
+    let earlier = previous
+        .as_ref()
+        .map(|r| r.answers.clone())
+        .unwrap_or_default();
+    let plan = plan.answered(choice.answers, &earlier)?;
     let app = choice
         .location
         .map(Path::to_path_buf)
@@ -684,6 +732,9 @@ struct Choice<'a> {
     location: Option<&'a Path>,
     /// for everyone or just this user.
     scope: Scope,
+    /// answers to the package's own fields; the rest keep what the
+    /// installed version had, else their defaults.
+    answers: &'a std::collections::BTreeMap<String, String>,
 }
 
 /// installs the embedded package as `choice` says. `progress` hears each
