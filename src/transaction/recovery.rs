@@ -16,9 +16,22 @@ pub enum Recovered {
 
 /// takes back undo records newest first. keeps going past failures and
 /// returns them all, so one stuck file does not leave the rest applied.
+///
+/// a service is stopped before anything else, so the program it runs can
+/// be put back, and set up again last, so it starts the program put back
+/// rather than the one being taken away.
 pub(super) fn roll_back(undos: &[Undo], platform: &dyn Platform) -> Vec<String> {
     let mut failures = Vec::new();
-    for undo in undos.iter().rev() {
+    let is_service = |undo: &&Undo| matches!(undo, Undo::RestoreService { .. });
+    for undo in undos.iter().rev().filter(is_service) {
+        if let Undo::RestoreService { name, .. } = undo
+            && let Err(e) = platform.stop_service(name)
+        {
+            failures.push(e);
+        }
+    }
+    let (services, rest): (Vec<&Undo>, Vec<&Undo>) = undos.iter().rev().partition(is_service);
+    for undo in rest.into_iter().chain(services) {
         if let Err(e) = take_back(undo, platform) {
             failures.push(e);
         }
@@ -40,6 +53,12 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
                 return Ok(());
             }
             gone(fs::remove_file(path), "remove", path)?;
+            // its folder may be gone since, like after an uninstall that
+            // got halfway; the file goes back where it was.
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("cannot restore {}: {e}", path.display()))?;
+            }
             fs::rename(backup, path).map_err(|e| format!("cannot restore {}: {e}", path.display()))
         }
         Undo::RemoveDirectory { path } => match fs::remove_dir(path) {

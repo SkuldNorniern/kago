@@ -21,6 +21,9 @@ struct Fake {
     at_restart: RefCell<Vec<PathBuf>>,
     firewall: RefCell<BTreeMap<String, crate::platform::Firewall>>,
     services: RefCell<BTreeMap<String, crate::platform::WindowsService>>,
+    /// services stopped and set, in order, with what the program file
+    /// held when one was set.
+    service_calls: RefCell<Vec<String>>,
     /// registry values and environment variables; JSON goes to real files
     /// under `base`.
     values: RefCell<BTreeMap<String, crate::manifest::Value>>,
@@ -38,6 +41,7 @@ impl Fake {
             at_restart: RefCell::new(Vec::new()),
             firewall: RefCell::new(BTreeMap::new()),
             services: RefCell::new(BTreeMap::new()),
+            service_calls: RefCell::new(Vec::new()),
             values: RefCell::new(BTreeMap::new()),
         }
     }
@@ -140,11 +144,22 @@ impl Platform for Fake {
         name: &str,
         service: Option<&crate::platform::WindowsService>,
     ) -> Result<(), String> {
+        let held = service
+            .and_then(|s| fs::read_to_string(s.command_line.trim_matches('"')).ok())
+            .unwrap_or_default();
+        self.service_calls
+            .borrow_mut()
+            .push(format!("set {name} {held}"));
         let mut services = self.services.borrow_mut();
         match service {
             Some(service) => services.insert(name.to_owned(), service.clone()),
             None => services.remove(name),
         };
+        Ok(())
+    }
+
+    fn stop_service(&self, name: &str) -> Result<(), String> {
+        self.service_calls.borrow_mut().push(format!("stop {name}"));
         Ok(())
     }
 
@@ -450,6 +465,58 @@ fn crash_is_rolled_back_on_next_run() {
     let recovered = recover(&w.fake, &w.store).unwrap();
     assert_eq!(recovered, [Recovered::RolledBack(World::id())]);
     assert!(!w.app().exists());
+    assert!(w.store.journals().unwrap().is_empty());
+}
+
+/// an upgrade that died after replacing a service's program: the old
+/// program goes back first, then the service starts it.
+fn half_upgraded_service(w: &World) -> PathBuf {
+    let exe = w.app().join("app.exe");
+    let backup = w.dir.join("backup-app.exe");
+    fs::create_dir_all(w.app()).unwrap();
+    fs::write(&backup, b"old").unwrap();
+    fs::write(&exe, b"new").unwrap();
+    let mut j = journal::Journal::begin(
+        &w.store.journal_path(&World::id()),
+        &World::id(),
+        &crate::package::Version::new(1, 1, 0),
+    )
+    .unwrap();
+    j.step(Undo::RestoreFile {
+        path: exe.clone(),
+        backup,
+    })
+    .unwrap();
+    j.step(Undo::RestoreService {
+        name: "svc".into(),
+        previous: Some(crate::platform::WindowsService {
+            display_name: "App".into(),
+            command_line: format!("\"{}\"", exe.display()),
+            automatic: true,
+            restart_on_failure: false,
+        }),
+    })
+    .unwrap();
+    exe
+}
+
+#[test]
+fn rollback_starts_a_service_on_its_program_put_back() {
+    let w = World::new("crash-service");
+    let exe = half_upgraded_service(&w);
+    recover(&w.fake, &w.store).unwrap();
+    assert_eq!(fs::read(&exe).unwrap(), b"old");
+    assert_eq!(*w.fake.service_calls.borrow(), ["stop svc", "set svc old"]);
+}
+
+#[test]
+fn rollback_puts_a_file_back_whose_folder_is_gone() {
+    let w = World::new("crash-folder-gone");
+    let exe = half_upgraded_service(&w);
+    fs::remove_dir_all(w.app()).unwrap();
+    let recovered = recover(&w.fake, &w.store).unwrap();
+    assert_eq!(recovered, [Recovered::RolledBack(World::id())]);
+    assert_eq!(fs::read(&exe).unwrap(), b"old");
     assert!(w.store.journals().unwrap().is_empty());
 }
 
