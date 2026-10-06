@@ -345,9 +345,13 @@ fn window(
     // picking everyone in a window without administrator rights starts
     // this setup again with them, carrying what was picked.
     let elevate = (info.other.is_some() && !platform::is_elevated()).then(|| handoff(exe.clone()));
+    let fields = plan.clone();
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
-        let mut report =
-            |fraction, stage: Stage<'_>| reporter.report(fraction, window_step(&stage));
+        // a secret answer, like a token, never shows in the details list.
+        let mut report = |fraction, stage: Stage<'_>| {
+            let step = window_step(&stage).map(|item| fields.masked(&picked.answers, item));
+            reporter.report(fraction, step);
+        };
         let choice = Choice {
             components: Some(&picked.components),
             answers: &picked.answers,

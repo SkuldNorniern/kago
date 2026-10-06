@@ -267,6 +267,24 @@ pub enum Step {
 }
 
 impl Step {
+    /// the same step with its item changed by `change`.
+    #[must_use]
+    pub fn map(self, change: impl FnOnce(&str) -> String) -> Self {
+        match self {
+            Self::Unpack(s) => Self::Unpack(change(&s)),
+            Self::Folder(s) => Self::Folder(change(&s)),
+            Self::File(s) => Self::File(change(&s)),
+            Self::Path(s) => Self::Path(change(&s)),
+            Self::Setting(s) => Self::Setting(change(&s)),
+            Self::Shortcut(s) => Self::Shortcut(change(&s)),
+            Self::Register(s) => Self::Register(change(&s)),
+            Self::Hook(s) => Self::Hook(change(&s)),
+            Self::Service(s) => Self::Service(change(&s)),
+            Self::Prerequisite(s) => Self::Prerequisite(change(&s)),
+            Self::Firewall(s) => Self::Firewall(change(&s)),
+        }
+    }
+
     fn text(&self, lang: Lang) -> String {
         let (line, item) = match self {
             Self::Unpack(s) => (Line::Unpack, s),

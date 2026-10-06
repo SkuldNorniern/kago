@@ -423,6 +423,20 @@ impl InstallPlan {
             .collect()
     }
 
+    /// `text` with every secret one of `answers` hidden, for what the
+    /// window shows.
+    #[must_use]
+    pub fn masked(&self, answers: &BTreeMap<String, String>, text: &str) -> String {
+        answers
+            .iter()
+            .filter(|(id, value)| {
+                !value.is_empty() && self.fields().any(|f| &f.id == *id && f.secret())
+            })
+            .fold(text.to_owned(), |held, (_, value)| {
+                held.replace(value.as_str(), "••••••")
+            })
+    }
+
     /// the plan installing `{app}` into `dir`.
     #[must_use]
     pub fn at(&self, dir: &Path) -> Self {
@@ -1268,6 +1282,8 @@ component docs Documentation off
         assert_eq!(values[1].as_str(), Some("http://example.com:8080"));
         assert_eq!(*values[2], Value(false.into()));
         assert!(answered.to_string().contains("--key=s3cret"));
+        let shown = plan.masked(&given, "main-executable --key=s3cret --host=example.com");
+        assert_eq!(shown, "main-executable --key=•••••• --host=example.com");
         let kept = answered.kept_answers();
         assert!(!kept.contains_key("key"), "secrets are not kept");
         assert_eq!(kept["host"], "example.com");
