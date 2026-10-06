@@ -159,6 +159,17 @@ pub trait Platform {
         Err("services for everyone are Windows-only for now".to_owned())
     }
 
+    /// stops the service `name` if it exists and runs, so its program can
+    /// be replaced; leaves how it is set up alone.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, or when it does not stop.
+    fn stop_service(&self, name: &str) -> Result<(), String> {
+        let _ = name;
+        Ok(())
+    }
+
     /// has the file or empty folder at `path` deleted when the computer
     /// next starts, for one still in use now.
     ///

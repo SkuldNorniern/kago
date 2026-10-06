@@ -11,8 +11,8 @@ use windows::Win32::System::Services::{
     QueryServiceConfigW, QueryServiceStatus, SC_ACTION, SC_ACTION_NONE, SC_ACTION_RESTART,
     SC_HANDLE, SC_MANAGER_ALL_ACCESS, SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS, SERVICE_AUTO_START,
     SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START,
-    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_QUERY_CONFIG, SERVICE_STATUS,
-    SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
+    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
+    SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -145,6 +145,15 @@ pub fn set_service(name: &str, wanted: Option<&WindowsService>) -> Result<(), St
         }
     }
     Ok(())
+}
+
+/// stops the service `name` when there is one.
+pub fn stop_service(name: &str) -> Result<(), String> {
+    let manager = manager(SC_MANAGER_CONNECT)?;
+    match open(&manager, name, SERVICE_STOP | SERVICE_QUERY_STATUS)? {
+        Some(service) => stop(&service, name),
+        None => Ok(()),
+    }
 }
 
 /// restarts the service after a crash, three times a day at most, or

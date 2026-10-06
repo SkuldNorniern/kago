@@ -205,6 +205,10 @@ impl Platform for Windows {
         service::set_service(name, wanted)
     }
 
+    fn stop_service(&self, name: &str) -> Result<(), String> {
+        service::stop_service(name)
+    }
+
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
         use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
         // SAFETY: the path string lives until the call returns; no target
