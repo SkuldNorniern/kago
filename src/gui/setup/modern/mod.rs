@@ -311,11 +311,32 @@ impl State {
                 true
             }
             WindowEvent::KeyInput {
-                key, pressed: true, ..
+                key,
+                pressed: true,
+                modifiers,
             } => {
                 let typing = matches!(self.session.wizard.page, Page::Input(_));
+                // Ctrl on Windows and Linux, Cmd on macOS.
+                let command = modifiers.ctrl || modifiers.meta;
+                let wizard = &mut self.session.wizard;
                 match key {
-                    KeyCode::Backspace if typing => self.session.wizard.erase(),
+                    KeyCode::V if typing && command => {
+                        if let Some(text) = aurea::clipboard_text() {
+                            wizard.paste(&text);
+                        }
+                    }
+                    KeyCode::Insert if typing && modifiers.shift => {
+                        if let Some(text) = aurea::clipboard_text() {
+                            wizard.paste(&text);
+                        }
+                    }
+                    KeyCode::C | KeyCode::Insert if typing && command => {
+                        if let Some(text) = wizard.copied() {
+                            let _ = aurea::set_clipboard_text(text);
+                        }
+                    }
+                    KeyCode::Backspace if typing && command => wizard.clear(),
+                    KeyCode::Backspace if typing => wizard.erase(),
                     KeyCode::Tab if typing => self.focus_next(),
                     KeyCode::Enter => self.click(Hit::Primary),
                     KeyCode::Escape if self.session.closable() => {

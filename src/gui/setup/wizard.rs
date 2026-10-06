@@ -264,6 +264,34 @@ impl Wizard {
         }
     }
 
+    /// pasted text, into the focused field: its first line, without
+    /// control characters, since a field holds one line.
+    pub fn paste(&mut self, text: &str) {
+        let line: String = text
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        self.type_text(&line);
+    }
+
+    /// what the focused field holds, to copy; never a secret one.
+    #[must_use]
+    pub fn copied(&self) -> Option<&str> {
+        let i = self.focus?;
+        let (_, field) = self.fields().find(|(at, _)| *at == i)?;
+        (!field.secret()).then(|| self.answers[i].as_str())
+    }
+
+    /// empties the focused field, like Ctrl+Backspace.
+    pub fn clear(&mut self) {
+        if let Some(i) = self.focus {
+            self.set_answer(i, String::new());
+        }
+    }
+
     /// Backspace in the focused field.
     pub fn erase(&mut self) {
         if let Some(i) = self.focus {
@@ -706,6 +734,11 @@ mod tests {
         w.type_text("tt");
         w.erase();
         assert_eq!(w.answers[0], "host");
+        w.paste(".example\tcom\nsecond line");
+        assert_eq!(w.answers[0], "host.examplecom", "one line, no tabs");
+        assert_eq!(w.copied(), Some("host.examplecom"));
+        w.clear();
+        w.type_text("host");
         assert_eq!(w.problem, None);
         w.act(Action::Next);
         assert_eq!(w.page, Page::Input(1));
