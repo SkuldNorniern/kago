@@ -107,6 +107,7 @@ impl Validator<'_> {
             services,
             runs: Vec::new(),
             build: Vec::new(),
+            inputs: Vec::new(),
             requirements,
             update,
             artifacts,

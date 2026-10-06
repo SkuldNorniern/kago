@@ -18,8 +18,8 @@ use crate::manifest::schema::{
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Change, Check, Command, Detect, Edit, Expect, FirewallRule, Place, Prerequisite, Run,
-    RunAt, Setting, Sign, SignKey, TIMESTAMP, Value, parse_color,
+    Brand, Change, Check, Command, Detect, Edit, Expect, Field, FieldKind, FirewallRule, InputPage,
+    Place, Prerequisite, Run, RunAt, Setting, Sign, SignKey, TIMESTAMP, Value, parse_color,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -51,6 +51,7 @@ const STATEMENTS: &[&str] = &[
     "use",
     "expect",
     "build",
+    "page",
 ];
 
 /// kago's own checks and actions, written in Kagofile syntax.
@@ -68,6 +69,7 @@ pub struct Lowered {
     pub expects: Vec<Expect>,
     pub runs: Vec<Run>,
     pub build: Vec<Command>,
+    pub inputs: Vec<InputPage>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -104,6 +106,7 @@ pub fn lower(
         requirements: Vec::new(),
         runs: Vec::new(),
         build: Vec::new(),
+        inputs: Vec::new(),
         services: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
@@ -185,6 +188,7 @@ struct Lower<'a> {
     requirements: Vec<RawRequirement>,
     runs: Vec<Run>,
     build: Vec<Command>,
+    inputs: Vec<InputPage>,
     services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
@@ -277,6 +281,7 @@ impl Lower<'_> {
             "sign" => self.sign_block(node),
             "prerequisite" => self.prerequisite(node),
             "update" => self.update(node),
+            "page" => self.page(node),
             "build" => {
                 self.no_children(node);
                 match invocation(node.args()) {
@@ -434,6 +439,158 @@ impl Lower<'_> {
             }
         }
         self.depth -= 1;
+    }
+
+    /// `page <id> "Title"` with `about <text>` and field lines:
+    /// `text|number|choice|check <id> "Label"` and their options.
+    fn page(&mut self, node: &Node) {
+        let (id, title) = match node.args() {
+            [id, title] => (id, title.text.clone()),
+            [id] => (id, id.text.clone()),
+            _ => return self.syntax(node.at(), "expected `page <id> [\"Title\"]`"),
+        };
+        let mut page = InputPage {
+            id: id.text.clone(),
+            title,
+            about: None,
+            fields: Vec::new(),
+        };
+        for child in &node.children {
+            self.no_children(child);
+            match child.keyword() {
+                "about" => page.about = Some(rest(child.args())),
+                _ => {
+                    if let Some(field) = self.field(child) {
+                        let taken = self
+                            .inputs
+                            .iter()
+                            .chain(std::iter::once(&page))
+                            .flat_map(|p| &p.fields)
+                            .any(|f| f.id == field.id);
+                        if taken {
+                            self.error(
+                                diagnostic::MANIFEST_DUPLICATE,
+                                child.at(),
+                                format!("field `{}` is declared twice", field.id),
+                            );
+                        } else {
+                            page.fields.push(field);
+                        }
+                    }
+                }
+            }
+        }
+        if page.fields.is_empty() {
+            return self.syntax(
+                node.at(),
+                "a page needs at least one field, like `text host \"Address\"`",
+            );
+        }
+        self.inputs.push(page);
+    }
+
+    /// one field line: kind, id, label, then options.
+    fn field(&mut self, node: &Node) -> Option<Field> {
+        let usage =
+            "expected `text|number|choice|check <id> \"Label\" [options]`, or `about <text>`";
+        let [id, rest_words @ ..] = node.args() else {
+            self.syntax(node.at(), usage);
+            return None;
+        };
+        let valid = !id.text.is_empty()
+            && id
+                .text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !valid {
+            self.error(
+                diagnostic::MANIFEST_VALUE,
+                id.at,
+                format!("`{}` is not a field id; use a-z, 0-9, `-` and `_`", id.text),
+            );
+            return None;
+        }
+        let (label, options) = match rest_words {
+            [label, rest @ ..] if label.quoted => (label.text.clone(), rest),
+            rest => (id.text.clone(), rest),
+        };
+        let mut kind = match node.keyword() {
+            "text" => FieldKind::Text { secret: false },
+            "number" => FieldKind::Number {
+                min: None,
+                max: None,
+            },
+            "choice" => FieldKind::Choice {
+                options: Vec::new(),
+            },
+            "check" => FieldKind::Check,
+            _ => {
+                self.syntax(node.at(), usage);
+                return None;
+            }
+        };
+        let mut default = String::new();
+        let mut required = false;
+        for word in options {
+            let text = word.text.as_str();
+            let number = |v: &str| v.parse::<i64>().ok();
+            match (&mut kind, text.split_once('=')) {
+                (_, Some(("default", v))) => v.clone_into(&mut default),
+                (FieldKind::Number { min, .. }, Some(("min", v))) if number(v).is_some() => {
+                    *min = number(v);
+                }
+                (FieldKind::Number { max, .. }, Some(("max", v))) if number(v).is_some() => {
+                    *max = number(v);
+                }
+                (FieldKind::Text { secret }, None) if text == "secret" => *secret = true,
+                (FieldKind::Check, None) if text == "on" || text == "off" => {
+                    default = (text == "on").to_string();
+                }
+                (FieldKind::Choice { options }, None) if !word.quoted || !text.is_empty() => {
+                    if text == "required" {
+                        required = true;
+                    } else {
+                        options.push(text.to_owned());
+                    }
+                }
+                (_, None) if text == "required" => required = true,
+                _ => {
+                    self.syntax(
+                        word.at,
+                        format!("`{text}` is not an option of `{}`", node.keyword()),
+                    );
+                    return None;
+                }
+            }
+        }
+        match &kind {
+            FieldKind::Choice { options } if options.is_empty() => {
+                self.syntax(
+                    node.at(),
+                    "a choice needs its options, like `choice mode \"Mode\" local cloud`",
+                );
+                return None;
+            }
+            FieldKind::Choice { options } if default.is_empty() => default.clone_from(&options[0]),
+            FieldKind::Check if default.is_empty() => "false".clone_into(&mut default),
+            _ => {}
+        }
+        let field = Field {
+            id: id.text.clone(),
+            label,
+            kind,
+            default,
+            required: false,
+        };
+        if let Err(problem) = field.check(&field.default) {
+            self.error(
+                diagnostic::MANIFEST_VALUE,
+                node.at(),
+                format!("default `{}` does not fit: {problem}", field.default),
+            );
+            return None;
+        }
+        Some(Field { required, ..field })
     }
 
     /// `expect <file> ["message"]`: the build fails unless the file is
@@ -1703,6 +1860,7 @@ impl Lower<'_> {
             expects: self.expects,
             runs: self.runs,
             build: self.build,
+            inputs: self.inputs,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

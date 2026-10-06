@@ -4,6 +4,7 @@ mod brand;
 mod change;
 mod check;
 mod firewall;
+mod input;
 mod kagofile;
 mod path;
 mod policy;
@@ -22,6 +23,7 @@ pub use brand::{Brand, parse_color};
 pub use change::{Change, Edit, Place, Value};
 pub use check::{Check, Detect};
 pub use firewall::FirewallRule;
+pub use input::{Field, FieldKind, InputPage, Problem};
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
 pub use policy::{
@@ -64,6 +66,8 @@ pub struct Manifest {
     pub runs: Vec<Run>,
     /// what `kago build` runs first to make the files, in order.
     pub build: Vec<Command>,
+    /// setup pages of the package's own, with fields to fill in.
+    pub inputs: Vec<InputPage>,
     pub requirements: Vec<Requirement>,
     pub update: Option<Update>,
     /// `target <os> <artifact>...`, only for listed OSes.
@@ -164,6 +168,7 @@ impl Manifest {
             m.expects = lowered.expects;
             m.runs = lowered.runs;
             m.build = lowered.build;
+            m.inputs = lowered.inputs;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -352,6 +357,51 @@ target linux setup appimage
             );
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pages_hold_fields() {
+        let (m, codes) = check(&with(
+            "page server \"Server settings\"
+  about Where trackers send their data.
+  text host \"Address\" default=localhost required
+  text key \"API key\" secret
+  number port \"Port\" default=9000 min=1 max=65535
+  choice mode \"Mode\" local cloud default=cloud
+  check telemetry \"Send usage data\" on
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let page = &m.unwrap().inputs[0];
+        assert_eq!(page.title, "Server settings");
+        assert_eq!(
+            page.about.as_deref(),
+            Some("Where trackers send their data.")
+        );
+        let f = &page.fields;
+        assert!(f[0].required && f[0].default == "localhost");
+        assert!(f[1].secret());
+        assert_eq!(
+            f[2].kind,
+            FieldKind::Number {
+                min: Some(1),
+                max: Some(65535)
+            }
+        );
+        assert_eq!(f[3].default, "cloud");
+        assert_eq!(f[4].default, "true");
+        for bad in [
+            "page p\n",
+            "page p\n  text a\n  text a\n",
+            "page p\n  number n default=x\n",
+            "page p\n  choice c\n",
+            "page p\n  slider s\n",
+            "page p\n  text t bold\n",
+            "page p\n  number n default=0 min=1\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(m.is_none() && !codes.is_empty(), "{bad}");
+        }
     }
 
     #[test]
