@@ -144,6 +144,64 @@ impl Rgba {
         self.resize(w, h)
     }
 
+    /// the same image with its corners cut round, `radius` pixels, the
+    /// edge smoothed over one pixel.
+    #[must_use]
+    pub fn rounded(&self, radius: u32) -> Self {
+        let mut out = self.clone();
+        let corner = f64::from(radius.min(self.width / 2).min(self.height / 2));
+        if corner < 1.0 {
+            return out;
+        }
+        // the nearest point of the rounded shape's inner box.
+        let inside = |at: f64, size: u32| at.clamp(corner, f64::from(size) - corner);
+        for row in 0..self.height {
+            for col in 0..self.width {
+                // how far the pixel's middle is outside the corner's curve.
+                let (px, py) = (f64::from(col) + 0.5, f64::from(row) + 0.5);
+                let distance = (px - inside(px, self.width)).hypot(py - inside(py, self.height));
+                let outside = (distance - corner + 0.5).clamp(0.0, 1.0);
+                if outside > 0.0 {
+                    let alpha = ((row * self.width + col) * 4 + 3) as usize;
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let kept = (f64::from(out.pixels[alpha]) * (1.0 - outside)).round() as u8;
+                    out.pixels[alpha] = kept;
+                }
+            }
+        }
+        out
+    }
+
+    /// the image's main color as an accent: the average of its colorful,
+    /// opaque pixels, made light enough to be a button. `None` for a gray
+    /// or see-through image.
+    #[must_use]
+    pub fn tone(&self) -> Option<[u8; 3]> {
+        let mut sum = [0.0f64; 3];
+        let mut weight = 0.0;
+        for p in self.pixels.as_chunks::<4>().0 {
+            let [r, g, b] = [p[0], p[1], p[2]].map(f64::from);
+            let (hi, lo) = (r.max(g).max(b), r.min(g).min(b));
+            // saturation, times opacity: gray and clear pixels count little.
+            let w = (hi - lo) / 255.0 * f64::from(p[3]) / 255.0;
+            sum[0] += r * w;
+            sum[1] += g * w;
+            sum[2] += b * w;
+            weight += w;
+        }
+        let pixels = (self.pixels.len() / 4).max(1);
+        #[allow(clippy::cast_precision_loss)]
+        if weight < 0.04 * pixels as f64 {
+            return None;
+        }
+        let avg = sum.map(|c| c / weight);
+        // as bright as kago's own accent, so text on it stays readable.
+        let hi = avg[0].max(avg[1]).max(avg[2]).max(1.0);
+        let scale = 230.0 / hi;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Some(avg.map(|c| (c * scale).clamp(0.0, 255.0).round() as u8))
+    }
+
     /// scaled to fill `width` x `height`, cut evenly at the sides that
     /// stick out, like a side banner.
     #[must_use]
@@ -230,6 +288,34 @@ mod tests {
         writer.write_image_data(rgba).unwrap();
         writer.finish().unwrap();
         out
+    }
+
+    #[test]
+    fn rounded_clears_only_the_corners() {
+        let square = Rgba {
+            width: 20,
+            height: 20,
+            pixels: [255, 0, 0, 255].repeat(400),
+        };
+        let round = square.rounded(8);
+        let alpha = |x: u32, y: u32| round.pixels[((y * 20 + x) * 4 + 3) as usize];
+        assert_eq!(alpha(0, 0), 0);
+        assert_eq!(alpha(19, 19), 0);
+        assert_eq!(alpha(10, 0), 255, "edges stay");
+        assert_eq!(alpha(10, 10), 255);
+    }
+
+    #[test]
+    fn tone_takes_the_colorful_pixels() {
+        let solid = |rgba: [u8; 4], n: usize| Rgba {
+            width: u32::try_from(n).unwrap(),
+            height: 1,
+            pixels: rgba.repeat(n),
+        };
+        let purple = solid([80, 40, 160, 255], 4).tone().unwrap();
+        assert_eq!(purple, [115, 58, 230]);
+        assert_eq!(solid([90, 90, 90, 255], 4).tone(), None, "gray");
+        assert_eq!(solid([200, 0, 0, 0], 4).tone(), None, "clear");
     }
 
     #[test]

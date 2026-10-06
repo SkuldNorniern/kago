@@ -141,6 +141,8 @@ pub struct Brand {
     pub header: Option<Rgba>,
     /// along the left of the welcome and finish pages.
     pub side: Option<Rgba>,
+    /// across the top of the modern look, behind the name.
+    pub banner: Option<Rgba>,
 }
 
 /// an optional part of the package.

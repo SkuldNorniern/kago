@@ -68,8 +68,9 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     }
     let stub_bytes = setup::prepare_stub(stub, icon.as_ref(), &out.with_extension("stub"))
         .map_err(|e| format!("{}: {e}", out.display()))?;
-    let presentation = presentation(&loaded, target)?;
+    let mut presentation = presentation(&loaded, target)?;
     let mut assets = brand_images(&loaded, target, icon.as_ref())?;
+    pick_accent(&mut presentation, &mut plan, &assets);
     for p in &plan.prerequisites {
         let bytes = fs::read(&p.source).map_err(|e| format!("{}: {e}", p.source.display()))?;
         assets.push((p.asset(), bytes));
@@ -152,6 +153,26 @@ fn write_feed(
     fs::write(path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
     println!("  {}: upload it with the setup", path.display());
     Ok(())
+}
+
+/// without an accent, the brand's own pictures give one, so buttons match
+/// them in the setup and in the uninstaller it leaves.
+fn pick_accent(
+    presentation: &mut Setup,
+    plan: &mut kago::install::InstallPlan,
+    assets: &[(String, Vec<u8>)],
+) {
+    if presentation.brand.accent.is_some() {
+        return;
+    }
+    let tone = ["banner", "side", "logo"].into_iter().find_map(|name| {
+        let (_, png) = assets.iter().find(|(n, _)| n == name)?;
+        kago::format::image::decode_png(png).ok()?.tone()
+    });
+    presentation.brand.accent = tone;
+    if let Some(look) = &mut plan.look {
+        look.accent = look.accent.or(tone);
+    }
 }
 
 /// how the setup window looks and what it asks.
@@ -351,6 +372,7 @@ fn brand_images(
         ("logo", &brand.logo),
         ("header", &brand.header),
         ("side", &brand.side),
+        ("banner", &brand.banner),
     ] {
         let Some(reference) = reference else {
             continue;

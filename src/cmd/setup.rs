@@ -392,6 +392,7 @@ fn window_brand(c: &mut Container) -> kago::gui::setup::Brand {
             .and_then(|png| kago::format::image::decode_png(&png).ok())
     };
     let (logo, header, side) = (image("logo"), image("header"), image("side"));
+    let banner = image("banner");
     let brand = &c.header.setup.brand;
     kago::gui::setup::Brand {
         text: brand.text.clone(),
@@ -402,6 +403,7 @@ fn window_brand(c: &mut Container) -> kago::gui::setup::Brand {
         logo,
         header,
         side,
+        banner,
     }
 }
 

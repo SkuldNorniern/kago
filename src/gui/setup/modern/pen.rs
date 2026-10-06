@@ -6,7 +6,8 @@ use std::time::Instant;
 
 use aurea::AureaResult;
 use aurea::render::{
-    Color, DrawingContext, Font, FontWeight, Paint, PaintStyle, Path, PathCommand, Point, Rect,
+    Color, DrawingContext, Font, FontWeight, GradientStop, LinearGradient, Paint, PaintStyle, Path,
+    PathCommand, Point, Rect,
 };
 
 use super::super::text::Lang;
@@ -73,7 +74,7 @@ impl Area {
         )
     }
 
-    fn rect(&self) -> Rect {
+    pub fn rect(&self) -> Rect {
         Rect::new(self.x, self.y, self.w, self.h)
     }
 }
@@ -164,6 +165,40 @@ impl Pen<'_> {
         let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
         self.ctx
             .draw_rect(area.rect(), &fill(Color::rgba(c.r, c.g, c.b, a)))
+    }
+
+    /// `c` over `area`, going from `from` to `to` opacity: top to bottom,
+    /// or left to right when `across`.
+    pub fn fade(
+        &mut self,
+        area: Area,
+        c: Color,
+        (from, to): (f32, f32),
+        across: bool,
+    ) -> AureaResult<()> {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let at =
+            |alpha: f32| Color::rgba(c.r, c.g, c.b, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let end = if across {
+            Point::new(area.right(), area.y)
+        } else {
+            Point::new(area.x, area.bottom())
+        };
+        let gradient = LinearGradient {
+            start: Point::new(area.x, area.y),
+            end,
+            stops: vec![
+                GradientStop {
+                    offset: 0.0,
+                    color: at(from),
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: at(to),
+                },
+            ],
+        };
+        self.ctx.fill_linear_gradient(&gradient, area.rect())
     }
 
     pub fn round(&mut self, area: Area, radius: f32, c: Color) -> AureaResult<()> {

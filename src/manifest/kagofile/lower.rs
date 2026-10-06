@@ -1300,6 +1300,7 @@ impl Lower<'_> {
                 "logo" => self.brand.logo = image(self),
                 "header" => self.brand.header = image(self),
                 "side" => self.brand.side = image(self),
+                "banner" => self.brand.banner = image(self),
                 "link" => match args {
                     [label, url] => {
                         self.brand.link = Some((label.text.clone(), url.text.clone()));
@@ -1309,7 +1310,7 @@ impl Lower<'_> {
                 other => self.syntax(
                     child.at(),
                     format!(
-                        "unknown brand field `{other}`; expected text, accent, logo, header, side, welcome, finish or link"
+                        "unknown brand field `{other}`; expected text, accent, logo, banner, header, side, welcome, finish or link"
                     ),
                 ),
             }

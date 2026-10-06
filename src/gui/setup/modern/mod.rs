@@ -102,14 +102,19 @@ struct Art {
     header: Option<Image>,
     /// already cropped to fill the side panel.
     side: Option<Image>,
+    /// already cropped to fill the top of the window.
+    banner: Option<Image>,
     accent: Option<Color>,
 }
 
 /// width of the side panel when the brand has a side image.
 const SIDE_W: f32 = 180.0;
+/// height of the banner across the top, fading out at its bottom.
+const BANNER_H: f32 = 136.0;
 
 impl Art {
-    fn new(brand: &super::Brand, height: f32, scale: f32) -> Self {
+    /// `width` and `height` are the window's, in points.
+    fn new(brand: &super::Brand, (width, height): (f32, f32), scale: f32) -> Self {
         let px = |v: f32| {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             let px = (v * scale).round().max(1.0) as u32;
@@ -122,14 +127,23 @@ impl Art {
                 .logo
                 .as_ref()
                 .map(|l| image(l.fit(px(52.0), px(52.0)))),
-            header: brand
-                .header
-                .as_ref()
-                .map(|h| image(h.fit(px(150.0), px(57.0)))),
+            header: brand.header.as_ref().map(|h| {
+                let fitted = h.fit(px(150.0), px(57.0));
+                let radius = px(10.0);
+                image(fitted.rounded(radius))
+            }),
             side: brand
                 .side
                 .as_ref()
                 .map(|s| image(s.cover(px(SIDE_W), px(height)))),
+            banner: brand.banner.as_ref().map(|b| {
+                let across = if brand.side.is_some() {
+                    width - SIDE_W
+                } else {
+                    width
+                };
+                image(b.cover(px(across), px(BANNER_H)))
+            }),
             accent: brand.accent.map(|[r, g, b]| Color::rgb(r, g, b)),
         }
     }
@@ -241,13 +255,18 @@ impl State {
     }
 }
 
-pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool> {
+/// the window's width and height for what the welcome page shows.
+fn window_size(info: &Info) -> (u32, u32) {
     // a license to accept adds its tick row; reading it is in the footer.
-    let base = if info.license.as_ref().is_some_and(|l| l.accept) {
+    let mut base = if info.license.as_ref().is_some_and(|l| l.accept) {
         HEIGHT
     } else {
         HEIGHT - 40
     };
+    // a line saying what is installed already.
+    if info.place.existing != super::Existing::None {
+        base += 26;
+    }
     // the welcome page grows by the component rows it lists.
     #[allow(
         clippy::cast_possible_truncation,
@@ -271,6 +290,11 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
     } else {
         WIDTH
     };
+    (width, height)
+}
+
+pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool> {
+    let (width, height) = window_size(info);
     let mut window = Window::new(
         &lang.fill(Line::WindowTitle, &[("name", &info.name)]),
         width.cast_signed(),
@@ -278,7 +302,11 @@ pub(super) fn run(info: &Info, lang: Lang, session: Session) -> AureaResult<bool
     )?;
     let canvas = Canvas::new(width, height, RendererBackend::Cpu)?;
     #[allow(clippy::cast_precision_loss)]
-    let art = Art::new(&info.brand, height as f32, window.scale_factor().max(1.0));
+    let art = Art::new(
+        &info.brand,
+        (width as f32, height as f32),
+        window.scale_factor().max(1.0),
+    );
     canvas.set_background_color(color::BACKGROUND);
     let state = Rc::new(RefCell::new(State {
         info: info.clone(),
@@ -376,10 +404,38 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
     let left = if let Some(side) = &s.art.side {
         pen.ctx
             .draw_image_rect(side, aurea::render::Rect::new(0.0, 0.0, SIDE_W, h))?;
+        // melts into the page instead of ending on an edge.
+        pen.fade(
+            Area::new(SIDE_W - 56.0, 0.0, 56.0, h),
+            color::BACKGROUND,
+            (0.0, 1.0),
+            true,
+        )?;
         SIDE_W
     } else {
         0.0
     };
+    if let Some(banner) = &s.art.banner {
+        let top = Area::new(left, 0.0, w - left, BANNER_H);
+        pen.ctx.draw_image_rect(banner, top.rect())?;
+        // darker behind the name, then gone into the page at the bottom.
+        pen.fade(
+            Area::new(top.x, 0.0, top.w * 0.7, top.h),
+            color::BACKGROUND,
+            (0.55, 0.0),
+            true,
+        )?;
+        pen.fade(
+            Area::new(top.x, top.h * 0.25, top.w, top.h * 0.6),
+            color::BACKGROUND,
+            (0.0, 1.0),
+            false,
+        )?;
+        pen.fill(
+            Area::new(top.x, top.h * 0.85, top.w, top.h * 0.15 + 1.0),
+            color::BACKGROUND,
+        )?;
+    }
     header(&mut pen, s, left, w)?;
 
     let arrived = smooth(frame.anim.to(key::PAGE, 1.0, 10.0));
@@ -450,7 +506,9 @@ fn header(pen: &mut Pen<'_>, s: &State, left: f32, w: f32) -> AureaResult<()> {
     if let Some(publisher) = &info.publisher {
         sub = format!("{sub}  \u{b7}  {publisher}");
     }
-    let marks = (s.art.logo.as_ref(), s.art.header.as_ref());
+    // the banner is the picture at the top; a header image would fight it.
+    let header = s.art.header.as_ref().filter(|_| s.art.banner.is_none());
+    let marks = (s.art.logo.as_ref(), header);
     title(pen, marks, (&info.name, &sub), left, w)
 }
 

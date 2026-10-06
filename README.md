@@ -323,16 +323,17 @@ What the setup looks like, after NSIS Modern UI. All lines are optional:
 ```
 brand
   text Eira Installer             # small text bottom left
-  accent 6667ab                   # main color, no #
+  accent 6667ab                   # main color, no #; taken from the pictures below when left out
   logo brand/logo.png             # replaces the app icon in the modern look
-  header brand/header.png         # top right; supply 300 x 114
-  side brand/side.png             # left of welcome and finish; supply 328 x 560
+  banner brand/banner.png         # modern look: across the top behind the name, fading into the page; supply 1280 x 272
+  header brand/header.png         # top right, corners rounded in the modern look; supply 300 x 114
+  side brand/side.png             # left edge, fading into the page; supply 328 x 560
   welcome Thanks for choosing Ozone.
   finish Ozone is ready.
   link "Read the guide" https://example.com/guide
 ```
 
-Images are PNG. They are stored in the setup and scaled for the screen's DPI when the window opens.
+Images are PNG. They are stored in the setup and scaled for the screen's DPI when the window opens. With a `banner`, the modern look leaves the `header` out. Without `accent`, `kago build` takes the main color of the banner, side picture or logo (the app icon by default), so the buttons match them in the setup and the uninstaller.
 
 ### sign
 

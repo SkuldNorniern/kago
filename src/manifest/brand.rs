@@ -16,6 +16,8 @@ pub struct Brand {
     pub header: Option<String>,
     /// build-side PNG along the left of the welcome and finish pages.
     pub side: Option<String>,
+    /// build-side PNG across the top of the modern look, behind the name.
+    pub banner: Option<String>,
     /// replaces the welcome text.
     pub welcome: Option<String>,
     /// replaces the finish text.
