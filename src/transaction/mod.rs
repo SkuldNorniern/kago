@@ -275,6 +275,17 @@ pub fn remove_at_restart(
             _ => left.push(resource),
         }
     }
+    // the rest goes at the restart; an entry in Apps for it would point at
+    // an uninstaller about to vanish.
+    if left
+        .iter()
+        .all(|r| matches!(r, Resource::Registration { .. }))
+    {
+        left.retain(|r| match r {
+            Resource::Registration { key, scope } => platform.unregister(*scope, key).is_err(),
+            _ => true,
+        });
+    }
     if left.is_empty() {
         store.remove_receipt(package)?;
         drop(held);
@@ -309,30 +320,46 @@ struct Removal {
     failed: Vec<String>,
 }
 
-/// removes `resources` of `receipt`: registrations, shortcuts and PATH
-/// first, then files, then directories deepest first and only when empty.
+/// removes `resources` of `receipt`: shortcuts and PATH first, then files,
+/// then directories deepest first and only when empty. the uninstaller
+/// and the registration go last, and only when nothing failed before
+/// them: a partly removed package keeps its entry in Apps and the program
+/// it runs, so the uninstall can run again.
 fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Platform) -> Removal {
     let mut out = Removal {
         left: Vec::new(),
         kept: Vec::new(),
         failed: Vec::new(),
     };
+    let uninstaller = format!("{{app}}/uninstall{}", std::env::consts::EXE_SUFFIX);
+    let is_uninstaller =
+        |r: &Resource| matches!(r, Resource::File { path, .. } if path.to_string() == uninstaller);
     let rank = |r: &Resource| match r {
         // the package's own cleanup runs while its files are still there.
         Resource::UninstallHook { .. } => 0,
-        Resource::Registration { .. } => 1,
         Resource::Shortcut { .. } => 2,
         Resource::PathEntry { .. }
         | Resource::LoginItem { .. }
         | Resource::FirewallRule { .. }
         | Resource::Service { .. }
         | Resource::Changed { .. } => 3,
+        Resource::File { .. } if is_uninstaller(r) => 5,
         Resource::File { .. } => 4,
-        Resource::Directory { path } => 5 + usize::MAX / 2 - path.segments().count(),
+        Resource::Directory { path } => 6 + usize::MAX / 2 - path.segments().count(),
+        Resource::Registration { .. } => usize::MAX,
     };
     let mut ordered: Vec<&Resource> = resources.iter().collect();
     ordered.sort_by_key(|r| rank(r));
     for resource in ordered {
+        let last = is_uninstaller(resource)
+            || matches!(
+                resource,
+                Resource::Registration { .. } | Resource::Directory { .. }
+            );
+        if last && !out.failed.is_empty() {
+            out.left.push(resource.clone());
+            continue;
+        }
         let result = match resource {
             Resource::Registration { key, scope } => platform.unregister(*scope, key),
             Resource::Shortcut { path } => remove_file(path),

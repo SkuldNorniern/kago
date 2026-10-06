@@ -285,6 +285,32 @@ impl Drop for World {
 }
 
 #[test]
+fn a_partial_uninstall_keeps_its_uninstaller_and_entry_to_run_again() {
+    let w = World::new("partial");
+    w.install(MANIFEST).unwrap();
+    let uninstaller = w
+        .app()
+        .join(format!("uninstall{}", std::env::consts::EXE_SUFFIX));
+    // something that cannot go: a folder where the program was.
+    let stuck = w.app().join("app.exe");
+    fs::remove_file(&stuck).unwrap();
+    fs::create_dir_all(stuck.join("busy")).unwrap();
+
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(done.failed.len(), 1, "{:?}", done.failed);
+    assert!(uninstaller.is_file(), "the uninstaller stays");
+    assert_eq!(w.fake.registered.borrow().len(), 1, "so does the entry");
+    assert!(!w.app().join("themes/dark.toml").exists(), "the rest went");
+
+    fs::remove_dir_all(&stuck).unwrap();
+    let again = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(again.failed.is_empty(), "{:?}", again.failed);
+    assert!(!w.app().exists());
+    assert!(w.fake.registered.borrow().is_empty());
+    assert_eq!(w.store.read_receipt(&World::id()).unwrap(), None);
+}
+
+#[test]
 fn install_then_uninstall_leaves_nothing() {
     let w = World::new("roundtrip");
     let receipt = w.install(MANIFEST).unwrap();
@@ -338,6 +364,23 @@ fn what_stays_in_use_goes_at_restart_files_first() {
         "{:?}",
         left.resources
     );
+}
+
+#[test]
+fn an_entry_left_with_only_files_for_the_restart_goes_too() {
+    let w = World::new("restart-entry");
+    let receipt = w.install(MANIFEST).unwrap();
+    let mut rest = receipt.clone();
+    rest.resources.retain(|r| {
+        matches!(
+            r,
+            Resource::File { .. } | Resource::Directory { .. } | Resource::Registration { .. }
+        )
+    });
+    w.store.write_receipt(&rest).unwrap();
+    remove_at_restart(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.registered.borrow().is_empty());
+    assert_eq!(w.store.read_receipt(&World::id()).unwrap(), None);
 }
 
 #[test]
