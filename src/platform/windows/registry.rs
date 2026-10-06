@@ -96,23 +96,41 @@ impl Key {
 
     /// `None` when the value does not exist or is not a `REG_DWORD`.
     pub fn dword(&self, name: &str) -> Result<Option<u32>, String> {
+        let name_w = HSTRING::from(name);
         let mut kind = REG_VALUE_TYPE::default();
-        let mut value = 0u32;
-        let mut size = 4u32;
-        // SAFETY: value holds the 4 bytes `size` says.
+        let mut size = 0u32;
+        // SAFETY: type and size query with null data, out pointers valid.
+        // asking for the data at once would fail on a longer value, like
+        // a string, with "more data is available".
         let e = unsafe {
             RegQueryValueExW(
                 self.0,
-                &HSTRING::from(name),
+                &name_w,
                 None,
                 Some(&raw mut kind),
-                Some((&raw mut value).cast()),
+                None,
                 Some(&raw mut size),
             )
         };
         if e == ERROR_FILE_NOT_FOUND {
             return Ok(None);
         }
+        check(e, "cannot read registry value", name)?;
+        if kind != REG_DWORD || size != 4 {
+            return Ok(None);
+        }
+        let mut value = 0u32;
+        // SAFETY: value holds the 4 bytes `size` says.
+        let e = unsafe {
+            RegQueryValueExW(
+                self.0,
+                &name_w,
+                None,
+                Some(&raw mut kind),
+                Some((&raw mut value).cast()),
+                Some(&raw mut size),
+            )
+        };
         check(e, "cannot read registry value", name)?;
         Ok((kind == REG_DWORD).then_some(value))
     }
@@ -254,5 +272,25 @@ pub fn set_value(
             k.set_dword(name, n)
         }
         other => Err(format!("{name}: {other} cannot go in the registry")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_string_and_a_number_both_read_back() {
+        let key = format!("Software\\kago-test-registry-{}", std::process::id());
+        let long = "\"C:\\Program Files\\DLP Agent/dlp-agent.exe\" --tray";
+        set_value(false, &key, "text", Some(&long.into())).unwrap();
+        set_value(false, &key, "short", Some(&"ab".into())).unwrap();
+        set_value(false, &key, "number", Some(&7.into())).unwrap();
+        let read = |name| value(false, &key, name).unwrap();
+        assert_eq!(read("text"), Some(long.into()));
+        assert_eq!(read("short"), Some("ab".into()));
+        assert_eq!(read("number"), Some(7.into()));
+        assert_eq!(read("missing"), None);
+        delete_tree(HKEY_CURRENT_USER, &key).unwrap();
     }
 }
