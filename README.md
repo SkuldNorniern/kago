@@ -198,7 +198,12 @@ run setup-tool --register {app}            # an app id, an installed file like {
   undo setup-tool --unregister {app}       # runs on rollback and at uninstall
 run {app}/tools/cleanup.exe
   at uninstall                             # first thing at uninstall
+run {app}/agent.exe --may-uninstall
+  at uninstall
+  required                                 # it fails: nothing is closed or removed
 ```
+
+A program run at uninstall is best effort: when it fails, the uninstall goes on. With `required` it may say no: it runs before the app is closed, may take up to 30 minutes, for example to ask for a code from an administrator, and anything but exit code 0 stops the uninstall and shows why.
 
 A `run` that fails at install undoes the install. Prefer a building block above when one fits: kago can check and roll those back itself, but it cannot know what a program did. An install for everyone only runs programs from the package, never ones from the machine.
 
