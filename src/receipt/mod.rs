@@ -77,6 +77,9 @@ pub enum Resource {
     UninstallHook {
         command: String,
         arguments: Vec<String>,
+        /// a failure stops the uninstall before anything is removed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        required: bool,
     },
     /// a value set outside the package. uninstall takes an added item
     /// out, and puts `previous` back where the value is still the one set.

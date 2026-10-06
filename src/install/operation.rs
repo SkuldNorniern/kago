@@ -48,6 +48,9 @@ pub enum Operation {
         command: Invocation,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         undo: Option<Invocation>,
+        /// at uninstall: stops it when the program fails.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        required: bool,
     },
     /// per user, a program started at sign-in; for everyone, a Windows
     /// service.

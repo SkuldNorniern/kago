@@ -155,6 +155,9 @@ pub struct Run {
     pub phase: RunAt,
     pub command: Command,
     pub undo: Option<Command>,
+    /// at uninstall: a failure stops the uninstall before anything is
+    /// closed or removed.
+    pub required: bool,
     pub component: Option<String>,
     pub when: Selector,
     pub at: Location,

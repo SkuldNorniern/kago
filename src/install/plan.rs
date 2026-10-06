@@ -557,6 +557,7 @@ impl Steps {
                 phase: r.run.phase,
                 command: r.command.clone(),
                 undo: r.undo.clone(),
+                required: r.run.required,
             };
             self.push(op, r.run.component.clone());
         }

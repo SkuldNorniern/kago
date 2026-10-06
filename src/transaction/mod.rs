@@ -44,6 +44,8 @@ pub enum Error {
     Unmet(Vec<String>),
     /// the install failed and everything it did was taken back.
     RolledBack(String),
+    /// a `required` program run at uninstall failed; nothing was removed.
+    Kept(String),
     Other(String),
 }
 
@@ -72,6 +74,7 @@ impl fmt::Display for Error {
             Self::RolledBack(e) => {
                 write!(f, "{e}\nnothing was changed, the install was rolled back")
             }
+            Self::Kept(e) => write!(f, "{e}\nthe uninstall was stopped, nothing was removed"),
             Self::Other(e) => f.write_str(e),
         }
     }
@@ -161,8 +164,50 @@ pub struct Uninstalled {
 ///
 /// # Errors
 ///
-/// when locked or not installed.
+/// when locked or not installed, or a `required` program says no.
 pub fn uninstall(
+    package: &PackageId,
+    platform: &dyn Platform,
+    store: &Store,
+) -> Result<Uninstalled, Error> {
+    ask(package, store)?;
+    remove(package, platform, store)
+}
+
+/// runs the package's `required` programs for uninstall, which may say no:
+/// the first that fails stops the uninstall before anything is closed or
+/// removed. [`remove`] does not run them again.
+///
+/// # Errors
+///
+/// [`Error::Kept`] when one fails; when locked, not installed or the
+/// receipt cannot be read.
+pub fn ask(package: &PackageId, store: &Store) -> Result<(), Error> {
+    let held = lock(store, package)?;
+    let receipt = store
+        .read_receipt(package)?
+        .ok_or_else(|| Error::NotInstalled(package.clone()))?;
+    // the program may wait for a person; the package is not held meanwhile.
+    drop(held);
+    for resource in &receipt.resources {
+        if let Resource::UninstallHook {
+            command,
+            arguments,
+            required: true,
+        } = resource
+        {
+            program::run_waiting(Path::new(command), arguments).map_err(Error::Kept)?;
+        }
+    }
+    Ok(())
+}
+
+/// removes what [`uninstall`] removes, without asking first.
+///
+/// # Errors
+///
+/// when locked or not installed.
+pub fn remove(
     package: &PackageId,
     platform: &dyn Platform,
     store: &Store,
@@ -294,7 +339,11 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::PathEntry { entry, scope } => {
                 platform.remove_path_entry(*scope, Path::new(entry))
             }
-            Resource::UninstallHook { command, arguments } => {
+            // a required one already ran in `ask`.
+            Resource::UninstallHook { required: true, .. } => Ok(()),
+            Resource::UninstallHook {
+                command, arguments, ..
+            } => {
                 // best effort: a broken hook must not keep the package from
                 // being removed.
                 let _ = program::run(Path::new(command), arguments);

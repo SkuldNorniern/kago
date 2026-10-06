@@ -250,18 +250,20 @@ fn uninstall_retrying(
     platform: &dyn platform::Platform,
     store: &transaction::Store,
 ) -> Result<transaction::Uninstalled, transaction::Error> {
+    // the package may say no, before anything is closed.
+    transaction::ask(package, store)?;
     // what still runs from the app folder goes first; what cannot be
     // closed shows up as not removed.
     if let Ok(Some(receipt)) = store.read_receipt(package) {
         let _ = platform::close_programs(&receipt.files());
     }
-    let mut done = transaction::uninstall(package, platform, store)?;
+    let mut done = transaction::remove(package, platform, store)?;
     for _ in 0..20 {
         if done.failed.is_empty() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
-        match transaction::uninstall(package, platform, store) {
+        match transaction::remove(package, platform, store) {
             Ok(again) => done.failed = again.failed,
             Err(transaction::Error::NotInstalled(_)) => done.failed.clear(),
             Err(e) => return Err(e),

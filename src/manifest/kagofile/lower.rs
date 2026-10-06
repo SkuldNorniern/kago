@@ -1043,17 +1043,20 @@ impl Lower<'_> {
         }
     }
 
-    /// `run <program> [arguments...]`, with `at install|uninstall` and
-    /// `undo <program> [arguments...]` under it.
+    /// `run <program> [arguments...]`, with `at install|uninstall`,
+    /// `undo <program> [arguments...]` and, at uninstall, `required` under
+    /// it.
     fn run(&mut self, node: &Node, scope: &Scope) {
         let Some(command) = invocation(node.args()) else {
             return self.syntax(node.at(), "expected `run <program> [arguments...]`");
         };
         let mut phase = RunAt::Install;
         let mut undo = None;
+        let mut required = false;
         for child in &node.children {
             self.no_children(child);
             match (child.keyword(), child.args()) {
+                ("required", []) => required = true,
                 ("at", [when]) => match when.text.parse() {
                     Ok(p) => phase = p,
                     Err(e) => self.error(diagnostic::MANIFEST_VALUE, when.at, e),
@@ -1061,12 +1064,18 @@ impl Lower<'_> {
                 ("undo", args) if !args.is_empty() => undo = invocation(args),
                 _ => self.syntax(
                     child.at(),
-                    "expected `at install|uninstall` or `undo <program> [arguments...]`",
+                    "expected `at install|uninstall`, `undo <program> [arguments...]` or `required`",
                 ),
             }
         }
         if phase == RunAt::Uninstall && undo.is_some() {
             return self.syntax(node.at(), "a program run at uninstall has nothing to undo");
+        }
+        if required && phase != RunAt::Uninstall {
+            return self.syntax(
+                node.at(),
+                "`required` is for a program run at uninstall; a failing one at install already undoes the install",
+            );
         }
         let when = self.when(scope, &[]);
         let when = crate::manifest::selector::selector(
@@ -1079,6 +1088,7 @@ impl Lower<'_> {
             phase,
             command,
             undo,
+            required,
             component: scope.component.as_ref().map(|c| c.get_ref().clone()),
             when,
             at: Location::at(self.file, self.source, node.at()),

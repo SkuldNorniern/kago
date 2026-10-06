@@ -425,6 +425,7 @@ run main-executable --setup
   undo main-executable --unsetup
 run {app}/tools/clean.exe --all
   at uninstall
+  required
 ",
         ));
         assert!(codes.is_empty(), "{codes:?}");
@@ -436,11 +437,13 @@ run {app}/tools/clean.exe --all
         assert_eq!(m.runs[0].undo.as_ref().unwrap().arguments, ["--unsetup"]);
         assert_eq!(m.runs[1].phase, RunAt::Uninstall);
         assert_eq!(m.runs[1].command.program, "{app}/tools/clean.exe");
+        assert!(m.runs[1].required && !m.runs[0].required);
         for bad in [
             "run\n",
             "hook post-install main-executable\n",
             "run x\n  at later\n",
             "run x\n  at uninstall\n  undo y\n",
+            "run x\n  required\n",
         ] {
             let (m, codes) = check(&with(bad));
             assert!(m.is_none() && !codes.is_empty(), "{bad}");

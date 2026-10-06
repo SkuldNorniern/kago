@@ -188,10 +188,12 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
             Resource::UninstallHook {
                 command: a,
                 arguments: x,
+                ..
             },
             Resource::UninstallHook {
                 command: b,
                 arguments: y,
+                ..
             },
         ) => a == b && x == y,
         _ => false,
@@ -298,7 +300,8 @@ impl Run<'_> {
                 phase,
                 command,
                 undo,
-            } => self.run(*phase, command, undo.as_ref()),
+                required,
+            } => self.run(*phase, command, undo.as_ref(), *required),
             Operation::CreateShortcut {
                 name,
                 target,
@@ -538,18 +541,20 @@ impl Run<'_> {
 
     /// a program for `install` runs now, and a failing one rolls the
     /// install back; its `undo` runs on rollback and at uninstall. one for
-    /// `uninstall` is kept for then.
+    /// `uninstall` is kept for then; a `required` one can stop it.
     fn run(
         &mut self,
         phase: RunAt,
         command: &crate::install::Invocation,
         undo: Option<&crate::install::Invocation>,
+        required: bool,
     ) -> Result<(), Error> {
         let (exe, arguments) = self.invocation(command)?;
         if phase == RunAt::Uninstall {
             self.resources.push(Resource::UninstallHook {
                 command: exe.display().to_string(),
                 arguments,
+                required,
             });
             return Ok(());
         }
@@ -563,6 +568,7 @@ impl Run<'_> {
             self.resources.push(Resource::UninstallHook {
                 command: exe.display().to_string(),
                 arguments,
+                required: false,
             });
         }
         Ok(())

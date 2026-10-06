@@ -789,6 +789,28 @@ fn a_run_at_uninstall_is_kept_for_then_and_skipped_on_upgrade() {
 }
 
 #[test]
+fn a_required_run_at_uninstall_that_fails_keeps_everything() {
+    let w = run_world("run-required");
+    w.install(&format!(
+        "{MANIFEST}run main --no-such-flag\n  at uninstall\n  required\n"
+    ))
+    .unwrap();
+    let err = uninstall(&World::id(), &w.fake, &w.store).unwrap_err();
+    assert!(matches!(err, Error::Kept(_)), "{err}");
+    assert!(w.app().join("app.exe").is_file());
+    assert!(w.store.read_receipt(&World::id()).unwrap().is_some());
+
+    // one that agrees lets the uninstall through.
+    w.install(
+        &format!("{MANIFEST}run main --list\n  at uninstall\n  required\n")
+            .replace("1.0.0", "1.1.0"),
+    )
+    .unwrap();
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(!w.app().exists());
+}
+
+#[test]
 fn an_undo_runs_on_rollback_and_is_kept_for_uninstall() {
     let w = run_world("run-undo");
     // the undo fails, so a rollback that ran it says so.

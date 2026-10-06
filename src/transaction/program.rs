@@ -9,12 +9,29 @@ use std::time::{Duration, Instant};
 /// longest a program may take before it counts as failed.
 const LIMIT: Duration = Duration::from_secs(120);
 
+/// longest a `required` program at uninstall may take: it may wait for a
+/// person, like one typing a code from an administrator.
+const WAITING_LIMIT: Duration = Duration::from_secs(30 * 60);
+
 /// runs `exe` with `arguments` in its own folder and waits for it.
 ///
 /// # Errors
 ///
 /// when it cannot start, exits with a failure, or runs past the limit.
 pub(super) fn run(exe: &Path, arguments: &[String]) -> Result<(), String> {
+    run_within(exe, arguments, LIMIT)
+}
+
+/// [`run`] for a program that may wait for a person.
+///
+/// # Errors
+///
+/// as [`run`].
+pub(super) fn run_waiting(exe: &Path, arguments: &[String]) -> Result<(), String> {
+    run_within(exe, arguments, WAITING_LIMIT)
+}
+
+fn run_within(exe: &Path, arguments: &[String], limit: Duration) -> Result<(), String> {
     let mut command = Command::new(exe);
     command
         .args(arguments)
@@ -44,11 +61,11 @@ pub(super) fn run(exe: &Path, arguments: &[String]) -> Result<(), String> {
                 Err(format!("{name} failed ({status})"))
             };
         }
-        if started.elapsed() > LIMIT {
+        if started.elapsed() > limit {
             let _ = child.kill();
             return Err(format!(
                 "{name} did not finish within {} seconds",
-                LIMIT.as_secs()
+                limit.as_secs()
             ));
         }
         thread::sleep(Duration::from_millis(50));
