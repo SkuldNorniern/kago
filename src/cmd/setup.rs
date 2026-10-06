@@ -347,7 +347,6 @@ fn window(
     let elevate = (info.other.is_some() && !platform::is_elevated()).then(|| handoff(exe.clone()));
     let fields = plan.clone();
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
-        // a secret answer, like a token, never shows in the details list.
         let mut report = |fraction, stage: Stage<'_>| {
             let step = window_step(&stage).map(|item| fields.masked(&picked.answers, item));
             reporter.report(fraction, step);

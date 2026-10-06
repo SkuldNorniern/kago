@@ -159,8 +159,7 @@ pub trait Platform {
         Err("services for everyone are Windows-only for now".to_owned())
     }
 
-    /// stops the service `name` if it exists and runs, so its program can
-    /// be replaced; leaves how it is set up alone.
+    /// stops the service `name` if it runs; keeps its setup.
     ///
     /// # Errors
     ///

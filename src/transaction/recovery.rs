@@ -17,9 +17,7 @@ pub enum Recovered {
 /// takes back undo records newest first. keeps going past failures and
 /// returns them all, so one stuck file does not leave the rest applied.
 ///
-/// a service is stopped before anything else, so the program it runs can
-/// be put back, and set up again last, so it starts the program put back
-/// rather than the one being taken away.
+/// services stop first and come back last, on the old program.
 pub(super) fn roll_back(undos: &[Undo], platform: &dyn Platform) -> Vec<String> {
     let mut failures = Vec::new();
     let is_service = |undo: &&Undo| matches!(undo, Undo::RestoreService { .. });
@@ -53,8 +51,7 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
                 return Ok(());
             }
             gone(fs::remove_file(path), "remove", path)?;
-            // its folder may be gone since, like after an uninstall that
-            // got halfway; the file goes back where it was.
+            // folder may be gone since.
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("cannot restore {}: {e}", path.display()))?;

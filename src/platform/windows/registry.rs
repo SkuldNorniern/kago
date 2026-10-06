@@ -100,8 +100,7 @@ impl Key {
         let mut kind = REG_VALUE_TYPE::default();
         let mut size = 0u32;
         // SAFETY: type and size query with null data, out pointers valid.
-        // asking for the data at once would fail on a longer value, like
-        // a string, with "more data is available".
+        // reading data now fails on a string with "more data".
         let e = unsafe {
             RegQueryValueExW(
                 self.0,

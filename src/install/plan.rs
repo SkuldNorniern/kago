@@ -423,8 +423,7 @@ impl InstallPlan {
             .collect()
     }
 
-    /// `text` with every secret one of `answers` hidden, for what the
-    /// window shows.
+    /// `text` with secret answers hidden.
     #[must_use]
     pub fn masked(&self, answers: &BTreeMap<String, String>, text: &str) -> String {
         answers

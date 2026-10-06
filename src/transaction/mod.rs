@@ -275,8 +275,7 @@ pub fn remove_at_restart(
             _ => left.push(resource),
         }
     }
-    // the rest goes at the restart; an entry in Apps for it would point at
-    // an uninstaller about to vanish.
+    // rest goes at restart, so the entry goes now.
     if left
         .iter()
         .all(|r| matches!(r, Resource::Registration { .. }))
@@ -321,10 +320,8 @@ struct Removal {
 }
 
 /// removes `resources` of `receipt`: shortcuts and PATH first, then files,
-/// then directories deepest first and only when empty. the uninstaller
-/// and the registration go last, and only when nothing failed before
-/// them: a partly removed package keeps its entry in Apps and the program
-/// it runs, so the uninstall can run again.
+/// then directories deepest first and only when empty. uninstaller and
+/// registration go last, only when nothing failed, so uninstall can rerun.
 fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Platform) -> Removal {
     let mut out = Removal {
         left: Vec::new(),
