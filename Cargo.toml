@@ -11,11 +11,10 @@ publish = false
 [features]
 default = ["gui"]
 # setup window on Aurea. without it kago is CLI and silent only.
-gui = ["dep:aurea", "dep:sys-locale"]
+gui = ["dep:aurea"]
 
 [dependencies]
-aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "68f799a", optional = true }
-sys-locale = { version = "0.3", optional = true }
+aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "809cf09", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"

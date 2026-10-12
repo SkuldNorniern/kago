@@ -117,7 +117,7 @@ impl Lang {
     pub fn detect() -> Self {
         std::env::var("KAGO_LANG")
             .ok()
-            .or_else(sys_locale::get_locale)
+            .or_else(aurea::locale)
             .map_or(Self::En, |locale| Self::of(&locale))
     }
 
