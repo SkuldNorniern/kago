@@ -228,6 +228,7 @@ run app --register {input.key}
 
 - `{input.<id>}` works in `json`, `registry` and `env` values, and in the arguments of `run`, `shortcut` and `service`. `kago check` says when an id has no field.
 - Next checks every field on the page: required ones filled in, numbers whole and in range.
+- `skip <check>` under a page leaves it out when the check finds its thing, like a key file an earlier install left: its fields keep their last answer or default.
 - An update or repair starts each field at the answer given last time. Secret fields start empty.
 - Silent installs take answers with `--set host=example.com`, for the setup and for `kago install`; fields left out keep their last answer or default.
 
