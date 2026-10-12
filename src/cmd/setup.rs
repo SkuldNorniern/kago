@@ -321,7 +321,7 @@ fn window(
                 version: plan.version.to_string(),
                 publisher: plan.publisher.clone(),
                 description: c.header.setup.description.clone(),
-                inputs: plan.inputs.clone(),
+                inputs: shown_pages(plan),
                 answers: earlier,
                 place: here,
                 for_everyone: scope == Scope::Machine,
@@ -483,6 +483,21 @@ fn window_components(
                 missing,
             }
         })
+        .collect()
+}
+
+/// the pages to show: one whose `skip` check finds its thing is left out.
+#[cfg(feature = "gui")]
+fn shown_pages(plan: &InstallPlan) -> Vec<kago::manifest::InputPage> {
+    plan.inputs
+        .iter()
+        .filter(|page| {
+            !page
+                .skip
+                .as_ref()
+                .is_some_and(|skip| platform::satisfied(&skip.check))
+        })
+        .cloned()
         .collect()
 }
 

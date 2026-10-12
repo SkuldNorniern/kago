@@ -698,6 +698,7 @@ mod tests {
             title: id.into(),
             about: None,
             fields: vec![field],
+            skip: None,
         };
         let text = |id: &str, required: bool| Field {
             id: id.into(),

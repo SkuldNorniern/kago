@@ -128,6 +128,10 @@ pub struct InputPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<String>,
     pub fields: Vec<Field>,
+    /// not shown when this finds what it looks for; its fields keep their
+    /// last answer or default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip: Option<super::check::Detect>,
 }
 
 #[cfg(test)]

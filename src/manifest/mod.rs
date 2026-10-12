@@ -360,6 +360,29 @@ target linux setup appimage
     }
 
     #[test]
+    fn a_page_may_be_skipped_when_a_check_finds_its_thing() {
+        let (m, codes) = check(&with(
+            "check enrolled \"Enrolled\" file %ProgramData%/Agent/key.tav
+page server \"Server\"
+  skip enrolled
+  text host \"Address\"
+page other \"Other\"
+  skip file %ProgramData%/x
+  text other \"Other\"
+",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let inputs = m.unwrap().inputs;
+        assert_eq!(
+            inputs[0].skip.as_ref().map(|d| d.name.as_str()),
+            Some("Enrolled")
+        );
+        assert!(inputs[1].skip.is_some(), "a test written out works too");
+        let (_, codes) = check(&with("page p\n  skip nothing\n  text a \"A\"\n"));
+        assert_eq!(codes, [diagnostic::MANIFEST_REFERENCE]);
+    }
+
+    #[test]
     fn pages_hold_fields() {
         let (m, codes) = check(&with(
             "page server \"Server settings\"

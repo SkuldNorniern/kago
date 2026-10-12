@@ -454,11 +454,13 @@ impl Lower<'_> {
             title,
             about: None,
             fields: Vec::new(),
+            skip: None,
         };
         for child in &node.children {
             self.no_children(child);
             match child.keyword() {
                 "about" => page.about = Some(rest(child.args())),
+                "skip" => page.skip = self.detect(child.args(), child.at()),
                 _ => {
                     if let Some(field) = self.field(child) {
                         let taken = self
