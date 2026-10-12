@@ -14,6 +14,7 @@ pub use uninstall::{Removed, Removing, run as run_uninstall};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::Duration;
 
 use aurea::AureaResult;
 
@@ -22,6 +23,10 @@ use crate::install::LocationError;
 use crate::manifest::SetupLook;
 use text::{Lang, Line};
 use wizard::{Action, Outcome, Wizard};
+
+/// how long a setup window waits for input before it looks at the worker
+/// again. input and redraws end the wait at once.
+const PUMP: Duration = Duration::from_millis(15);
 
 /// what the window shows about the package.
 #[derive(Debug, Clone)]

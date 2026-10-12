@@ -7,7 +7,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
 
 use aurea::elements::{
     Button, Container, Divider, Label, Orientation, ProgressBar, Stack, TextView,
@@ -184,12 +183,11 @@ fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool
     window.set_content(render(info, lang, &removal.page, &tx)?)?;
     window.show();
     loop {
-        for event in window.poll_events() {
+        for event in window.wait_events(Some(super::PUMP)) {
             if matches!(event, WindowEvent::CloseRequested) && removal.closable() {
                 return Ok(removal.removed());
             }
         }
-        window.process_frames()?;
         let changed = match rx.try_recv() {
             Ok(Message::Remove) => {
                 removal.confirm();
@@ -200,8 +198,6 @@ fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool
         };
         if changed {
             window.set_content(render(info, lang, &removal.page, &tx)?)?;
-        } else {
-            thread::sleep(Duration::from_millis(15));
         }
     }
 }

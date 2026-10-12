@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::os::raw::c_void;
 use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use aurea::elements::{
@@ -60,12 +59,11 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
     window.show();
     let mut logged = Instant::now();
     loop {
-        for event in window.poll_events() {
+        for event in window.wait_events(Some(super::PUMP)) {
             if matches!(event, WindowEvent::CloseRequested) && session.closable() {
                 return Ok(session.installed());
             }
         }
-        window.process_frames()?;
         let mut busy = false;
         let mut redraw = false;
         while let Ok(action) = rx.try_recv() {
@@ -138,9 +136,6 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
                 logged = Instant::now();
                 log.0.borrow_mut().set_content(&details(lang, &session))?;
             }
-        }
-        if !busy {
-            thread::sleep(Duration::from_millis(15));
         }
     }
 }

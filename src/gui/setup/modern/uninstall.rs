@@ -4,8 +4,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use aurea::elements::{Container, Orientation, Stack};
 use aurea::render::{Canvas, Color, DrawingContext, Image, RendererBackend, request_canvas_redraw};
@@ -153,7 +152,7 @@ pub(in crate::gui::setup) fn run(
     request_canvas_redraw(id);
     loop {
         let mut redraw = false;
-        for event in window.poll_events() {
+        for event in window.wait_events(Some(super::super::PUMP)) {
             let mut s = state.borrow_mut();
             if matches!(event, WindowEvent::CloseRequested) && s.removal.closable() {
                 return Ok(s.removal.removed());
@@ -171,10 +170,6 @@ pub(in crate::gui::setup) fn run(
         }
         if redraw {
             request_canvas_redraw(id);
-        }
-        window.process_frames()?;
-        if !redraw {
-            thread::sleep(Duration::from_millis(15));
         }
     }
 }

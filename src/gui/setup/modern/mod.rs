@@ -9,8 +9,6 @@ pub(super) use uninstall::run as uninstall;
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::thread;
-use std::time::Duration;
 
 use aurea::elements::{Container, Orientation, Stack};
 use aurea::render::{Canvas, DrawingContext, RendererBackend, request_canvas_redraw};
@@ -317,7 +315,7 @@ impl State {
             } => {
                 let typing = matches!(self.session.wizard.page, Page::Input(_));
                 // Ctrl on Windows and Linux, Cmd on macOS.
-                let command = modifiers.ctrl || modifiers.meta;
+                let command = modifiers.command();
                 let wizard = &mut self.session.wizard;
                 match key {
                     KeyCode::V if typing && command => {
@@ -453,7 +451,7 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
     request_canvas_redraw(id);
     loop {
         let mut redraw = false;
-        for event in window.poll_events() {
+        for event in window.wait_events(Some(super::PUMP)) {
             let mut s = state.borrow_mut();
             if matches!(event, WindowEvent::CloseRequested) && s.session.closable() {
                 return Ok(s.session.installed());
@@ -485,10 +483,6 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         }
         if redraw {
             request_canvas_redraw(id);
-        }
-        window.process_frames()?;
-        if !redraw {
-            thread::sleep(Duration::from_millis(15));
         }
     }
 }
