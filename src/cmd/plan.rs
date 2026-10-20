@@ -41,7 +41,13 @@ pub fn build(
         return Ok(None);
     };
     if offer && !args.flag("--no-build") {
-        run_build(&manifest, path.parent().unwrap_or(Path::new(".")))?;
+        let out = args.value("--out").unwrap_or("dist");
+        run_build(
+            &manifest,
+            path.parent().unwrap_or(Path::new(".")),
+            target,
+            Path::new(out),
+        )?;
     }
     let requested: Option<Scope> = args.value("--scope").map(str::parse).transpose()?;
     let selection = match args.value("--components") {
@@ -86,21 +92,37 @@ pub fn build(
     }))
 }
 
-/// the Kagofile's `build` lines, in its folder, each until it ends.
-fn run_build(manifest: &Manifest, base: &Path) -> Result<(), String> {
-    for step in &manifest.build {
-        let line = std::iter::once(step.program.as_str())
-            .chain(step.arguments.iter().map(String::as_str))
+/// the Kagofile's `build` steps for `target`, in its folder, each until
+/// it ends. each gets the package's version, the target and where the
+/// setup goes as `KAGO_*` variables.
+fn run_build(manifest: &Manifest, base: &Path, target: Target, out: &Path) -> Result<(), String> {
+    let base = if base.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        base
+    };
+    let cx = kago::manifest::Context::target(target);
+    let out = std::path::absolute(out).unwrap_or_else(|_| out.to_path_buf());
+    for step in manifest.build.iter().filter(|s| s.when.matches(&cx)) {
+        let (program, mut arguments) = if step.script {
+            interpreter(&step.command.program)
+        } else {
+            (step.command.program.clone(), Vec::new())
+        };
+        arguments.extend(step.command.arguments.iter().cloned());
+        let line = std::iter::once(step.command.program.as_str())
+            .chain(step.command.arguments.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(" ");
         eprintln!("build: {line}");
-        let status = std::process::Command::new(&step.program)
-            .args(&step.arguments)
-            .current_dir(if base.as_os_str().is_empty() {
-                Path::new(".")
-            } else {
-                base
-            })
+        let status = std::process::Command::new(&program)
+            .args(&arguments)
+            .current_dir(base)
+            .env("KAGO_PACKAGE", manifest.package.id.as_str())
+            .env("KAGO_NAME", &manifest.package.name)
+            .env("KAGO_VERSION", manifest.package.version.to_string())
+            .env("KAGO_TARGET", target.to_string())
+            .env("KAGO_OUT", &out)
             .status()
             .map_err(|e| format!("build: `{line}` cannot start: {e}"))?;
         if !status.success() {
@@ -108,6 +130,32 @@ fn run_build(manifest: &Manifest, base: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// the program that runs a script, by its extension, and its arguments
+/// before the script's own.
+fn interpreter(script: &str) -> (String, Vec<String>) {
+    let extension = Path::new(script)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let owned = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    let (program, before): (&str, Vec<String>) = match extension.as_str() {
+        "ps1" if cfg!(windows) => (
+            "powershell",
+            owned(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]),
+        ),
+        "ps1" => ("pwsh", owned(&["-NoProfile", "-File"])),
+        "cmd" | "bat" => ("cmd", owned(&["/d", "/c"])),
+        "sh" => ("sh", Vec::new()),
+        "py" if cfg!(windows) => ("py", Vec::new()),
+        "py" => ("python3", Vec::new()),
+        _ => return (script.to_owned(), Vec::new()),
+    };
+    let mut arguments = before;
+    arguments.push(script.to_owned());
+    (program.to_owned(), arguments)
 }
 
 /// a checked manifest and the directory its paths are relative to.

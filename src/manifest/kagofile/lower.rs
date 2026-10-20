@@ -18,8 +18,9 @@ use crate::manifest::schema::{
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, Change, Check, Command, Detect, Edit, Expect, Field, FieldKind, FirewallRule, InputPage,
-    Place, Prerequisite, Run, RunAt, Setting, Sign, SignKey, TIMESTAMP, Value, parse_color,
+    Brand, BuildStep, Change, Check, Command, Detect, Edit, Expect, Field, FieldKind, FirewallRule,
+    InputPage, Place, Prerequisite, Run, RunAt, Setting, Sign, SignKey, TIMESTAMP, Value,
+    parse_color,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -68,7 +69,7 @@ pub struct Lowered {
     pub changes: Vec<Change>,
     pub expects: Vec<Expect>,
     pub runs: Vec<Run>,
-    pub build: Vec<Command>,
+    pub build: Vec<BuildStep>,
     pub inputs: Vec<InputPage>,
 }
 
@@ -187,7 +188,7 @@ struct Lower<'a> {
     paths: Vec<Spanned<RawPath>>,
     requirements: Vec<RawRequirement>,
     runs: Vec<Run>,
-    build: Vec<Command>,
+    build: Vec<BuildStep>,
     inputs: Vec<InputPage>,
     services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
@@ -282,13 +283,7 @@ impl Lower<'_> {
             "prerequisite" => self.prerequisite(node),
             "update" => self.update(node),
             "page" => self.page(node),
-            "build" => {
-                self.no_children(node);
-                match invocation(node.args()) {
-                    Some(step) => self.build.push(step),
-                    None => self.syntax(node.at(), "expected `build <program> [arguments...]`"),
-                }
-            }
+            "build" => self.build_block(node),
             name if self.actions.contains_key(name) => self.call(node, &Scope::default(), true),
             _ => self.item(node, &Scope::default()),
         }
@@ -593,6 +588,78 @@ impl Lower<'_> {
             return None;
         }
         Some(Field { required, ..field })
+    }
+
+    /// `build <program> [arguments]` or `build script <file> [arguments]`,
+    /// or `build` with such lines under it, which `when` blocks may hold.
+    fn build_block(&mut self, node: &Node) {
+        if node.args().is_empty() && node.children.is_empty() {
+            return self.syntax(
+                node.at(),
+                "expected `build <program> [arguments]`, `build script <file>`, or lines under `build`",
+            );
+        }
+        if !node.args().is_empty() {
+            if let Some(child) = node.children.first() {
+                return self.syntax(
+                    child.at(),
+                    "put every step under `build`, or one on its line",
+                );
+            }
+            self.build_step(node.args(), node.at(), &[]);
+            return;
+        }
+        self.build_lines(&node.children, &[]);
+    }
+
+    fn build_lines(&mut self, lines: &[Node], when: &[Word]) {
+        for line in lines {
+            if line.keyword() == "when" {
+                if line.args().is_empty() {
+                    self.syntax(line.at(), "expected `when <os|arch|libc|format>...`");
+                }
+                let inner: Vec<Word> = when.iter().chain(line.args()).cloned().collect();
+                self.build_lines(&line.children, &inner);
+            } else {
+                self.no_children(line);
+                self.build_step(&line.words, line.at(), when);
+            }
+        }
+    }
+
+    /// one step from its words: `script <file> [arguments]` or
+    /// `<program> [arguments]`.
+    fn build_step(&mut self, words: &[Word], at: usize, when: &[Word]) {
+        let (script, words) = match words {
+            [first, rest @ ..] if first.text == "script" && !first.quoted => (true, rest),
+            _ => (false, words),
+        };
+        let Some(command) = invocation(words) else {
+            return self.syntax(at, "expected `script <file> [arguments]`");
+        };
+        if script && !self.base.join(&command.program).is_file() {
+            self.error(
+                diagnostic::MANIFEST_REFERENCE,
+                at,
+                format!(
+                    "build script {} does not exist",
+                    self.base.join(&command.program).display()
+                ),
+            );
+            return;
+        }
+        let when = self.when(&Scope::default(), when);
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
+        self.build.push(BuildStep {
+            command,
+            script,
+            when,
+        });
     }
 
     /// `expect <file> ["message"]`: the build fails unless the file is

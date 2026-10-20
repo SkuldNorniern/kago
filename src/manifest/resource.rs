@@ -148,6 +148,15 @@ pub struct Command {
     pub arguments: Vec<String>,
 }
 
+/// one `build` step: a program, or a script run by the program its
+/// extension calls for, only for the targets `when` picks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildStep {
+    pub command: Command,
+    pub script: bool,
+    pub when: Selector,
+}
+
 /// `run`: a program started at install or uninstall. `undo` takes back
 /// what it did, on rollback and at uninstall.
 #[derive(Debug, Clone, PartialEq, Eq)]

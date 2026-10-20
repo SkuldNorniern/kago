@@ -32,7 +32,7 @@ pub use policy::{
 };
 pub use prerequisite::Prerequisite;
 pub use resource::{
-    Command, Component, Expect, File, Icon, Ownership, PathEntry, PathKind, PathSource,
+    BuildStep, Command, Component, Expect, File, Icon, Ownership, PathEntry, PathKind, PathSource,
     Requirement, RequirementKind, RequirementPolicy, ResourceScope, Run, RunAt, Service,
     ServiceRestart, ServiceStart, Shortcut, ShortcutLocation,
 };
@@ -65,7 +65,7 @@ pub struct Manifest {
     /// programs started at install or uninstall.
     pub runs: Vec<Run>,
     /// what `kago build` runs first to make the files, in order.
-    pub build: Vec<Command>,
+    pub build: Vec<BuildStep>,
     /// setup pages of the package's own, with fields to fill in.
     pub inputs: Vec<InputPage>,
     pub requirements: Vec<Requirement>,
@@ -434,11 +434,42 @@ page other \"Other\"
         ));
         assert!(codes.is_empty(), "{codes:?}");
         let build = m.unwrap().build;
-        assert_eq!(build[0].program, "python");
-        assert_eq!(build[0].arguments, ["-m", "PyInstaller", "app.spec"]);
-        assert_eq!(build[1].program, "cargo");
+        assert_eq!(build[0].command.program, "python");
+        assert_eq!(
+            build[0].command.arguments,
+            ["-m", "PyInstaller", "app.spec"]
+        );
+        assert_eq!(build[1].command.program, "cargo");
+        assert!(!build[0].script && build[0].when.is_always());
         let (_, codes) = check(&with("build\n"));
         assert_eq!(codes, vec![diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
+    fn build_blocks_hold_scripts_and_when() {
+        let dir = std::env::temp_dir().join(format!("kago-build-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools/driver.ps1"), "").unwrap();
+        let src = format!(
+            "{AUREA}build\n  cargo build --release\n  when windows\n    script tools/driver.ps1 -Release\n"
+        );
+        let (m, d) = Manifest::parse_in("Kagofile", &src, &dir);
+        assert!(!d.has_errors(), "{d:?}");
+        let build = m.unwrap().build;
+        assert_eq!(build.len(), 2);
+        assert!(build[1].script);
+        assert_eq!(build[1].command.program, "tools/driver.ps1");
+        assert_eq!(build[1].command.arguments, ["-Release"]);
+        let windows = Context::target("windows-x86_64".parse().unwrap());
+        let linux = Context::target("linux-x86_64".parse().unwrap());
+        assert!(build[1].when.matches(&windows) && !build[1].when.matches(&linux));
+        let (_, d) = Manifest::parse_in(
+            "Kagofile",
+            &format!("{AUREA}build script missing.sh\n"),
+            &dir,
+        );
+        assert!(d.iter().any(|d| d.code == diagnostic::MANIFEST_REFERENCE));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -129,14 +129,27 @@ Install paths start with a root:
 
 File paths may use `${version}`, `${name}`, `${id}`, `${os}`, `${arch}`, `${target}`, `${triple}` (like `x86_64-pc-windows-msvc`) and `${exe}` (`.exe` on Windows).
 
-### build lines
+### build steps
+
+`kago build` runs these first, so the setup always holds what you just built:
 
 ```
-build cargo build --release
-build python -m PyInstaller --noconfirm --windowed --name tool main.py
+build cargo build --release                      # one step on its line
+
+build                                            # or several under it
+  python -m PyInstaller --noconfirm --windowed --name tool main.py
+  script tools/build-driver.ps1 -Release        # a script of your own
+  when windows
+    script tools/sign-driver.cmd
+  when linux
+    script tools/build-driver.sh
 ```
 
-`kago build` runs these in order from the Kagofile's folder before it packs the setup, and stops when one fails. `kago build --no-build` skips them. A program is started directly, not through a shell; for `npm`, which is `npm.cmd` on Windows, write `build cmd /c npm run build`.
+- Steps run in order from the Kagofile's folder, and the build stops at the first one that fails. `kago build --no-build` skips them, to pack what is there.
+- `script` picks the program by the file's extension: `.ps1` PowerShell, `.cmd` and `.bat` cmd, `.sh` sh, `.py` Python (`py` on Windows). Other files run as they are. `kago check` says when a script is missing.
+- `when` limits steps to some targets, like any `when` block.
+- Every step gets `KAGO_PACKAGE`, `KAGO_NAME`, `KAGO_VERSION`, `KAGO_TARGET` and `KAGO_OUT` (the folder the setup goes to) in its environment.
+- A program starts directly, not through a shell; for `npm`, which is `npm.cmd` on Windows, write `cmd /c npm run build`.
 
 ### sources
 
