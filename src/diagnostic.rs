@@ -107,6 +107,21 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// as JSON, for `--json` output.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "code": self.code.to_string(),
+            "severity": self.severity.to_string(),
+            "message": self.message,
+            "file": self.location.as_ref().map(|l| &l.file),
+            "line": self.location.as_ref().map(|l| l.line),
+            "column": self.location.as_ref().map(|l| l.column),
+            "target": self.target.map(|t| t.to_string()),
+            "help": self.help,
+        })
+    }
+
     #[must_use]
     pub fn error(code: Code, message: impl Into<String>) -> Self {
         Self::new(code, Severity::Error, message.into())

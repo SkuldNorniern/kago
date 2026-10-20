@@ -413,6 +413,33 @@ impl InstallPlan {
         })
     }
 
+    /// what in this plan needs administrator rights, in words; empty when
+    /// it installs without them.
+    #[must_use]
+    pub fn admin_reasons(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.scope == Scope::Machine {
+            out.push("installing for everyone, into Program Files".to_owned());
+        }
+        for op in &self.operations {
+            match op {
+                Operation::AllowThroughFirewall { name, .. } => {
+                    out.push(format!("firewall rule {name}"));
+                }
+                Operation::InstallService {
+                    id,
+                    scope: Scope::Machine,
+                    ..
+                } => out.push(format!("Windows service {id}")),
+                _ => {}
+            }
+        }
+        for p in self.prerequisites.iter().filter(|p| p.admin) {
+            out.push(format!("prerequisite {}, when it is missing", p.name));
+        }
+        out
+    }
+
     /// the answers to remember for an update: all but secret ones.
     #[must_use]
     pub fn kept_answers(&self) -> BTreeMap<String, String> {
@@ -1125,10 +1152,14 @@ mod tests {
         let open = format!("{AUREA}firewall main-executable\n");
         let (plan, d) = build(&open);
         assert!(d.is_empty(), "{d:?}");
-        assert!(plan.unwrap().operations.iter().any(|op| matches!(
+        let plan = plan.unwrap();
+        assert!(plan.operations.iter().any(|op| matches!(
             op,
             Operation::AllowThroughFirewall { name, .. } if name == "Aurea"
         )));
+        assert_eq!(plan.admin_reasons(), ["firewall rule Aurea"]);
+        let everyone = plan.in_scope(Scope::Machine).unwrap().admin_reasons();
+        assert_eq!(everyone[0], "installing for everyone, into Program Files");
         let fixed = open.replace("scope choose", "scope user");
         let (plan, d) = build(&fixed);
         assert!(plan.is_none());

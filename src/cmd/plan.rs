@@ -20,7 +20,32 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     let Some((_, plan)) = build(args, target, false)? else {
         return Ok(ExitCode::FAILURE);
     };
+    let admin = plan.admin_reasons();
+    if args.flag("--json") {
+        let report = serde_json::json!({ "plan": plan, "admin": admin });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
     print!("{plan}");
+    println!();
+    if admin.is_empty() {
+        println!("administrator rights: not needed");
+    } else {
+        println!("administrator rights: needed for");
+        for reason in &admin {
+            println!("  {reason}");
+        }
+    }
+    if plan.scope_open {
+        let other = match plan.scope {
+            Scope::Machine => Scope::User,
+            Scope::User => Scope::Machine,
+        };
+        println!("  (picking {other} at install changes this; see --scope {other})");
+    }
     println!("\nno changes made.");
     Ok(ExitCode::SUCCESS)
 }

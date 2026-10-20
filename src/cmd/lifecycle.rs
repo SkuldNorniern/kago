@@ -162,17 +162,38 @@ pub fn status(args: &Args) -> Result<ExitCode, String> {
         Some(_) => vec![scope(args)?],
         None => vec![Scope::User, Scope::Machine],
     };
-    let mut any = false;
+    let mut found = Vec::new();
     for scope in scopes {
         let Ok((_, store)) = open(scope) else {
             continue;
         };
-        for r in store.receipts().unwrap_or_default() {
-            any = true;
-            println!("{} {} ({}) {}", r.package, r.version, r.scope, r.name);
-        }
+        found.extend(store.receipts().unwrap_or_default());
     }
-    if !any {
+    if args.flag("--json") {
+        let list: Vec<serde_json::Value> = found
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "package": r.package.as_str(),
+                    "name": r.name,
+                    "version": r.version.to_string(),
+                    "scope": r.scope.to_string(),
+                    "components": r.components,
+                    "location": r.roots.get(&kago::manifest::Root::App),
+                    "update": r.update,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    for r in &found {
+        println!("{} {} ({}) {}", r.package, r.version, r.scope, r.name);
+    }
+    if found.is_empty() {
         println!("nothing installed");
     }
     Ok(ExitCode::SUCCESS)

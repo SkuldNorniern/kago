@@ -23,15 +23,16 @@ commands:
   init [dir] [--id <package-id>] [--force]
                 write a starter Kagofile, filled in from Cargo.toml,
                 pyproject.toml or package.json
-  check [manifest] [--target <target>]...
+  check [manifest] [--target <target>]... [--json]
                 validate the Kagofile and resolve it for each target
                 (default: the host)
   inspect <setup.exe> [--plan] [--json]
                 what a built setup holds: package, components, pages,
                 prerequisites; --plan lists every step it would take
   plan [manifest] [--target <target>] [--scope user|machine]
-       [--components <a,b>]
-                print what an install would do, without doing it
+       [--components <a,b>] [--json]
+                print what an install would do and what of it needs
+                administrator rights, without doing it
   build [manifest] [--target <target>] [--scope user|machine]
         [--components <a,b>] [--out <dir>] [--no-sign] [--no-build]
                 run the Kagofile's `build` lines, then build the setup
@@ -45,7 +46,7 @@ commands:
                 remove everything the install owns
   verify <package-id> [--scope user|machine]
                 check installed files against the receipt
-  status [--scope user|machine]
+  status [--scope user|machine] [--json]
                 list installed packages
   recover [--scope user|machine]
                 finish or roll back installs a crash left behind
@@ -68,13 +69,12 @@ pub fn run() -> ExitCode {
     };
     let result = match command {
         "init" => Args::parse_with(rest, &["--id"], &["--force"]).and_then(|a| init::run(&a)),
-        "check" => Args::parse(rest, &["--target"]).and_then(|a| check::run(&a)),
+        "check" => Args::parse_with(rest, &["--target"], &["--json"]).and_then(|a| check::run(&a)),
         "inspect" => {
             Args::parse_with(rest, &[], &["--plan", "--json"]).and_then(|a| inspect::run(&a))
         }
-        "plan" => {
-            Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
-        }
+        "plan" => Args::parse_with(rest, &["--target", "--scope", "--components"], &["--json"])
+            .and_then(|a| plan::run(&a)),
         "build" => Args::parse_with(
             rest,
             &["--target", "--scope", "--components", "--out"],
@@ -85,7 +85,9 @@ pub fn run() -> ExitCode {
             .and_then(|a| lifecycle::install(&a)),
         "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
-        "status" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::status(&a)),
+        "status" => {
+            Args::parse_with(rest, &["--scope"], &["--json"]).and_then(|a| lifecycle::status(&a))
+        }
         "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
         "update" => {
             Args::parse_with(rest, &[], &["--check", "--silent"]).and_then(|a| update::run(&a))
