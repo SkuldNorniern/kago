@@ -2,6 +2,7 @@ mod args;
 mod build;
 mod check;
 mod init;
+mod inspect;
 mod lifecycle;
 mod plan;
 pub mod setup;
@@ -25,6 +26,9 @@ commands:
   check [manifest] [--target <target>]...
                 validate the Kagofile and resolve it for each target
                 (default: the host)
+  inspect <setup.exe> [--plan] [--json]
+                what a built setup holds: package, components, pages,
+                prerequisites; --plan lists every step it would take
   plan [manifest] [--target <target>] [--scope user|machine]
        [--components <a,b>]
                 print what an install would do, without doing it
@@ -65,6 +69,9 @@ pub fn run() -> ExitCode {
     let result = match command {
         "init" => Args::parse_with(rest, &["--id"], &["--force"]).and_then(|a| init::run(&a)),
         "check" => Args::parse(rest, &["--target"]).and_then(|a| check::run(&a)),
+        "inspect" => {
+            Args::parse_with(rest, &[], &["--plan", "--json"]).and_then(|a| inspect::run(&a))
+        }
         "plan" => {
             Args::parse(rest, &["--target", "--scope", "--components"]).and_then(|a| plan::run(&a))
         }
