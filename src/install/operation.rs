@@ -83,6 +83,11 @@ pub enum Operation {
         name: String,
         program: SemanticPath,
         public: bool,
+        /// only this protocol, on `ports` when given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol: Option<crate::manifest::Protocol>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        ports: String,
     },
 }
 
@@ -132,13 +137,20 @@ impl fmt::Display for Operation {
                 name,
                 program,
                 public,
+                protocol,
+                ports,
             } => {
                 let networks = if *public {
                     "all networks"
                 } else {
                     "private networks"
                 };
-                write!(f, "firewall  {name} -> {program} ({networks})")
+                let only = match (protocol, ports.is_empty()) {
+                    (Some(p), true) => format!(", {p} only"),
+                    (Some(p), false) => format!(", {p} {ports}"),
+                    (None, _) => String::new(),
+                };
+                write!(f, "firewall  {name} -> {program} ({networks}{only})")
             }
         }
     }

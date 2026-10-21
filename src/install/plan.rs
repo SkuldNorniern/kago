@@ -482,15 +482,17 @@ impl InstallPlan {
     /// fixed and `scope` is not it.
     #[must_use]
     pub fn in_scope(&self, scope: Scope) -> Option<Self> {
-        if scope == self.scope {
-            return Some(self.clone());
-        }
-        if !self.scope_open {
+        if scope != self.scope && !self.scope_open {
             return None;
         }
         let operations = self
             .operations
             .iter()
+            // just for one person there are no rights to add a firewall
+            // rule; the plan says so by leaving it out.
+            .filter(|op| {
+                scope == Scope::Machine || !matches!(op, Operation::AllowThroughFirewall { .. })
+            })
             .map(|op| match op {
                 Operation::AddPathEntry { directory, .. } => Operation::AddPathEntry {
                     directory: directory.clone(),
@@ -584,9 +586,20 @@ impl Steps {
         scope_open: bool,
         diagnostics: &mut Diagnostics,
     ) {
+        let mut names = BTreeSet::new();
         for rule in &manifest.firewall {
             if !resolved.components.contains(rule.component.as_deref()) {
                 continue;
+            }
+            if scope_open {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        diagnostic::TARGET_CAPABILITY,
+                        "an install just for one person cannot add a firewall rule; Windows asks the first time the program listens",
+                    )
+                    .at(rule.at.clone())
+                    .help("installs for everyone add it"),
+                );
             }
             if scope == Scope::User && !scope_open {
                 diagnostics.push(
@@ -621,10 +634,23 @@ impl Steps {
                     format!("{} {}", manifest.package.name, rule.app)
                 }
             });
+            if !names.insert(name.clone()) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_DUPLICATE,
+                        format!("two firewall rules are called `{name}`"),
+                    )
+                    .at(rule.at.clone())
+                    .help("give one its own name, like `firewall <app> \"Name\"`"),
+                );
+                continue;
+            }
             let op = Operation::AllowThroughFirewall {
                 name,
                 program,
                 public: rule.public,
+                protocol: rule.protocol,
+                ports: rule.ports.clone(),
             };
             self.push(op, rule.component.clone());
         }
@@ -1156,8 +1182,21 @@ mod tests {
         };
         let open = format!("{AUREA}firewall main-executable\n");
         let (plan, d) = build(&open);
-        assert!(d.is_empty(), "{d:?}");
+        // the person may pick an install just for them, which cannot add it.
+        assert_eq!(
+            d.iter().map(|d| d.severity).collect::<Vec<_>>(),
+            [crate::diagnostic::Severity::Warning]
+        );
         let plan = plan.unwrap();
+        assert!(
+            !plan
+                .in_scope(Scope::User)
+                .unwrap()
+                .operations
+                .iter()
+                .any(|op| matches!(op, Operation::AllowThroughFirewall { .. })),
+            "a plan just for one person leaves it out"
+        );
         assert!(plan.operations.iter().any(|op| matches!(
             op,
             Operation::AllowThroughFirewall { name, .. } if name == "Aurea"
@@ -1165,6 +1204,10 @@ mod tests {
         assert_eq!(plan.admin_reasons(), ["firewall rule Aurea"]);
         let everyone = plan.in_scope(Scope::Machine).unwrap().admin_reasons();
         assert_eq!(everyone[0], "installing for everyone, into Program Files");
+        let twice = format!("{open}firewall main-executable udp 9000\n");
+        let (plan, d) = build(&twice);
+        assert!(plan.is_none());
+        assert!(d.iter().any(|d| d.code == diagnostic::MANIFEST_DUPLICATE));
         let fixed = open.replace("scope choose", "scope user");
         let (plan, d) = build(&fixed);
         assert!(plan.is_none());

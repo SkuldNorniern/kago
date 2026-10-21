@@ -117,8 +117,8 @@ pub trait Platform {
     /// # Errors
     ///
     /// when the firewall cannot be read here.
-    fn firewall_rule(&self, name: &str) -> Result<Option<Firewall>, String> {
-        let _ = name;
+    fn firewall_rule(&self, name: &str, group: &str) -> Result<Option<Firewall>, String> {
+        let _ = (name, group);
         Err("firewall rules are Windows-only for now".to_owned())
     }
 
@@ -423,6 +423,11 @@ pub struct WindowsService {
 pub struct Firewall {
     pub program: PathBuf,
     pub public: bool,
+    /// only this protocol, on `ports` when given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<crate::manifest::Protocol>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ports: String,
 }
 
 /// held while this process is the only setup or uninstaller working on
@@ -595,7 +600,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_missing_firewall_rule_reads_as_none() {
-        assert_eq!(windows::firewall::rule("kago test: no such rule"), Ok(None));
+        assert_eq!(
+            windows::firewall::rule("kago test: no such rule", "kago test"),
+            Ok(None)
+        );
     }
 
     #[cfg(windows)]

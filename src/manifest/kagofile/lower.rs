@@ -1066,29 +1066,41 @@ impl Lower<'_> {
     /// `firewall <app> ["Rule name"] [public]`.
     fn firewall_rule(&mut self, node: &Node, scope: &Scope) {
         self.no_children(node);
+        let usage = "expected `firewall <app> [\"Rule name\"] [public] [tcp|udp [ports]]`";
         let [app, rest @ ..] = node.args() else {
-            self.syntax(
-                node.at(),
-                "expected `firewall <app> [\"Rule name\"] [public]`",
-            );
-            return;
+            return self.syntax(node.at(), usage);
         };
         let mut name = None;
         let mut public = false;
-        for word in rest {
+        let mut protocol = None;
+        let mut ports = String::new();
+        let mut words = rest.iter().peekable();
+        while let Some(word) = words.next() {
             match word.text.as_str() {
                 "public" if !word.quoted => public = true,
-                _ if name.is_none() => name = Some(word.text.clone()),
-                _ => self.syntax(
-                    word.at,
-                    "expected `firewall <app> [\"Rule name\"] [public]`",
-                ),
+                "tcp" | "udp" if !word.quoted && protocol.is_none() => {
+                    protocol = word.text.parse().ok();
+                    // the ports, when the next word is a port list.
+                    if let Some(next) = words.peek()
+                        && next.text.starts_with(|c: char| c.is_ascii_digit())
+                    {
+                        if let Err(e) = crate::manifest::check_ports(&next.text) {
+                            return self.error(diagnostic::MANIFEST_VALUE, next.at, e);
+                        }
+                        next.text.clone_into(&mut ports);
+                        words.next();
+                    }
+                }
+                _ if name.is_none() && word.quoted => name = Some(word.text.clone()),
+                _ => return self.syntax(word.at, usage),
             }
         }
         self.firewall.push(FirewallRule {
             app: app.text.clone(),
             name,
             public,
+            protocol,
+            ports,
             component: scope.component.as_ref().map(|c| c.get_ref().clone()),
             at: Location::at(self.file, self.source, node.at()),
         });

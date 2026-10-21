@@ -22,7 +22,7 @@ use std::path::Path;
 pub use brand::{Brand, parse_color};
 pub use change::{Change, Edit, Place, Value};
 pub use check::{Check, Detect};
-pub use firewall::FirewallRule;
+pub use firewall::{FirewallRule, Protocol, check_ports};
 pub use input::{Field, FieldKind, InputPage, Problem};
 pub(crate) use path::valid_segment;
 pub use path::{PathError, Root, SemanticPath};
@@ -448,6 +448,30 @@ page other \"Other\"
                 m.is_none() && codes == [diagnostic::MANIFEST_VALUE],
                 "{bad}"
             );
+        }
+    }
+
+    #[test]
+    fn firewall_rules_narrow_to_a_protocol_and_ports() {
+        let (m, codes) = check(&with(
+            "firewall main-executable\nfirewall main-executable \"Aurea link\" tcp 7000,7001 public\nfirewall main-executable \"Aurea discovery\" udp\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let rules = m.unwrap().firewall;
+        assert_eq!(rules[0].protocol, None);
+        assert_eq!(rules[1].protocol, Some(Protocol::Tcp));
+        assert_eq!(rules[1].ports, "7000,7001");
+        assert!(rules[1].public);
+        assert_eq!(rules[2].protocol, Some(Protocol::Udp));
+        assert_eq!(rules[2].ports, "");
+        for bad in [
+            "firewall main-executable tcp 70000\n",
+            "firewall main-executable tcp 9010-9000\n",
+            "firewall main-executable tcp 1 udp 2\n",
+            "firewall main-executable sideways\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(m.is_none() && !codes.is_empty(), "{bad}");
         }
     }
 

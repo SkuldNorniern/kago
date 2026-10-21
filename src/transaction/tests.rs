@@ -163,7 +163,11 @@ impl Platform for Fake {
         Ok(())
     }
 
-    fn firewall_rule(&self, name: &str) -> Result<Option<crate::platform::Firewall>, String> {
+    fn firewall_rule(
+        &self,
+        name: &str,
+        _: &str,
+    ) -> Result<Option<crate::platform::Firewall>, String> {
         Ok(self.firewall.borrow().get(name).cloned())
     }
 

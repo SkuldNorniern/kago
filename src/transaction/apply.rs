@@ -355,11 +355,7 @@ impl Run<'_> {
                 scope: Scope::Machine,
                 ..
             } => self.windows_service(op),
-            Operation::AllowThroughFirewall {
-                name,
-                program,
-                public,
-            } => self.firewall(name, program, *public),
+            Operation::AllowThroughFirewall { .. } => self.firewall(op),
             Operation::Change { place, edit, value } => self.change(place, *edit, value),
         }
     }
@@ -528,19 +524,36 @@ impl Run<'_> {
 
     /// a firewall rule for one of the package's programs. per user there is
     /// no right to add one; Windows asks when the program first listens.
-    fn firewall(&mut self, name: &str, program: &SemanticPath, public: bool) -> Result<(), Error> {
+    fn firewall(&mut self, op: &Operation) -> Result<(), Error> {
+        let Operation::AllowThroughFirewall {
+            name,
+            program,
+            public,
+            protocol,
+            ports,
+        } = op
+        else {
+            return Ok(());
+        };
         if self.plan.scope == Scope::User {
             return Ok(());
         }
-        let program = self.resolve(program)?;
+        let rule = crate::platform::Firewall {
+            program: self.resolve(program)?,
+            public: *public,
+            protocol: *protocol,
+            ports: ports.clone(),
+        };
         let group = self.plan.package.to_string();
-        let previous = self.platform.firewall_rule(name).map_err(Error::Other)?;
+        let previous = self
+            .platform
+            .firewall_rule(name, &group)
+            .map_err(Error::Other)?;
         self.step(Undo::RestoreFirewallRule {
             name: name.to_owned(),
             group: group.clone(),
             previous,
         })?;
-        let rule = crate::platform::Firewall { program, public };
         self.platform
             .set_firewall_rule(name, &group, Some(&rule))
             .map_err(Error::Other)?;

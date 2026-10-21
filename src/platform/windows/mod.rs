@@ -186,8 +186,8 @@ impl Platform for Windows {
         }
     }
 
-    fn firewall_rule(&self, name: &str) -> Result<Option<super::Firewall>, String> {
-        firewall::rule(name)
+    fn firewall_rule(&self, name: &str, group: &str) -> Result<Option<super::Firewall>, String> {
+        firewall::rule(name, group)
     }
 
     fn set_firewall_rule(
