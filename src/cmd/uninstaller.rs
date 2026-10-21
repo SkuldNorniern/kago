@@ -65,7 +65,12 @@ fn start(exe: &Path, (silent, purge): (bool, bool)) -> ExitCode {
                 .receipts()
                 .unwrap_or_default()
                 .into_iter()
-                .find(|r| r.roots.get(&Root::App).is_some_and(|app| app == dir));
+                // the folder may be written in other case than it was installed.
+                .find(|r| {
+                    r.roots
+                        .get(&Root::App)
+                        .is_some_and(|app| app.as_os_str().eq_ignore_ascii_case(dir))
+                });
             if let Some(receipt) = here {
                 return Ok((receipt.package, scope));
             }
