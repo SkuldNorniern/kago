@@ -4,7 +4,7 @@ use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, WIN32_ERROR};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ,
     REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE, RegCloseKey, RegCreateKeyExW, RegDeleteTreeW,
-    RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    RegDeleteValueW, RegOpenKeyExW, RegQueryInfoKeyW, RegQueryValueExW, RegSetValueExW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -189,6 +189,30 @@ impl Key {
         check(e, "cannot write registry value", name)
     }
 
+    /// whether the key holds no values and no keys.
+    pub fn is_empty(&self) -> Result<bool, String> {
+        let (mut keys, mut values) = (0u32, 0u32);
+        // SAFETY: the key is open; only the two counts are asked for.
+        let e = unsafe {
+            RegQueryInfoKeyW(
+                self.0,
+                None,
+                None,
+                None,
+                Some(&raw mut keys),
+                None,
+                None,
+                Some(&raw mut values),
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        check(e, "cannot read registry key", "")?;
+        Ok(keys == 0 && values == 0)
+    }
+
     /// removes one value; missing is fine.
     pub fn delete_value(&self, name: &str) -> Result<(), String> {
         // SAFETY: the key is open and the name lives across the call.
@@ -254,10 +278,12 @@ pub fn set_value(
     value: Option<&serde_json::Value>,
 ) -> Result<(), String> {
     let Some(value) = value else {
-        return match Key::open(hive_of(machine), key)? {
-            Some(k) => k.delete_value(name),
-            None => Ok(()),
-        };
+        if let Some(k) = Key::open(hive_of(machine), key)? {
+            k.delete_value(name)?;
+            drop(k);
+            prune(machine, key)?;
+        }
+        return Ok(());
     };
     let k = Key::create(hive_of(machine), key)?;
     match value {
@@ -272,6 +298,28 @@ pub fn set_value(
         }
         other => Err(format!("{name}: {other} cannot go in the registry")),
     }
+}
+
+/// deletes `key` when nothing is left in it, then each parent that is
+/// left empty by that, but never the first two levels, like
+/// `Software\Classes`.
+fn prune(machine: bool, key: &str) -> Result<(), String> {
+    let mut path = key.trim_matches('\\').to_owned();
+    while path.matches('\\').count() >= 2 {
+        let empty = match Key::open_read(hive_of(machine), &path)? {
+            Some(k) => k.is_empty()?,
+            None => true,
+        };
+        if !empty {
+            break;
+        }
+        delete_tree(hive_of(machine), &path)?;
+        let Some((parent, _)) = path.rsplit_once('\\') else {
+            break;
+        };
+        path = parent.to_owned();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

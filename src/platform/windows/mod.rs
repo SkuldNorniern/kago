@@ -151,7 +151,13 @@ impl Platform for Windows {
         match slot {
             Slot::Json { file, key } => super::json::set(file, key, value.map(|v| &v.0)),
             Slot::Registry { machine, key, name } => {
-                registry::set_value(*machine, key, name, value.map(|v| &v.0))
+                registry::set_value(*machine, key, name, value.map(|v| &v.0))?;
+                // a file type or URL protocol: Explorer shows the change
+                // without a restart.
+                if key.to_ascii_lowercase().starts_with(r"software\classes") {
+                    shortcut::associations_changed();
+                }
+                Ok(())
             }
             Slot::Environment { machine, name } => {
                 let text = value.map(ToString::to_string);

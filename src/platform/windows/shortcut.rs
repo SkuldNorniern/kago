@@ -92,3 +92,11 @@ mod tests {
         assert_eq!(a(&["C:\\dir with space\\"]), "\"C:\\dir with space\\\\\"");
     }
 }
+
+/// tells Explorer that file types or URL protocols changed, so it shows
+/// their new icons and programs right away.
+pub fn associations_changed() {
+    use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
+    // SAFETY: no items are passed with this event.
+    unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+}
