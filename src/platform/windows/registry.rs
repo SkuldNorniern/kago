@@ -94,6 +94,27 @@ impl Key {
         Ok(Some(Self(key)))
     }
 
+    /// the type of the value `name`; `None` when it does not exist.
+    pub fn kind(&self, name: &str) -> Result<Option<REG_VALUE_TYPE>, String> {
+        let mut kind = REG_VALUE_TYPE::default();
+        // SAFETY: type query with null data, the out pointer is valid.
+        let e = unsafe {
+            RegQueryValueExW(
+                self.0,
+                &HSTRING::from(name),
+                None,
+                Some(&raw mut kind),
+                None,
+                None,
+            )
+        };
+        if e == ERROR_FILE_NOT_FOUND {
+            return Ok(None);
+        }
+        check(e, "cannot read registry value", name)?;
+        Ok(Some(kind))
+    }
+
     /// `None` when the value does not exist or is not a `REG_DWORD`.
     pub fn dword(&self, name: &str) -> Result<Option<u32>, String> {
         let name_w = HSTRING::from(name);
@@ -258,14 +279,26 @@ fn hive_of(machine: bool) -> HKEY {
 
 /// the value `name` in `key`: a `REG_DWORD` as a number, a string as
 /// text. `None` when it or the key is missing.
+///
+/// # Errors
+///
+/// when it holds another type, like binary data: kago could not put it
+/// back, so it must not change it.
 pub fn value(machine: bool, key: &str, name: &str) -> Result<Option<serde_json::Value>, String> {
-    let Some(key) = Key::open_read(hive_of(machine), key)? else {
+    let Some(k) = Key::open_read(hive_of(machine), key)? else {
         return Ok(None);
     };
-    if let Some(n) = key.dword(name)? {
-        return Ok(Some(n.into()));
+    match k.kind(name)? {
+        None => Ok(None),
+        Some(REG_DWORD) => Ok(k.dword(name)?.map(Into::into)),
+        Some(kind) if kind == REG_SZ || kind == REG_EXPAND_SZ => {
+            Ok(k.text(name)?.map(|t| t.value.into()))
+        }
+        Some(kind) => Err(format!(
+            r"{key}\{name} holds a registry value of type {}, which kago cannot put back; it is left as it is",
+            kind.0
+        )),
     }
-    Ok(key.text(name)?.map(|t| t.value.into()))
 }
 
 /// writes the value `name` in `key`, making the key when missing: a
@@ -287,7 +320,11 @@ pub fn set_value(
     };
     let k = Key::create(hive_of(machine), key)?;
     match value {
-        serde_json::Value::String(s) => k.set_text(name, s, false),
+        // a value that expands `%VARIABLES%` keeps doing so.
+        serde_json::Value::String(s) => {
+            let expand = k.kind(name)? == Some(REG_EXPAND_SZ);
+            k.set_text(name, s, expand)
+        }
         serde_json::Value::Bool(b) => k.set_dword(name, u32::from(*b)),
         serde_json::Value::Number(n) => {
             let n = n
@@ -338,6 +375,29 @@ mod tests {
         assert_eq!(read("short"), Some("ab".into()));
         assert_eq!(read("number"), Some(7.into()));
         assert_eq!(read("missing"), None);
+        let k = Key::create(HKEY_CURRENT_USER, &key).unwrap();
+        k.set_text("expand", r"%TEMP%\a", true).unwrap();
+        // SAFETY: four bytes of binary data.
+        let e = unsafe {
+            RegSetValueExW(
+                k.0,
+                &HSTRING::from("binary"),
+                None,
+                windows::Win32::System::Registry::REG_BINARY,
+                Some(&[1, 2, 3, 4]),
+            )
+        };
+        assert!(e.is_ok());
+        assert!(
+            value(false, &key, "binary").is_err(),
+            "never taken for missing"
+        );
+        set_value(false, &key, "expand", Some(&r"%TEMP%\b".into())).unwrap();
+        assert!(
+            k.text("expand").unwrap().unwrap().expand,
+            "stays expandable"
+        );
+        drop(k);
         delete_tree(HKEY_CURRENT_USER, &key).unwrap();
     }
 }
