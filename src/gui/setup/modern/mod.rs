@@ -546,7 +546,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
             false,
         )?;
         pen.fill(
-            Area::new(top.x, top.h * 0.85, top.w, top.h * 0.15 + 1.0),
+            Area::new(top.x, top.h * 0.85 - 2.0, top.w, top.h * 0.15 + 3.0),
             color::BACKGROUND,
         )?;
     }
