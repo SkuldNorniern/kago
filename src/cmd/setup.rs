@@ -41,6 +41,8 @@ struct SetupArgs {
     scope: Option<Scope>,
     /// answers to the package's own fields, by id.
     answers: std::collections::BTreeMap<String, String>,
+    /// a file of more answers, read once and deleted.
+    answers_file: Option<PathBuf>,
     /// started by the setup window with administrator rights, to install
     /// for everyone what was picked there.
     elevated: bool,
@@ -84,6 +86,11 @@ fn setup_args(args: &[String]) -> Option<Result<SetupArgs, String>> {
                 None => return Some(Err("`--set` needs <field>=<value>".to_owned())),
             },
             "--elevated" => out.elevated = true,
+            // answers the window that asked for administrator rights got.
+            "--answers" => match it.next() {
+                Some(file) => out.answers_file = Some(PathBuf::from(file)),
+                None => return Some(Err("`--answers` needs a file".to_owned())),
+            },
             _ => return None,
         }
     }
@@ -106,13 +113,27 @@ pub fn run_embedded() -> Option<ExitCode> {
     let exe = std::env::current_exe().ok()?;
     let embedded = setup::embedded(&exe).ok()??;
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let parsed = match setup_args(&args)? {
+    let mut parsed = match setup_args(&args)? {
         Ok(parsed) => parsed,
         Err(e) => {
             eprintln!("setup: {e}\n\n{SETUP_USAGE}");
             return Some(ExitCode::FAILURE);
         }
     };
+    if let Some(file) = parsed.answers_file.take() {
+        let read = fs::read_to_string(&file);
+        let _ = fs::remove_file(&file);
+        match read.map_err(|e| e.to_string()).and_then(|t| {
+            serde_json::from_str::<std::collections::BTreeMap<String, String>>(&t)
+                .map_err(|e| e.to_string())
+        }) {
+            Ok(answers) => parsed.answers.extend(answers),
+            Err(e) => {
+                eprintln!("setup: {}: {e}", file.display());
+                return Some(ExitCode::FAILURE);
+            }
+        }
+    }
     if parsed.help {
         print!("{SETUP_USAGE}");
         return Some(ExitCode::SUCCESS);
@@ -391,8 +412,23 @@ fn handoff(exe: PathBuf) -> kago::gui::setup::Elevate {
         if let Some(dir) = &picked.location {
             args.extend(["--location".to_owned(), dir.display().to_string()]);
         }
-        for (id, value) in &picked.answers {
-            args.extend(["--set".to_owned(), format!("{id}={value}")]);
+        // answers may be secret, and any program can read another's
+        // command line: they go in a file only this user can read, which
+        // the elevated setup deletes once read.
+        if !picked.answers.is_empty() {
+            let file = std::env::temp_dir().join(format!(
+                "kago-answers-{}-{}.json",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_nanos())
+            ));
+            let text = serde_json::to_string(&picked.answers)
+                .map_err(|e| kago::platform::ElevationError::Failed(e.to_string()))?;
+            fs::write(&file, text).map_err(|e| {
+                kago::platform::ElevationError::Failed(format!("{}: {e}", file.display()))
+            })?;
+            args.extend(["--answers".to_owned(), file.display().to_string()]);
         }
         platform::run_elevated(&exe, &args, false).map(|_| ())
     })
