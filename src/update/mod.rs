@@ -109,6 +109,9 @@ fn next_to(at: &str, file: &str) -> String {
 ///
 /// when the download fails or the file is not a feed.
 pub fn read(url: &str, dir: &Path) -> Result<(Feed, String), String> {
+    if !secure(url) {
+        return Err(format!("the update feed {url} is not on https"));
+    }
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let file = dir.join(FEED);
     let out = Command::new("curl")
@@ -119,6 +122,11 @@ pub fn read(url: &str, dir: &Path) -> Result<(Feed, String), String> {
             "--show-error",
             "--write-out",
             "%{url_effective}",
+            // never through plain http, not even by a redirect.
+            "--proto",
+            "=https,file",
+            "--proto-redir",
+            "=https",
             "--output",
         ])
         .arg(&file)
@@ -144,11 +152,22 @@ pub fn read(url: &str, dir: &Path) -> Result<(Feed, String), String> {
 ///
 /// when the download fails or does not match.
 pub fn download(offer: &Offer, dir: &Path) -> Result<PathBuf, String> {
+    if !secure(&offer.url) {
+        return Err(format!(
+            "the update {} is not on https; it is not downloaded",
+            offer.url
+        ));
+    }
     let file = crate::payload::fetch(&offer.url, Some(&offer.sha256), dir, "")?;
     let name = offer.url.rsplit('/').next().unwrap_or("setup.exe");
     let named = dir.join(name);
     fs::rename(&file, &named).map_err(|e| format!("{}: {e}", named.display()))?;
     Ok(named)
+}
+
+/// https, or a local file for testing feeds.
+fn secure(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("file://")
 }
 
 #[cfg(test)]
@@ -208,5 +227,16 @@ mod tests {
         let text = serde_json::to_string(&f).unwrap();
         assert!(text.contains("\"version\":\"1.2.0\""));
         assert_eq!(serde_json::from_str::<Feed>(&text).unwrap(), f);
+    }
+
+    #[test]
+    fn updates_come_over_https_only() {
+        assert!(secure(
+            "https://github.com/o/r/releases/latest/download/latest.json"
+        ));
+        assert!(secure("file:///C:/feeds/latest.json"));
+        assert!(!secure("http://example.com/latest.json"));
+        let dir = std::env::temp_dir();
+        assert!(read("http://example.com/latest.json", &dir).is_err());
     }
 }
