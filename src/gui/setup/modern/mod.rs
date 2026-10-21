@@ -92,6 +92,8 @@ struct State {
     session: Session,
     mouse: (f32, f32),
     pressed: Option<Hit>,
+    /// Enter went down in this window; it acts when it comes up.
+    enter: bool,
     hits: Vec<(Area, Hit)>,
     anim: Anim,
     /// page drawn last frame, to start the rise when it changes.
@@ -308,6 +310,23 @@ impl State {
                 self.session.wizard.type_text(text);
                 true
             }
+            // on release, and only after a press this window saw: an Enter
+            // held from whatever started the window must not confirm.
+            WindowEvent::KeyInput {
+                key: KeyCode::Enter,
+                pressed,
+                ..
+            } => {
+                if pressed {
+                    self.enter = true;
+                    return false;
+                }
+                if std::mem::take(&mut self.enter) {
+                    self.click(Hit::Primary);
+                    return true;
+                }
+                false
+            }
             WindowEvent::KeyInput {
                 key,
                 pressed: true,
@@ -336,7 +355,6 @@ impl State {
                     KeyCode::Backspace if typing && command => wizard.clear(),
                     KeyCode::Backspace if typing => wizard.erase(),
                     KeyCode::Tab if typing => self.focus_next(),
-                    KeyCode::Enter => self.click(Hit::Primary),
                     KeyCode::Escape if self.session.closable() => {
                         self.close |= self.session.act(Action::Cancel);
                     }
@@ -432,6 +450,7 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         session,
         mouse: (-1.0, -1.0),
         pressed: None,
+        enter: false,
         hits: Vec::new(),
         anim: Anim::default(),
         shown: None,

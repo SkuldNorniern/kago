@@ -24,6 +24,8 @@ struct State {
     removal: Removal,
     mouse: (f32, f32),
     pressed: Option<Hit>,
+    /// Enter went down in this window; it acts when it comes up.
+    enter: bool,
     hits: Vec<(Area, Hit)>,
     anim: Anim,
     logo: Option<Image>,
@@ -91,11 +93,27 @@ impl State {
                 self.mouse = (-1.0, -1.0);
                 true
             }
+            // on release, and only after a press this window saw: an Enter
+            // held from whatever started the window must not confirm.
+            WindowEvent::KeyInput {
+                key: KeyCode::Enter,
+                pressed,
+                ..
+            } => {
+                if pressed {
+                    self.enter = true;
+                    return false;
+                }
+                if std::mem::take(&mut self.enter) {
+                    self.click(Hit::Primary);
+                    return true;
+                }
+                false
+            }
             WindowEvent::KeyInput {
                 key, pressed: true, ..
             } => {
                 match key {
-                    KeyCode::Enter => self.click(Hit::Primary),
                     KeyCode::Escape if self.removal.closable() => self.close = true,
                     _ => return false,
                 }
@@ -133,6 +151,7 @@ pub(in crate::gui::setup) fn run(
         removal,
         mouse: (-1.0, -1.0),
         pressed: None,
+        enter: false,
         hits: Vec::new(),
         anim: Anim::default(),
         logo,
