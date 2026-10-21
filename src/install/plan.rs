@@ -290,12 +290,18 @@ impl InstallPlan {
             .filter(|c| !on.contains(c.id.as_str()))
             .flat_map(|c| c.operations.iter().copied())
             .collect();
+        // just for one person there are no rights to add a firewall rule;
+        // the plan says so by leaving it out.
         let kept: Vec<Operation> = self
             .operations
             .iter()
             .enumerate()
             .filter(|(i, _)| !dropped.contains(i))
             .map(|(_, op)| op.clone())
+            .filter(|op| {
+                self.scope == Scope::Machine
+                    || !matches!(op, Operation::AllowThroughFirewall { .. })
+            })
             .collect();
         let mut needed = BTreeSet::new();
         for op in &kept {
@@ -482,17 +488,16 @@ impl InstallPlan {
     /// fixed and `scope` is not it.
     #[must_use]
     pub fn in_scope(&self, scope: Scope) -> Option<Self> {
-        if scope != self.scope && !self.scope_open {
+        if scope == self.scope {
+            return Some(self.clone());
+        }
+        if !self.scope_open {
             return None;
         }
+        // every step stays where it is: choices point at them by index.
         let operations = self
             .operations
             .iter()
-            // just for one person there are no rights to add a firewall
-            // rule; the plan says so by leaving it out.
-            .filter(|op| {
-                scope == Scope::Machine || !matches!(op, Operation::AllowThroughFirewall { .. })
-            })
             .map(|op| match op {
                 Operation::AddPathEntry { directory, .. } => Operation::AddPathEntry {
                     directory: directory.clone(),
@@ -1188,14 +1193,26 @@ mod tests {
             [crate::diagnostic::Severity::Warning]
         );
         let plan = plan.unwrap();
+        let everyone = plan.in_scope(Scope::Machine).unwrap();
+        assert_eq!(
+            everyone.operations.len(),
+            plan.operations.len(),
+            "choices point at steps by index"
+        );
         assert!(
             !plan
-                .in_scope(Scope::User)
-                .unwrap()
+                .with_defaults()
                 .operations
                 .iter()
                 .any(|op| matches!(op, Operation::AllowThroughFirewall { .. })),
             "a plan just for one person leaves it out"
+        );
+        assert!(
+            everyone
+                .with_defaults()
+                .operations
+                .iter()
+                .any(|op| matches!(op, Operation::AllowThroughFirewall { .. }))
         );
         assert!(plan.operations.iter().any(|op| matches!(
             op,
