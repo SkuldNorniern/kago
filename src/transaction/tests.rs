@@ -1098,3 +1098,22 @@ fn purge_takes_what_uninstall_kept_and_the_settings_folder() {
         "only the package's folder"
     );
 }
+
+#[test]
+fn purge_leaves_shared_files_alone() {
+    let w = World::new("purge-shared");
+    let manifest = MANIFEST.replace(
+        "copy payload/config.toml -> {config}/config.toml keep",
+        "copy payload/config.toml -> {app}/shared.toml shared",
+    );
+    let receipt = w.install(&manifest).unwrap();
+    let shared = w.app().join("shared.toml");
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(shared.is_file(), "uninstall keeps a shared file");
+    let failed = purge(&receipt, &w.fake, &done.kept);
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!(
+        shared.is_file(),
+        "purge does too: another program may use it"
+    );
+}

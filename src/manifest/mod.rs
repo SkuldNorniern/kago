@@ -442,6 +442,8 @@ page other \"Other\"
             "purge {data}\n",
             "purge C:/Users\n",
             "purge %APPDATA%/../x\n",
+            "purge %APPDATA%/.\n",
+            "purge %APPDATA%/./\n",
         ] {
             let (m, codes) = check(&with(bad));
             assert!(
@@ -464,11 +466,20 @@ page other \"Other\"
         assert!(rules[1].public);
         assert_eq!(rules[2].protocol, Some(Protocol::Udp));
         assert_eq!(rules[2].ports, "");
+        // a name without quotes, and a quoted name after the protocol.
+        let (m, codes) = check(&with(
+            "firewall main-executable AureaLink\nfirewall main-executable tcp \"3D link\"\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let rules = m.unwrap().firewall;
+        assert_eq!(rules[0].name.as_deref(), Some("AureaLink"));
+        assert_eq!(rules[1].name.as_deref(), Some("3D link"));
+        assert_eq!(rules[1].ports, "");
         for bad in [
             "firewall main-executable tcp 70000\n",
             "firewall main-executable tcp 9010-9000\n",
             "firewall main-executable tcp 1 udp 2\n",
-            "firewall main-executable sideways\n",
+            "firewall main-executable \"A\" \"B\"\n",
         ] {
             let (m, codes) = check(&with(bad));
             assert!(m.is_none() && !codes.is_empty(), "{bad}");

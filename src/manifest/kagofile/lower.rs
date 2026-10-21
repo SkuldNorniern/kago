@@ -683,7 +683,11 @@ impl Lower<'_> {
             Some(rest) => rest.split_once('%').map(|(_, after)| after),
             None => folder.text.split_once('}').map(|(_, after)| after),
         };
-        let below = after.is_some_and(|rest| rest.split(['/', '\\']).any(|s| !s.is_empty()));
+        // a real folder name, never `.`, which is the known folder itself.
+        let below = after.is_some_and(|rest| {
+            let segments: Vec<&str> = rest.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+            !segments.is_empty() && segments.iter().all(|s| *s != "." && *s != "..")
+        });
         if !below {
             return self.error(
                 diagnostic::MANIFEST_VALUE,
@@ -1082,6 +1086,7 @@ impl Lower<'_> {
                     protocol = word.text.parse().ok();
                     // the ports, when the next word is a port list.
                     if let Some(next) = words.peek()
+                        && !next.quoted
                         && next.text.starts_with(|c: char| c.is_ascii_digit())
                     {
                         if let Err(e) = crate::manifest::check_ports(&next.text) {
@@ -1091,7 +1096,7 @@ impl Lower<'_> {
                         words.next();
                     }
                 }
-                _ if name.is_none() && word.quoted => name = Some(word.text.clone()),
+                _ if name.is_none() => name = Some(word.text.clone()),
                 _ => return self.syntax(word.at, usage),
             }
         }

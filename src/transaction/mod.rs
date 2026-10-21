@@ -244,7 +244,21 @@ pub fn remove(
 pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec<String> {
     use crate::manifest::Root;
     let mut failed = Vec::new();
-    for path in kept.iter().map(Path::new).filter(|p| p.is_file()) {
+    // only the person's own: never a shared or external file another
+    // program may use.
+    let theirs: Vec<std::path::PathBuf> = receipt
+        .resources
+        .iter()
+        .filter_map(|r| match r {
+            Resource::File {
+                path,
+                ownership: Ownership::UserData | Ownership::PreserveIfModified,
+                ..
+            } => receipt.absolute(path),
+            _ => None,
+        })
+        .collect();
+    for path in theirs.iter().filter(|p| p.is_file()) {
         if let Err(e) = fs::remove_file(path) {
             failed.push(format!("{}: {e}", path.display()));
         }
