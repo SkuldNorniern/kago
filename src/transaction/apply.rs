@@ -310,6 +310,19 @@ impl Run<'_> {
         self.roots.resolve(path).map_err(Error::Other)
     }
 
+    /// [`resolve`](Self::resolve), for writing there: never through a link
+    /// another user could have made; see [`super::linked`].
+    fn real(&self, path: &SemanticPath) -> Result<PathBuf, Error> {
+        let dest = self.resolve(path)?;
+        match super::linked(self.plan.scope, &self.roots.0, path) {
+            Some(link) => Err(Error::Other(format!(
+                "{} is a link to somewhere else; an install for everyone only writes to real folders there",
+                link.display()
+            ))),
+            None => Ok(dest),
+        }
+    }
+
     fn op(&mut self, op: &Operation) -> Result<(), Error> {
         match op {
             Operation::CreateDirectory { path } => self.directory(path),
@@ -379,7 +392,7 @@ impl Run<'_> {
         else {
             return Ok(());
         };
-        let dest = self.resolve(target)?;
+        let dest = self.real(target)?;
         let earlier = self.previous.and_then(|p| {
             p.resources.iter().find_map(|r| match r {
                 Resource::File { path, replaced, .. } if path == target => Some(replaced.clone()),
@@ -714,7 +727,7 @@ impl Run<'_> {
 
     /// creates one directory and owns it, or leaves an existing one alone.
     fn directory(&mut self, path: &SemanticPath) -> Result<(), Error> {
-        let dir = self.resolve(path)?;
+        let dir = self.real(path)?;
         if dir.is_dir() {
             // an upgrade keeps owning what the older version created.
             let owned = self.previous.is_some_and(|p| {

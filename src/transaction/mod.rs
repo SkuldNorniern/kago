@@ -258,7 +258,7 @@ pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec
                 path,
                 ownership: Ownership::UserData | Ownership::PreserveIfModified,
                 ..
-            } => receipt.absolute(path),
+            } if linked(receipt.scope, &receipt.roots, path).is_none() => receipt.absolute(path),
             _ => None,
         })
         .collect();
@@ -528,6 +528,39 @@ fn revert(
     }
 }
 
+/// for everyone, the folder on the way from `path`'s root to it that is a
+/// link to somewhere else. the data roots sit in `%ProgramData%`, where
+/// any user may make folders: a link there must not lead an elevated kago
+/// to write or delete in a system folder. `None` for the app's own folder,
+/// where only administrators write, and for installs just for the user.
+pub(super) fn linked(
+    scope: Scope,
+    roots: &std::collections::BTreeMap<crate::manifest::Root, std::path::PathBuf>,
+    path: &crate::manifest::SemanticPath,
+) -> Option<std::path::PathBuf> {
+    use crate::manifest::Root;
+    if scope != Scope::Machine
+        || !matches!(
+            path.root,
+            Root::Config | Root::Data | Root::Cache | Root::Logs | Root::State
+        )
+    {
+        return None;
+    }
+    let root = roots.get(&path.root)?;
+    let mut at = root.clone();
+    let mut on_the_way = vec![root.clone()];
+    for segment in path.segments() {
+        at.push(segment);
+        on_the_way.push(at.clone());
+    }
+    // the file itself may be a link: moving or removing it never follows.
+    on_the_way.pop();
+    on_the_way
+        .into_iter()
+        .find(|dir| fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink()))
+}
+
 /// removes one file of the package, unless ownership keeps it: then
 /// where it is, to report as kept. the person's own file it replaced
 /// goes back.
@@ -545,6 +578,13 @@ fn remove_owned_file(receipt: &Receipt, file: &Resource) -> Result<Option<String
     let abs = receipt
         .absolute(path)
         .ok_or_else(|| format!("{path}: root missing from receipt"))?;
+    if let Some(link) = linked(receipt.scope, &receipt.roots, path) {
+        return Err(format!(
+            "{}: {} is a link to somewhere else, so it was left",
+            abs.display(),
+            link.display()
+        ));
+    }
     let keep = match ownership {
         Ownership::Owned | Ownership::Generated => false,
         Ownership::PreserveIfModified => hash(&abs).is_ok_and(|(_, now)| now != *sha256),

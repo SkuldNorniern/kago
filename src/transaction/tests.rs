@@ -1170,3 +1170,32 @@ fn a_file_the_person_had_comes_back_at_uninstall() {
             .exists()
     );
 }
+
+/// a junction made with `mklink /J`, which needs no administrator.
+#[cfg(windows)]
+#[test]
+fn an_install_for_everyone_never_writes_through_a_link() {
+    let w = World::new("linked");
+    let elsewhere = w.dir.join("system");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let config = w.dir.join("machine").join("config");
+    fs::create_dir_all(&config).unwrap();
+    let made = std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(config.join("App"))
+        .arg(&elsewhere)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{made:?}");
+    let plan = w.plan_in(MANIFEST, Scope::Machine);
+    let err = install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap_err();
+    assert!(err.to_string().contains("link"), "{err}");
+    assert_eq!(
+        fs::read_dir(&elsewhere).unwrap().count(),
+        0,
+        "nothing went there"
+    );
+    // just for the user, the folder is theirs to link.
+    w.install(MANIFEST).unwrap();
+    fs::remove_dir(config.join("App")).unwrap();
+}
