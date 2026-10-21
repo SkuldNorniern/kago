@@ -473,3 +473,7 @@ Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 - Linux and macOS setups, and MSI, DMG, AppImage, DEB, RPM outputs; `target` lines for them only check the Kagofile
 - building a setup for another OS or architecture than the machine running `kago build`
 - checking for updates on a schedule; the app or the person runs `kago update`
+- signed update feeds: an update is checked by the sha256 in `latest.json`, fetched over HTTPS
+- updating an install for everyone without the administrator prompt
+- delta updates: an update downloads the whole new setup
+- Homebrew and winget manifests
