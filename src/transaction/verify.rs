@@ -33,6 +33,7 @@ pub fn verify(receipt: &Receipt) -> Verified {
                 size,
                 sha256,
                 ownership,
+                ..
             } => {
                 let Some(abs) = receipt.absolute(path) else {
                     out.missing.push(path.to_string());

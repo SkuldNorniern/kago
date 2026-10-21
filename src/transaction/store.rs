@@ -12,6 +12,7 @@ use crate::receipt::Receipt;
 /// receipts/<package>.json
 /// transactions/<package>.journal
 /// transactions/<package>.backup/
+/// replaced/<package>/             files that were there before the install
 /// locks/<package>.lock
 /// bin/kago[.exe]                 runtime used by uninstall entries
 /// ```
@@ -45,6 +46,12 @@ impl Store {
         self.root
             .join("transactions")
             .join(format!("{package}.backup"))
+    }
+
+    /// where files that were there before the install are kept until
+    /// uninstall puts them back.
+    pub(super) fn replaced_dir(&self, package: &PackageId) -> PathBuf {
+        self.root.join("replaced").join(package.as_str())
     }
 
     pub(super) fn lock_path(&self, package: &PackageId) -> PathBuf {

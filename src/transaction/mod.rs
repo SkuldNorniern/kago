@@ -223,6 +223,7 @@ pub fn remove(
     let outcome = remove_resources(&receipt, &receipt.resources, platform);
     if outcome.left.is_empty() {
         store.remove_receipt(package)?;
+        let _ = fs::remove_dir(store.replaced_dir(package));
         drop(held);
         // nothing of this package is left; the lock file can go too.
         let _ = fs::remove_file(store.lock_path(package));
@@ -475,27 +476,13 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 value,
                 previous,
             } => revert(platform, slot, *edit, value, previous.as_ref()),
-            Resource::File {
-                path,
-                sha256,
-                ownership,
-                ..
-            } => match receipt.absolute(path) {
-                None => Err(format!("{path}: root missing from receipt")),
-                Some(abs) => {
-                    let keep = match ownership {
-                        Ownership::Owned | Ownership::Generated => false,
-                        Ownership::PreserveIfModified => {
-                            hash(&abs).is_ok_and(|(_, now)| now != *sha256)
-                        }
-                        Ownership::UserData | Ownership::Shared | Ownership::External => true,
-                    };
-                    if keep {
-                        out.kept.push(abs.display().to_string());
-                        continue;
-                    }
-                    remove_file(&abs)
+            Resource::File { .. } => match remove_owned_file(receipt, resource) {
+                Ok(Some(kept)) => {
+                    out.kept.push(kept);
+                    continue;
                 }
+                Ok(None) => Ok(()),
+                Err(e) => Err(e),
             },
             Resource::Directory { path } => match receipt.absolute(path) {
                 None => Err(format!("{path}: root missing from receipt")),
@@ -538,6 +525,40 @@ fn revert(
             }
         }
         Edit::Init => Ok(()),
+    }
+}
+
+/// removes one file of the package, unless ownership keeps it: then
+/// where it is, to report as kept. the person's own file it replaced
+/// goes back.
+fn remove_owned_file(receipt: &Receipt, file: &Resource) -> Result<Option<String>, String> {
+    let Resource::File {
+        path,
+        sha256,
+        ownership,
+        replaced,
+        ..
+    } = file
+    else {
+        return Ok(None);
+    };
+    let abs = receipt
+        .absolute(path)
+        .ok_or_else(|| format!("{path}: root missing from receipt"))?;
+    let keep = match ownership {
+        Ownership::Owned | Ownership::Generated => false,
+        Ownership::PreserveIfModified => hash(&abs).is_ok_and(|(_, now)| now != *sha256),
+        Ownership::UserData | Ownership::Shared | Ownership::External => true,
+    };
+    if keep {
+        return Ok(Some(abs.display().to_string()));
+    }
+    remove_file(&abs)?;
+    match replaced {
+        Some(original) if original.is_file() => recovery::move_file(original, &abs)
+            .map(|()| None)
+            .map_err(|e| format!("cannot put back {}: {e}", abs.display())),
+        _ => Ok(None),
     }
 }
 

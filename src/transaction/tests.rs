@@ -1139,3 +1139,34 @@ fn purge_never_takes_a_folder_others_use() {
     assert!(theirs.join("letter.txt").is_file());
     assert_eq!(failed.len(), 1, "{failed:?}");
 }
+
+#[test]
+fn a_file_the_person_had_comes_back_at_uninstall() {
+    let mut w = World::new("replaced");
+    let manifest = MANIFEST.replace(
+        "copy payload/config.toml -> {config}/config.toml keep",
+        "copy payload/config.toml -> {config}/config.toml",
+    );
+    let config = w.dir.join("machine").join("config").join("App");
+    fs::create_dir_all(&config).unwrap();
+    let file = config.join("config.toml");
+    fs::write(&file, b"mine").unwrap();
+    w.fake.fail_register = true;
+    w.install(&manifest).unwrap_err();
+    assert_eq!(fs::read(&file).unwrap(), b"mine", "rolled back");
+    w.fake.fail_register = false;
+    w.install(&manifest).unwrap();
+    assert_eq!(fs::read(&file).unwrap(), b"cfg");
+    // an update keeps it aside, still the person's.
+    w.install(&manifest.replace("1.0.0", "1.1.0")).unwrap();
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
+    assert_eq!(fs::read(&file).unwrap(), b"mine", "put back");
+    assert!(
+        !w.store
+            .root()
+            .join("replaced")
+            .join(World::id().as_str())
+            .exists()
+    );
+}

@@ -313,42 +313,7 @@ impl Run<'_> {
     fn op(&mut self, op: &Operation) -> Result<(), Error> {
         match op {
             Operation::CreateDirectory { path } => self.directory(path),
-            Operation::InstallFile {
-                source,
-                target,
-                size,
-                sha256,
-                ownership,
-            } => {
-                let dest = self.resolve(target)?;
-                if let Some(kept) = self.keep_user_file(target, &dest, *ownership) {
-                    self.resources.push(Resource::File {
-                        path: target.clone(),
-                        size: *size,
-                        sha256: kept,
-                        ownership: *ownership,
-                    });
-                    return Ok(());
-                }
-                self.place(&dest, |dest| {
-                    fs::copy(source, dest).map_err(|e| Error::io(dest, &e))?;
-                    let (got_size, got) = hash(dest).map_err(|e| Error::io(dest, &e))?;
-                    if got != *sha256 || got_size != *size {
-                        return Err(Error::Other(format!(
-                            "{} changed since the plan was built",
-                            source.display()
-                        )));
-                    }
-                    Ok(())
-                })?;
-                self.resources.push(Resource::File {
-                    path: target.clone(),
-                    size: *size,
-                    sha256: *sha256,
-                    ownership: *ownership,
-                });
-                Ok(())
-            }
+            Operation::InstallFile { .. } => self.file(op),
             Operation::AddPathEntry { directory, scope } => self.path_entry(directory, *scope),
             Operation::Run {
                 phase,
@@ -400,6 +365,68 @@ impl Run<'_> {
             Operation::AllowThroughFirewall { .. } => self.firewall(op),
             Operation::Change { place, edit, value } => self.change(place, *edit, value),
         }
+    }
+
+    /// one of the package's files, put where the plan says.
+    fn file(&mut self, op: &Operation) -> Result<(), Error> {
+        let Operation::InstallFile {
+            source,
+            target,
+            size,
+            sha256,
+            ownership,
+        } = op
+        else {
+            return Ok(());
+        };
+        let dest = self.resolve(target)?;
+        let earlier = self.previous.and_then(|p| {
+            p.resources.iter().find_map(|r| match r {
+                Resource::File { path, replaced, .. } if path == target => Some(replaced.clone()),
+                _ => None,
+            })
+        });
+        if let Some(kept) = self.keep_user_file(target, &dest, *ownership) {
+            self.resources.push(Resource::File {
+                path: target.clone(),
+                size: *size,
+                sha256: kept,
+                ownership: *ownership,
+                replaced: earlier.flatten(),
+            });
+            return Ok(());
+        }
+        // a file of the person's own outside the app's folder, which
+        // uninstall would otherwise take with it, is kept aside.
+        let theirs = earlier.is_none()
+            && dest.is_file()
+            && matches!(ownership, Ownership::Owned | Ownership::Generated)
+            && !matches!(target.root, Root::App | Root::Bin);
+        let aside = theirs.then(|| {
+            self.store
+                .replaced_dir(&self.plan.package)
+                .join(format!("{}-{}", self.transaction, self.backups))
+        });
+        let replaced = aside.clone().or_else(|| earlier.flatten());
+        self.place_aside(&dest, aside, |dest| {
+            fs::copy(source, dest).map_err(|e| Error::io(dest, &e))?;
+            let (got_size, got) = hash(dest).map_err(|e| Error::io(dest, &e))?;
+            if got != *sha256 || got_size != *size {
+                return Err(Error::Other(format!(
+                    "{} changed since the plan was built",
+                    source.display()
+                )));
+            }
+            Ok(())
+        })?;
+        self.resources.push(Resource::File {
+            path: target.clone(),
+            size: *size,
+            sha256: *sha256,
+            ownership: *ownership,
+            replaced,
+        });
+        Ok(())
     }
 
     /// an existing file the user may own: user data always stays, a
@@ -720,12 +747,24 @@ impl Run<'_> {
         dest: &Path,
         write: impl FnOnce(&Path) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        self.place_aside(dest, None, write)
+    }
+
+    /// [`place`](Self::place), moving an existing file to `aside` when
+    /// given, where it outlives the transaction.
+    fn place_aside(
+        &mut self,
+        dest: &Path,
+        aside: Option<PathBuf>,
+        write: impl FnOnce(&Path) -> Result<(), Error>,
+    ) -> Result<(), Error> {
         if dest.exists() {
-            let backup = self
-                .store
-                .backup_dir(&self.plan.package)
-                .join(&self.transaction)
-                .join(self.backups.to_string());
+            let backup = aside.unwrap_or_else(|| {
+                self.store
+                    .backup_dir(&self.plan.package)
+                    .join(&self.transaction)
+                    .join(self.backups.to_string())
+            });
             self.backups += 1;
             let dir = backup.parent().expect("backup has a parent");
             fs::create_dir_all(dir).map_err(|e| Error::io(dir, &e))?;
@@ -768,6 +807,7 @@ impl Run<'_> {
             size,
             sha256,
             ownership: Ownership::Owned,
+            replaced: None,
         });
         Ok(dest)
     }

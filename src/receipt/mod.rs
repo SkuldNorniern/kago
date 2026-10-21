@@ -59,6 +59,10 @@ pub enum Resource {
         size: u64,
         sha256: Digest,
         ownership: Ownership,
+        /// the person's own file that was there first, kept aside in
+        /// kago's state and put back at uninstall.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replaced: Option<PathBuf>,
     },
     /// exact entry added to PATH.
     PathEntry {
@@ -205,6 +209,7 @@ mod tests {
                     size: 3,
                     sha256: Digest([7; 32]),
                     ownership: Ownership::Owned,
+                    replaced: None,
                 },
                 Resource::PathEntry {
                     entry: "C:/Users/x/AppData/Local/Programs/Ozone".into(),
