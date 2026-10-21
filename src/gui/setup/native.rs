@@ -487,7 +487,9 @@ fn render(
                     }
                     _ => {
                         body.add(Label::new(&field.label)?)?;
-                        let typed = Kept::new(TextField::with_content(answer)?);
+                        let typed = TextField::with_content(answer)?;
+                        typed.set_password(field.secret())?;
+                        let typed = Kept::new(typed);
                         body.add(typed.share())?;
                         Input::Text(typed)
                     }
