@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::journal::{Entry, Journal, Undo};
-use super::recovery::{cleanup, roll_back};
+use super::recovery::{cleanup, move_file, roll_back};
 use super::{Error, Store, remove_resources};
 use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
 use crate::manifest::{
@@ -733,7 +733,7 @@ impl Run<'_> {
                 path: dest.to_path_buf(),
                 backup: backup.clone(),
             })?;
-            move_file(dest, &backup)?;
+            move_file(dest, &backup).map_err(|e| Error::io(dest, &e))?;
         } else {
             self.step(Undo::RemoveFile {
                 path: dest.to_path_buf(),
@@ -810,15 +810,6 @@ impl Run<'_> {
         self.resources.push(Resource::Registration { key, scope });
         Ok(())
     }
-}
-
-/// rename, or copy and delete across volumes.
-fn move_file(from: &Path, to: &Path) -> Result<(), Error> {
-    if fs::rename(from, to).is_ok() {
-        return Ok(());
-    }
-    fs::copy(from, to).map_err(|e| Error::io(to, &e))?;
-    fs::remove_file(from).map_err(|e| Error::io(from, &e))
 }
 
 /// keeps one copy of the running kago where uninstall entries point. the

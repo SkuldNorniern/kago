@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use super::journal::{self, Entry, Undo};
 use super::{Error, Store};
@@ -56,7 +57,7 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
                 fs::create_dir_all(parent)
                     .map_err(|e| format!("cannot restore {}: {e}", path.display()))?;
             }
-            fs::rename(backup, path).map_err(|e| format!("cannot restore {}: {e}", path.display()))
+            move_file(backup, path).map_err(|e| format!("cannot restore {}: {e}", path.display()))
         }
         Undo::RemoveDirectory { path } => match fs::remove_dir(path) {
             Ok(()) => Ok(()),
@@ -81,6 +82,22 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
             platform.set_login_item(name, previous.as_deref())
         }
     }
+}
+
+/// rename, or across drives copy and delete. the copy is written under
+/// another name and renamed when whole, so a crash never leaves half a
+/// file where rollback would take it for the original.
+pub(super) fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    let mut partial = to.as_os_str().to_owned();
+    partial.push(".kago-partial");
+    let partial = PathBuf::from(partial);
+    fs::copy(from, &partial)?;
+    fs::File::open(&partial)?.sync_all()?;
+    fs::rename(&partial, to)?;
+    fs::remove_file(from)
 }
 
 /// finishes or rolls back a journal left by a crash.
