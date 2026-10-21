@@ -473,6 +473,35 @@ page other \"Other\"
     }
 
     #[test]
+    fn file_types_and_url_protocols_come_from_the_library() {
+        let (m, codes) = check(&with(
+            "file-type .aurea Aurea.Project \"Aurea project\" {app}/bin/aurea.exe\nurl-protocol aurea \"Aurea\" {app}/bin/aurea.exe\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let set: Vec<(String, String)> = m
+            .unwrap()
+            .changes
+            .iter()
+            .map(|c| (c.place.to_string(), c.value.to_string()))
+            .collect();
+        let has = |place: &str, value: &str| set.iter().any(|(p, v)| p == place && v == value);
+        assert!(
+            has(r"Software\Classes\.aurea (default)", "Aurea.Project"),
+            "{set:?}"
+        );
+        assert!(has(
+            r"Software\Classes\Aurea.Project\DefaultIcon (default)",
+            "{app}/bin/aurea.exe,0"
+        ));
+        assert!(has(
+            r"Software\Classes\Aurea.Project\shell\open\command (default)",
+            "\"{app}/bin/aurea.exe\" \"%1\""
+        ));
+        assert!(has(r"Software\Classes\aurea URL Protocol", ""));
+        assert!(has(r"Software\Classes\aurea (default)", "URL:Aurea"));
+    }
+
+    #[test]
     fn vcredist_comes_from_the_library() {
         let (m, codes) = check(&with("vcredist vc_redist.x64.exe\n"));
         assert!(codes.is_empty(), "{codes:?}");

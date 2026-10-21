@@ -285,6 +285,8 @@ kago's own library is written the same way ([library.kago](src/manifest/kagofile
 | `check steamvr` | whether SteamVR has run on this machine |
 | `vcredist <installer>` | the Visual C++ runtime as a prerequisite |
 | `webview2 <installer>` | the WebView2 runtime as a prerequisite |
+| `file-type <.ext> <id> "Name" <program> [icon=<file>]` | files with that extension open in the program, with its icon; taken back at uninstall |
+| `url-protocol <scheme> "Name" <program>` | links like `scheme://...` start the program with the link |
 
 ### components
 

@@ -36,3 +36,26 @@ action webview2 file
     arguments /silent /install
     detect registry HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5} pv
     admin
+
+# a file type one of the package's programs opens: double-clicking such a
+# file starts the program with it. the extension starts with a dot.
+#   file-type .airaproj AiraStudio.Project "Aira project" {app}/aira-studio.exe
+action file-type ext id name program icon=$program
+  registry Software\Classes\$ext
+    set @ $id
+  registry Software\Classes\$id
+    set @ $name
+  registry Software\Classes\$id\DefaultIcon
+    set @ "$icon,0"
+  registry Software\Classes\$id\shell\open\command
+    set @ "\"$program\" \"%1\""
+
+# a URL protocol: links like aira://pair?code=1 start the program with
+# the whole link.
+#   url-protocol aira "Aira Studio" {app}/aira-studio.exe
+action url-protocol scheme name program
+  registry Software\Classes\$scheme
+    set @ "URL:$name"
+    set "URL Protocol" ""
+  registry Software\Classes\$scheme\shell\open\command
+    set @ "\"$program\" \"%1\""
