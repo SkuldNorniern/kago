@@ -453,7 +453,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kago"
+name = "kago-setup"
 version = "0.1.0"
 dependencies = [
  "aurea",

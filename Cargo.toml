@@ -1,12 +1,22 @@
 [package]
-name = "kago"
+name = "kago-setup"
 description = "Kago: declarative installer, packager and updater"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.90"
 license = "Apache-2.0"
 repository = "https://github.com/SkuldNorniern/kago"
 publish = false
+
+# the crate is kago-setup on crates.io, where `kago` is taken; the library
+# and the command are still `kago`.
+[lib]
+name = "kago"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kago"
+path = "src/main.rs"
 
 [features]
 default = ["gui"]

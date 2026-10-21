@@ -7,11 +7,11 @@ The setup has two looks:
 - **modern**: dark, drawn like Lykil and Aira Studio
 - **native**: a classic NSIS-style wizard
 
-Both come in English and Korean.
+Both come in English, Korean and Japanese, following the system's language.
 
 ## Install kago
 
-You need Rust 1.89 or newer.
+You need Rust 1.90 or newer.
 
 ```sh
 cargo install --git https://github.com/SkuldNorniern/kago
