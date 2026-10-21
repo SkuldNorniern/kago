@@ -17,7 +17,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "aurea"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 dependencies = [
  "aurea-animation",
  "aurea-ffi",
@@ -34,7 +34,7 @@ dependencies = [
 [[package]]
 name = "aurea-animation"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 dependencies = [
  "aurea-foundation",
 ]
@@ -42,7 +42,7 @@ dependencies = [
 [[package]]
 name = "aurea-ffi"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 dependencies = [
  "cc",
  "pkg-config",
@@ -51,12 +51,12 @@ dependencies = [
 [[package]]
 name = "aurea-foundation"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 
 [[package]]
 name = "aurea-render"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 dependencies = [
  "aurea-foundation",
  "dwrote",
@@ -73,7 +73,7 @@ dependencies = [
 [[package]]
 name = "aurea-runtime"
 version = "0.1.0"
-source = "git+https://github.com/SkuldNorniern/aurea?rev=b17a76f#b17a76fad1d45c860680f229d98b21a2b2eab956"
+source = "git+https://github.com/SkuldNorniern/aurea?rev=a2822fb#a2822fb9e3eefb110e9925245cc408a22b7c85b5"
 dependencies = [
  "aurea-foundation",
  "log",

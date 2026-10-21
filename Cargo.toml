@@ -14,7 +14,7 @@ default = ["gui"]
 gui = ["dep:aurea"]
 
 [dependencies]
-aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "b17a76f", optional = true }
+aurea = { git = "https://github.com/SkuldNorniern/aurea", rev = "a2822fb", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"

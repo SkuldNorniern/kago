@@ -404,7 +404,7 @@ fn render(
             window.add(header(Line::ComponentsTitle, Line::ComponentsBody)?)?;
             window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
             for (i, (component, on)) in info.components.iter().zip(&wizard.chosen).enumerate() {
-                let mut checkbox = Checkbox::with_checked(&component.name, *on)?;
+                let checkbox = Checkbox::with_checked(&component.name, *on)?;
                 if wizard.locked(i) {
                     // like NSIS's read-only sections: shown, ticked, greyed.
                     checkbox.set_enabled(false)?;
