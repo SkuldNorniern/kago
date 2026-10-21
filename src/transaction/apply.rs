@@ -75,16 +75,9 @@ pub(super) fn install(
             .to_string(),
     };
     if let Err(e) = run.all() {
-        let failures = roll_back(&run.undos, platform);
+        let undos = std::mem::take(&mut run.undos);
         drop(journal);
-        if failures.is_empty() {
-            cleanup(store, &plan.package)?;
-            return Err(Error::RolledBack(e.to_string()));
-        }
-        return Err(Error::Other(format!(
-            "{e}\nrollback was incomplete, run `kago recover`:\n  {}",
-            failures.join("\n  ")
-        )));
+        return Err(undone(&e, &undos, platform, store, &plan.package));
     }
     let resources = std::mem::take(&mut run.resources);
     let used: Vec<SemanticPath> = resources
@@ -111,8 +104,13 @@ pub(super) fn install(
         roots: roots.used(&used),
         resources,
     };
-    store.write_receipt(&receipt)?;
-    journal.write(&Entry::Commit)?;
+    // the receipt changes inside the transaction too: a crash before the
+    // commit mark puts back the old one with the old files.
+    if let Err(e) = run.commit(&receipt) {
+        let undos = std::mem::take(&mut run.undos);
+        drop(journal);
+        return Err(undone(&e, &undos, platform, store, &plan.package));
+    }
     drop(journal);
     // committed. a backup still held open (the old exe of a running app)
     // keeps the journal around; the next kago run finishes the cleanup.
@@ -122,6 +120,28 @@ pub(super) fn install(
         drop_stale(&previous, &receipt, platform);
     }
     Ok(receipt)
+}
+
+/// takes back every step after `e` stopped the install: the error to
+/// return, saying whether everything came back.
+fn undone(
+    e: &Error,
+    undos: &[Undo],
+    platform: &dyn Platform,
+    store: &Store,
+    package: &crate::package::PackageId,
+) -> Error {
+    let failures = roll_back(undos, platform);
+    if !failures.is_empty() {
+        return Error::Other(format!(
+            "{e}\nrollback was incomplete, run `kago recover`:\n  {}",
+            failures.join("\n  ")
+        ));
+    }
+    match cleanup(store, package) {
+        Ok(()) => Error::RolledBack(e.to_string()),
+        Err(cleanup) => cleanup,
+    }
 }
 
 /// where the app's own data folders the Kagofile names are, for purging.
@@ -256,6 +276,28 @@ impl Run<'_> {
             self.op(op)?;
         }
         Ok(())
+    }
+
+    /// writes `receipt` and the commit mark, with the old receipt kept
+    /// aside in the journal until then.
+    fn commit(&mut self, receipt: &Receipt) -> Result<(), Error> {
+        let file = self.store.receipt_path(&self.plan.package);
+        let undo = if file.is_file() {
+            let backup = self
+                .store
+                .backup_dir(&self.plan.package)
+                .join(&self.transaction)
+                .join("receipt.json");
+            let dir = backup.parent().expect("backup has a parent");
+            fs::create_dir_all(dir).map_err(|e| Error::io(dir, &e))?;
+            fs::copy(&file, &backup).map_err(|e| Error::io(&backup, &e))?;
+            Undo::RestoreFile { path: file, backup }
+        } else {
+            Undo::RemoveFile { path: file }
+        };
+        self.step(undo)?;
+        self.store.write_receipt(receipt)?;
+        self.journal.write(&Entry::Commit)
     }
 
     fn step(&mut self, undo: Undo) -> Result<(), Error> {
