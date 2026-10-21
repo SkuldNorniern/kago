@@ -26,26 +26,25 @@ pub fn run() -> Option<ExitCode> {
         && flag == "--uninstall"
     {
         let silent = rest.iter().any(|a| is_silent(a));
+        let purge = rest.iter().any(|a| a == "--purge");
         let scope = rest
             .windows(2)
             .find(|w| w[0] == "--scope")
             .and_then(|w| w[1].parse().ok())
             .unwrap_or(Scope::User);
-        return Some(remove(id, scope, silent, &exe));
+        return Some(remove(id, scope, (silent, purge), &exe));
     }
     let named = exe
         .file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.eq_ignore_ascii_case(&file_name()));
-    let silent = match args.as_slice() {
-        [] => false,
-        [flag] if is_silent(flag) => true,
-        _ => return None,
-    };
-    if !named {
+    // `/S` alone, or with `--purge` to remove the user's data too.
+    let silent = args.iter().any(|a| is_silent(a));
+    let purge = args.iter().any(|a| a == "--purge");
+    if !named || args.iter().any(|a| !is_silent(a) && a != "--purge") {
         return None;
     }
-    Some(start(&exe, silent))
+    Some(start(&exe, (silent, purge)))
 }
 
 fn is_silent(arg: &str) -> bool {
@@ -53,7 +52,7 @@ fn is_silent(arg: &str) -> bool {
 }
 
 /// finds the package installed in this folder and starts the temp copy.
-fn start(exe: &Path, silent: bool) -> ExitCode {
+fn start(exe: &Path, (silent, purge): (bool, bool)) -> ExitCode {
     // per-user installs first, then the ones for everyone.
     let found = (|| -> Result<(PackageId, Scope), String> {
         let platform = platform::host()?;
@@ -99,6 +98,9 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
     if silent {
         arguments.push("--silent".to_owned());
     }
+    if purge {
+        arguments.push("--purge".to_owned());
+    }
     // hand off and exit at once: this file is part of what gets removed,
     // and Windows cannot delete a running program. tools that need the
     // real exit code run QuietUninstallString, which waits.
@@ -123,7 +125,7 @@ fn start(exe: &Path, silent: bool) -> ExitCode {
 }
 
 /// the temp copy: asks (unless silent), removes, then deletes itself.
-fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
+fn remove(id: &str, scope: Scope, (silent, purge): (bool, bool), exe: &Path) -> ExitCode {
     // started from the app folder, this process has it as its working
     // folder, and Windows does not delete a folder a process works in.
     let _ = std::env::set_current_dir(std::env::temp_dir());
@@ -139,7 +141,7 @@ fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let code = match PackageId::new(id) {
-        Ok(package) => remove_package(&package, scope, silent),
+        Ok(package) => remove_package(&package, scope, (silent, purge)),
         Err(e) => {
             eprintln!("uninstall: {e}");
             ExitCode::FAILURE
@@ -149,7 +151,7 @@ fn remove(id: &str, scope: Scope, silent: bool, exe: &Path) -> ExitCode {
     code
 }
 
-fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
+fn remove_package(package: &PackageId, scope: Scope, (silent, purge): (bool, bool)) -> ExitCode {
     let opened = platform::host().and_then(|p| {
         let store = transaction::store(p.as_ref(), scope).map_err(|e| e.to_string())?;
         Ok((p, store))
@@ -189,10 +191,10 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
             running: platform::programs_using(&receipt.files()).unwrap_or_default(),
         };
         let package = package.clone();
-        let work = move || {
+        let work = move |purge: bool| {
             let platform = platform::host()?;
             let store = transaction::store(platform.as_ref(), scope).map_err(|e| e.to_string())?;
-            uninstall_retrying(&package, platform.as_ref(), &store)
+            uninstall_retrying(&package, platform.as_ref(), &store, purge)
                 .map(|done| kago::gui::setup::Removed {
                     kept: done.kept,
                     failed: done.failed,
@@ -211,7 +213,7 @@ fn remove_package(package: &PackageId, scope: Scope, silent: bool) -> ExitCode {
         };
     }
     let _ = silent;
-    match uninstall_retrying(package, platform.as_ref(), &store) {
+    match uninstall_retrying(package, platform.as_ref(), &store, purge) {
         Ok(done) if done.failed.is_empty() => ExitCode::SUCCESS,
         Ok(done) => {
             for failed in done.failed {
@@ -249,9 +251,11 @@ fn uninstall_retrying(
     package: &PackageId,
     platform: &dyn platform::Platform,
     store: &transaction::Store,
+    purge: bool,
 ) -> Result<transaction::Uninstalled, transaction::Error> {
     // the package may say no, before anything is closed.
     transaction::ask(package, store)?;
+    let receipt = store.read_receipt(package)?;
     // what still runs from the app folder goes first; what cannot be
     // closed shows up as not removed.
     if let Ok(Some(receipt)) = store.read_receipt(package) {
@@ -275,6 +279,11 @@ fn uninstall_retrying(
         done.failed
             .retain(|f| !scheduled.iter().any(|s| f.starts_with(s.as_str())));
         done.at_restart = scheduled;
+    }
+    if purge && let Some(receipt) = &receipt {
+        done.failed
+            .extend(transaction::purge(receipt, platform, &done.kept));
+        done.kept.clear();
     }
     Ok(done)
 }

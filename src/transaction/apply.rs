@@ -107,6 +107,7 @@ pub(super) fn install(
         look: plan.look.clone(),
         update: plan.update.clone(),
         answers: plan.kept_answers(),
+        purge: purge_folders(plan, &roots),
         roots: roots.used(&used),
         resources,
     };
@@ -121,6 +122,16 @@ pub(super) fn install(
         drop_stale(&previous, &receipt, platform);
     }
     Ok(receipt)
+}
+
+/// where the app's own data folders the Kagofile names are, for purging.
+fn purge_folders(plan: &InstallPlan, roots: &Roots) -> Vec<PathBuf> {
+    plan.purge
+        .iter()
+        .filter_map(|text| {
+            crate::install::location(text, roots, &|name| std::env::var(name).ok()).ok()
+        })
+        .collect()
 }
 
 /// removes what the old version owned and the new one does not. best

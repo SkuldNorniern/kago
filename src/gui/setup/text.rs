@@ -103,6 +103,7 @@ pub enum Line {
     Firewall,
     /// Next without the arrow, for the modern look.
     Continue,
+    RemoveData,
     FieldRequired,
     FieldNumber,
     FieldMin,
@@ -547,6 +548,11 @@ const fn table(line: Line) -> [&'static str; 3] {
             "Firewall rule: {item}",
             "방화벽 규칙: {item}",
             "ファイアウォール規則: {item}",
+        ],
+        Line::RemoveData => [
+            "Also remove my settings and data",
+            "내 설정과 데이터도 제거",
+            "設定とデータも削除する",
         ],
         Line::Continue => ["Next", "다음", "次へ"],
         Line::FieldRequired => [

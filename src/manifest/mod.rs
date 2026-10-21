@@ -68,6 +68,9 @@ pub struct Manifest {
     pub build: Vec<BuildStep>,
     /// setup pages of the package's own, with fields to fill in.
     pub inputs: Vec<InputPage>,
+    /// folders of the app's own data, like `%APPDATA%/Aira`, that
+    /// uninstall removes when asked to remove the person's data too.
+    pub purge: Vec<String>,
     pub requirements: Vec<Requirement>,
     pub update: Option<Update>,
     /// `target <os> <artifact>...`, only for listed OSes.
@@ -169,6 +172,7 @@ impl Manifest {
             m.runs = lowered.runs;
             m.build = lowered.build;
             m.inputs = lowered.inputs;
+            m.purge = lowered.purge;
             m
         });
         let manifest = if diagnostics.has_errors() {
@@ -424,6 +428,26 @@ page other \"Other\"
         ] {
             let (m, codes) = check(&with(bad));
             assert!(m.is_none() && !codes.is_empty(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn purge_names_the_apps_own_folders_only() {
+        let (m, codes) = check(&with("purge %APPDATA%/Aurea\npurge {data}/models\n"));
+        assert!(codes.is_empty(), "{codes:?}");
+        assert_eq!(m.unwrap().purge, ["%APPDATA%/Aurea", "{data}/models"]);
+        for bad in [
+            "purge %APPDATA%\n",
+            "purge %APPDATA%/\n",
+            "purge {data}\n",
+            "purge C:/Users\n",
+            "purge %APPDATA%/../x\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(
+                m.is_none() && codes == [diagnostic::MANIFEST_VALUE],
+                "{bad}"
+            );
         }
     }
 

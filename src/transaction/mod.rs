@@ -235,6 +235,69 @@ pub fn remove(
     })
 }
 
+/// after an uninstall, what it kept on purpose too: the files it kept
+/// (user data, changed settings) and the package's own settings and data
+/// folders, with whatever the app put there. a folder only goes when it
+/// is named after the package, so a root set wrong never takes more.
+/// returns what could not be removed.
+#[must_use]
+pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec<String> {
+    use crate::manifest::Root;
+    let mut failed = Vec::new();
+    for path in kept.iter().map(Path::new).filter(|p| p.is_file()) {
+        if let Err(e) = fs::remove_file(path) {
+            failed.push(format!("{}: {e}", path.display()));
+        }
+    }
+    let folder = crate::install::folder_name(&receipt.name);
+    let app = receipt.roots.get(&Root::App);
+    let mut dirs: Vec<std::path::PathBuf> = platform
+        .roots(receipt.scope, &receipt.name)
+        .map(|roots| {
+            [
+                Root::Config,
+                Root::Data,
+                Root::Cache,
+                Root::Logs,
+                Root::State,
+            ]
+            .iter()
+            .filter_map(|r| roots.0.get(r).cloned())
+            .collect()
+        })
+        .unwrap_or_default();
+    dirs.sort();
+    dirs.dedup();
+    for dir in dirs {
+        let named = dir
+            .components()
+            .any(|c| c.as_os_str().to_str() == Some(folder.as_str()));
+        let inside_app = app.is_some_and(|a| dir.starts_with(a) || a.starts_with(&dir));
+        if !named || inside_app || !dir.exists() {
+            continue;
+        }
+        if let Err(e) = fs::remove_dir_all(&dir) {
+            failed.push(format!("{}: {e}", dir.display()));
+        }
+    }
+    // the app's own data folders the Kagofile names with `purge`.
+    for dir in receipt.purge.iter().filter(|d| d.exists()) {
+        let removed = if dir.is_dir() {
+            fs::remove_dir_all(dir)
+        } else {
+            fs::remove_file(dir)
+        };
+        if let Err(e) = removed {
+            failed.push(format!("{}: {e}", dir.display()));
+        }
+    }
+    // folders that only held kept files.
+    for path in kept.iter().map(Path::new).filter(|p| p.is_dir()) {
+        let _ = fs::remove_dir(path);
+    }
+    failed
+}
+
 /// what an earlier uninstall could not remove because it was in use:
 /// deleted when the computer next starts, like NSIS's `/REBOOTOK`, and no
 /// longer the package's. returns those paths; what cannot be scheduled

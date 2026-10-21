@@ -77,6 +77,10 @@ pub struct InstallPlan {
     /// the package's own setup pages and their fields.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<InputPage>,
+    /// folders of the app's own data, removed when uninstall is asked to
+    /// remove the person's data too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub purge: Vec<String>,
     /// what was filled in, by field id, once [`InstallPlan::answered`]
     /// put the answers into the operations.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -251,6 +255,7 @@ impl InstallPlan {
             location: None,
             needs,
             inputs: manifest.inputs.clone(),
+            purge: manifest.purge.clone(),
             answers: BTreeMap::new(),
         };
         (Some(plan), diagnostics)

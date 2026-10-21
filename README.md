@@ -247,6 +247,17 @@ run app --register {input.key}
 
 A secret field is only hidden on screen. Its value ends up wherever you use it, like a settings file or a program's arguments, and in the receipt that lets uninstall put things back.
 
+### the app's own data
+
+Uninstall keeps what the person made: changed settings, user data. When they tick "Also remove my settings and data" (or `kago uninstall --purge`), it removes that too, with the package's `{config}` and `{data}` folders. Folders your app keeps elsewhere are named with `purge`:
+
+```
+purge %APPDATA%/Aira          # removed only on that tick
+purge {data}/models
+```
+
+A `purge` line must name a folder inside a root or variable, never `%APPDATA%` itself.
+
 ### checks
 
 A `check` tells whether something is on the machine. `require`, a component's `detect` and a `prerequisite` use them:
@@ -408,13 +419,14 @@ Your files are signed as copies inside the setup; the ones in your build folder 
 
 ```
 kago init [dir] [--id <package-id>] [--force]   starter Kagofile
-kago check [--target <t>]...                    validate and resolve
-kago plan [--components a,b]                    what an install would do, without doing it
-kago build [--out <dir>] [--components a,b] [--no-sign]   the setup exe (default: every component offered)
-kago install [--components a,b] [--location <dir>]   install straight from the Kagofile
-kago uninstall <package-id>
+kago check [--target <t>]... [--json]           validate and resolve
+kago plan [--components a,b] [--json]           what an install would do and what needs administrator rights
+kago build [--out <dir>] [--components a,b] [--no-sign] [--no-build]   build steps, then the setup exe
+kago inspect <setup.exe> [--plan] [--json]      what a built setup holds
+kago install [--components a,b] [--location <dir>] [--set field=value]   install straight from the Kagofile
+kago uninstall <package-id> [--purge]           --purge also removes the person's settings and data
 kago verify <package-id>                        compare installed files with the receipt
-kago status                                     what is installed
+kago status [--json]                            what is installed
 kago recover                                    finish or undo an install a crash cut short
 kago update [<package-id>] [--check] [--silent] install a newer version from the `update` feed
 kago version
@@ -452,7 +464,8 @@ Every install has `uninstall.exe` in its folder, like an NSIS uninstaller:
 - a running app is closed first; what stays in use is removed when Windows restarts (for installs for everyone)
 - it looks like the setup did: modern with the brand's accent and the app icon, or native
 - Settings › Apps runs it
-- `uninstall.exe /S` removes the app silently
+- a tick box, off by default, also removes the person's settings and data: what uninstall would keep, the package's own `{config}` and `{data}` folders, and the folders a `purge` line names
+- `uninstall.exe /S` removes the app silently; `uninstall.exe /S --purge` its data too
 - `QuietUninstallString` (the command-line runtime) gives tools a real exit code
 
 ## Not supported yet

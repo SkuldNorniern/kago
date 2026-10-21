@@ -50,6 +50,7 @@ impl State {
                 self.removal.confirm();
                 self.started = Instant::now();
             }
+            (Page::Ask, Hit::Accept) => self.removal.purge = !self.removal.purge,
             (Page::Ask, Hit::Secondary) | (Page::Done(_) | Page::Failed(_), Hit::Primary) => {
                 self.close = true;
             }
@@ -287,15 +288,24 @@ fn ask(
             color::TEXT,
         )?;
     }
+    let mut y = body.y + used + 14.0 + if s.info.location.is_some() { 76.0 } else { 0.0 };
     if let Some(note) = s.info.running_note(lang) {
-        let y = body.y + used + 14.0 + if s.info.location.is_some() { 76.0 } else { 0.0 };
-        pen.wrapped(
+        let note_h = pen.wrapped(
             &note,
             Area::new(body.x, y, body.w, 40.0),
             &pen.font(13.0),
             color::WARN,
         )?;
+        y += note_h + 10.0;
     }
+    let on = frame.anim.to(key::ACCEPT, f32::from(s.removal.purge), 16.0);
+    super::tick(
+        pen,
+        frame,
+        (body.x, y),
+        (lang.line(Line::RemoveData), Some(Hit::Accept)),
+        on,
+    )?;
     buttons(
         pen,
         frame,

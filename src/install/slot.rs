@@ -89,7 +89,11 @@ pub fn slot(
 }
 
 /// a file location written `{root}/...` or `%VARIABLE%/...`.
-fn location(
+///
+/// # Errors
+///
+/// when the root or variable has no value here.
+pub fn location(
     text: &str,
     roots: &Roots,
     variable: &dyn Fn(&str) -> Option<String>,

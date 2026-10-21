@@ -104,7 +104,9 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
 
 pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
     let [id] = args.positional.as_slice() else {
-        return Err("usage: kago uninstall <package-id> [--scope user|machine]".to_owned());
+        return Err(
+            "usage: kago uninstall <package-id> [--scope user|machine] [--purge]".to_owned(),
+        );
     };
     let package = PackageId::new(id).map_err(|e| e.to_string())?;
     let scope = installed_scope(args, &package)?;
@@ -114,8 +116,16 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
         ));
     }
     let (platform, store) = open(scope)?;
+    let receipt = store.read_receipt(&package).map_err(|e| e.to_string())?;
     let mut done =
         transaction::uninstall(&package, platform.as_ref(), &store).map_err(|e| e.to_string())?;
+    if args.flag("--purge")
+        && let Some(receipt) = &receipt
+    {
+        done.failed
+            .extend(transaction::purge(receipt, platform.as_ref(), &done.kept));
+        done.kept.clear();
+    }
     if !done.failed.is_empty() {
         let scheduled = transaction::remove_at_restart(&package, platform.as_ref(), &store)
             .map_err(|e| e.to_string())?;

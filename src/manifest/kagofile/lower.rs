@@ -53,6 +53,7 @@ const STATEMENTS: &[&str] = &[
     "expect",
     "build",
     "page",
+    "purge",
 ];
 
 /// kago's own checks and actions, written in Kagofile syntax.
@@ -71,6 +72,7 @@ pub struct Lowered {
     pub runs: Vec<Run>,
     pub build: Vec<BuildStep>,
     pub inputs: Vec<InputPage>,
+    pub purge: Vec<String>,
 }
 
 /// lowers `nodes`; `base` is the Kagofile directory, for `version from`.
@@ -108,6 +110,7 @@ pub fn lower(
         runs: Vec::new(),
         build: Vec::new(),
         inputs: Vec::new(),
+        purge: Vec::new(),
         services: Vec::new(),
         shortcuts: Vec::new(),
         targets: BTreeMap::new(),
@@ -190,6 +193,7 @@ struct Lower<'a> {
     runs: Vec<Run>,
     build: Vec<BuildStep>,
     inputs: Vec<InputPage>,
+    purge: Vec<String>,
     services: Vec<RawService>,
     shortcuts: Vec<RawShortcut>,
     targets: BTreeMap<Os, Vec<Spanned<String>>>,
@@ -283,6 +287,7 @@ impl Lower<'_> {
             "prerequisite" => self.prerequisite(node),
             "update" => self.update(node),
             "page" => self.page(node),
+            "purge" => self.purge_line(node),
             "build" => self.build_block(node),
             name if self.actions.contains_key(name) => self.call(node, &Scope::default(), true),
             _ => self.item(node, &Scope::default()),
@@ -660,6 +665,36 @@ impl Lower<'_> {
             script,
             when,
         });
+    }
+
+    /// `purge <folder>`: a folder of the app's own data, removed when the
+    /// person asks uninstall to remove their data too.
+    fn purge_line(&mut self, node: &Node) {
+        self.no_children(node);
+        let Some([folder]) = self.args(node, 1, "purge <folder>") else {
+            return;
+        };
+        if let Err(e) = location(&folder.text) {
+            return self.error(diagnostic::MANIFEST_VALUE, folder.at, e);
+        }
+        // never a whole known folder, like `%APPDATA%` itself.
+        // what follows `{root}` or `%VARIABLE%`.
+        let after = match folder.text.strip_prefix('%') {
+            Some(rest) => rest.split_once('%').map(|(_, after)| after),
+            None => folder.text.split_once('}').map(|(_, after)| after),
+        };
+        let below = after.is_some_and(|rest| rest.split(['/', '\\']).any(|s| !s.is_empty()));
+        if !below {
+            return self.error(
+                diagnostic::MANIFEST_VALUE,
+                folder.at,
+                format!(
+                    "`{}` is a whole folder others use too; name the app's folder in it, like `{}/MyApp`",
+                    folder.text, folder.text
+                ),
+            );
+        }
+        self.purge.push(folder.text.clone());
     }
 
     /// `expect <file> ["message"]`: the build fails unless the file is
@@ -1930,6 +1965,7 @@ impl Lower<'_> {
             runs: self.runs,
             build: self.build,
             inputs: self.inputs,
+            purge: self.purge,
         };
         (
             (!self.diagnostics.has_errors()).then_some(lowered),

@@ -38,6 +38,10 @@ pub struct Receipt {
     /// to start from in an update.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub answers: BTreeMap<String, String>,
+    /// folders of the app's own data, where they were at install, for
+    /// removing the person's data at uninstall when asked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub purge: Vec<PathBuf>,
     /// absolute location each used root had at install time.
     pub roots: BTreeMap<Root, PathBuf>,
     pub resources: Vec<Resource>,
@@ -187,6 +191,7 @@ mod tests {
             look: None,
             update: None,
             answers: BTreeMap::new(),
+            purge: Vec::new(),
             roots: BTreeMap::from([(
                 Root::App,
                 PathBuf::from("C:/Users/x/AppData/Local/Programs/Ozone"),

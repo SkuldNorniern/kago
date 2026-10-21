@@ -1068,3 +1068,29 @@ fn a_failed_install_takes_its_changes_back() {
     assert_eq!(left, serde_json::json!({ "drivers": [] }));
     assert!(fake.values.borrow().is_empty());
 }
+
+#[test]
+fn purge_takes_what_uninstall_kept_and_the_settings_folder() {
+    let w = World::new("purge");
+    let receipt = w.install(MANIFEST).unwrap();
+    let config = w.dir.join("machine").join("config").join("App");
+    fs::write(config.join("config.toml"), b"changed by the user").unwrap();
+    fs::write(config.join("written-by-the-app.json"), b"{}").unwrap();
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(config.join("config.toml").is_file(), "kept without purge");
+    let own = w.dir.join("machine").join("elsewhere").join("App data");
+    fs::create_dir_all(&own).unwrap();
+    fs::write(own.join("recording.bin"), b"x").unwrap();
+    let receipt = Receipt {
+        purge: vec![own.clone()],
+        ..receipt
+    };
+    let failed = purge(&receipt, &w.fake, &done.kept);
+    assert!(!own.exists(), "a folder the Kagofile names");
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!(!config.exists());
+    assert!(
+        w.dir.join("machine").join("config").exists(),
+        "only the package's folder"
+    );
+}

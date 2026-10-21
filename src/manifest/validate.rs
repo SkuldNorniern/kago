@@ -108,6 +108,7 @@ impl Validator<'_> {
             runs: Vec::new(),
             build: Vec::new(),
             inputs: Vec::new(),
+            purge: Vec::new(),
             requirements,
             update,
             artifacts,

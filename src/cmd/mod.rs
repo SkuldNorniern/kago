@@ -42,8 +42,9 @@ commands:
           [--set <field>=<value>]...
                 install the manifest on this machine; --set answers a
                 field of the package's own pages
-  uninstall <package-id> [--scope user|machine]
-                remove everything the install owns
+  uninstall <package-id> [--scope user|machine] [--purge]
+                remove everything the install owns; --purge also removes
+                the user's settings and data for it
   verify <package-id> [--scope user|machine]
                 check installed files against the receipt
   status [--scope user|machine] [--json]
@@ -83,7 +84,8 @@ pub fn run() -> ExitCode {
         .and_then(|a| build::run(&a)),
         "install" => Args::parse(rest, &["--scope", "--components", "--location", "--set"])
             .and_then(|a| lifecycle::install(&a)),
-        "uninstall" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::uninstall(&a)),
+        "uninstall" => Args::parse_with(rest, &["--scope"], &["--purge"])
+            .and_then(|a| lifecycle::uninstall(&a)),
         "verify" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::verify(&a)),
         "status" => {
             Args::parse_with(rest, &["--scope"], &["--json"]).and_then(|a| lifecycle::status(&a))

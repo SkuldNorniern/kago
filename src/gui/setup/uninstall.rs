@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use aurea::elements::{
-    Button, Container, Divider, Label, Orientation, ProgressBar, Stack, TextView,
+    Button, Checkbox, Container, Divider, Label, Orientation, ProgressBar, Stack, TextView,
 };
 use aurea::{AureaResult, Window, WindowEvent};
 
@@ -80,11 +80,14 @@ pub(super) enum Page {
     Failed(String),
 }
 
-type Work = Box<dyn FnOnce() -> Result<Removed, String> + Send>;
+/// removes the package; true also removes the user's settings and data.
+type Work = Box<dyn FnOnce(bool) -> Result<Removed, String> + Send>;
 
 /// the removal and how far it is, the same for both looks.
 pub(super) struct Removal {
     pub page: Page,
+    /// the person ticked removing their settings and data too.
+    pub purge: bool,
     work: Option<Work>,
     tx: Sender<Result<Removed, String>>,
     rx: Receiver<Result<Removed, String>>,
@@ -95,6 +98,7 @@ impl Removal {
         let (tx, rx) = mpsc::channel();
         Self {
             page: Page::Ask,
+            purge: false,
             work: Some(work),
             tx,
             rx,
@@ -105,8 +109,9 @@ impl Removal {
     pub fn confirm(&mut self) {
         if let (Page::Ask, Some(work)) = (&self.page, self.work.take()) {
             let tx = self.tx.clone();
+            let purge = self.purge;
             thread::spawn(move || {
-                let _ = tx.send(work());
+                let _ = tx.send(work(purge));
             });
             self.page = Page::Working;
         }
@@ -158,7 +163,7 @@ impl Removal {
 /// when the window cannot be created.
 pub fn run<F>(info: &Removing, remove: F) -> AureaResult<bool>
 where
-    F: FnOnce() -> Result<Removed, String> + Send + 'static,
+    F: FnOnce(bool) -> Result<Removed, String> + Send + 'static,
 {
     let lang = Lang::detect();
     let removal = Removal::new(Box::new(remove));
@@ -180,7 +185,8 @@ fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool
         HEIGHT,
     )?;
     let (tx, rx) = mpsc::channel();
-    window.set_content(render(info, lang, &removal.page, &tx)?)?;
+    let (content, mut purge) = render(info, lang, &removal.page, &tx)?;
+    window.set_content(content)?;
     window.show();
     loop {
         for event in window.wait_events(Some(super::PUMP)) {
@@ -190,6 +196,7 @@ fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool
         }
         let changed = match rx.try_recv() {
             Ok(Message::Remove) => {
+                removal.purge = purge.take().is_some_and(|b| b.get_checked());
                 removal.confirm();
                 true
             }
@@ -197,7 +204,9 @@ fn native(info: &Removing, lang: Lang, mut removal: Removal) -> AureaResult<bool
             _ => removal.pump(),
         };
         if changed {
-            window.set_content(render(info, lang, &removal.page, &tx)?)?;
+            let (content, next) = render(info, lang, &removal.page, &tx)?;
+            window.set_content(content)?;
+            purge = next;
         }
     }
 }
@@ -209,7 +218,15 @@ fn button(title: &str, tx: &Sender<Message>, message: fn() -> Message) -> AureaR
     })
 }
 
-fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> AureaResult<Stack> {
+/// the page, and on the asking page the box for removing the user's
+/// settings and data too.
+fn render(
+    info: &Removing,
+    lang: Lang,
+    page: &Page,
+    tx: &Sender<Message>,
+) -> AureaResult<(Stack, Option<std::rc::Rc<Checkbox>>)> {
+    let mut purge = None;
     let fill = |line| {
         lang.fill(
             line,
@@ -231,6 +248,10 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
             if let Some(note) = info.running_note(lang) {
                 body.add(Label::new(&note)?)?;
             }
+            let tick =
+                std::rc::Rc::new(Checkbox::with_checked(lang.line(Line::RemoveData), false)?);
+            body.add(Shared(std::rc::Rc::clone(&tick)))?;
+            purge = Some(tick);
             body.add_spacer(1.0)?;
             buttons.add(button(lang.line(Line::Uninstall), tx, || Message::Remove)?)?;
             buttons.add(button(lang.line(Line::Cancel), tx, || Message::Close)?)?;
@@ -261,5 +282,27 @@ fn render(info: &Removing, lang: Lang, page: &Page, tx: &Sender<Message>) -> Aur
     window.add_weighted(body, 1.0)?;
     window.add(Divider::horizontal(WIDTH.unsigned_abs())?)?;
     window.add(buttons)?;
-    Ok(window)
+    Ok((window, purge))
+}
+
+/// a box still readable after the page took it.
+struct Shared(std::rc::Rc<Checkbox>);
+
+#[allow(
+    unsafe_code,
+    reason = "Element's invalidate is an unsafe trait method; this only forwards it"
+)]
+impl aurea::elements::Element for Shared {
+    fn handle(&self) -> *mut std::os::raw::c_void {
+        self.0.handle()
+    }
+
+    fn released_to_parent(&self) {
+        self.0.released_to_parent();
+    }
+
+    unsafe fn invalidate_platform(&self, rect: Option<aurea::render::Rect>) {
+        // SAFETY: same element, same thread; the caller's guarantees hold.
+        unsafe { self.0.invalidate_platform(rect) }
+    }
 }
