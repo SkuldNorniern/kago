@@ -1,6 +1,6 @@
-# the Windows setup: `kago build` writes it to dist/. build first:
-# cargo build --release, and the SteamVR driver and client in
-# ../aira-motion/aira-openvr with CMake.
+# the Windows setup: `kago build` builds the app and the SteamVR driver
+# and client, then writes the setup to dist/. the driver and client need
+# their CMake build folders configured once in ../aira-motion/aira-openvr.
 package dev.eira.aira-studio
   name Aira Studio
   version from cargo
@@ -13,6 +13,13 @@ license LICENSE
 
 source motion
   dir ../aira-motion
+
+# `kago build --no-build` packs what is built already.
+build
+  cargo build --release
+  when windows
+    cmake --build ../aira-motion/aira-openvr/driver/build --config Release
+    cmake --build ../aira-motion/aira-openvr/client/build --config Release
 
 require windows 10.0.17763
 
@@ -33,3 +40,7 @@ component steamvr "SteamVR support" required
 
 component desktop "Desktop shortcut" off
   shortcut desktop
+
+# settings and recordings; removed only when the person ticks "also
+# remove my settings and data" at uninstall.
+purge %APPDATA%/Aira
