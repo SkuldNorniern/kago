@@ -12,6 +12,7 @@ pub mod resource;
 pub use shortcut::{join_arguments, quote};
 pub mod restart;
 pub mod service;
+mod shared;
 mod shortcut;
 
 use std::collections::BTreeMap;
@@ -213,6 +214,10 @@ impl Platform for Windows {
 
     fn stop_service(&self, name: &str) -> Result<(), String> {
         service::stop_service(name)
+    }
+
+    fn shared_folder(&self, dir: &Path) -> bool {
+        shared::shared(dir)
     }
 
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {

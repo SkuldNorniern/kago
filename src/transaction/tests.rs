@@ -185,6 +185,11 @@ impl Platform for Fake {
         Ok(())
     }
 
+    /// a folder named `Shared` stands for one like the user's Documents.
+    fn shared_folder(&self, dir: &Path) -> bool {
+        dir.file_name().is_some_and(|n| n == "Shared")
+    }
+
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
         self.at_restart.borrow_mut().push(path.to_path_buf());
         Ok(())
@@ -1116,4 +1121,21 @@ fn purge_leaves_shared_files_alone() {
         shared.is_file(),
         "purge does too: another program may use it"
     );
+}
+
+#[test]
+fn purge_never_takes_a_folder_others_use() {
+    let w = World::new("purge-known");
+    let receipt = w.install(MANIFEST).unwrap();
+    let done = uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    let theirs = w.dir.join("machine").join("Shared");
+    fs::create_dir_all(&theirs).unwrap();
+    fs::write(theirs.join("letter.txt"), b"x").unwrap();
+    let receipt = Receipt {
+        purge: vec![theirs.clone()],
+        ..receipt
+    };
+    let failed = purge(&receipt, &w.fake, &done.kept);
+    assert!(theirs.join("letter.txt").is_file());
+    assert_eq!(failed.len(), 1, "{failed:?}");
 }

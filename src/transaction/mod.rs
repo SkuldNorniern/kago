@@ -286,8 +286,14 @@ pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec
         let named = dir
             .components()
             .any(|c| c.as_os_str().to_str() == Some(folder.as_str()));
-        let inside_app = app.is_some_and(|a| dir.starts_with(a) || a.starts_with(&dir));
-        if !named || inside_app || !dir.exists() {
+        let lower = |p: &Path| p.display().to_string().to_lowercase();
+        let inside_app = app.is_some_and(|a| {
+            let (a, d) = (lower(a), lower(&dir));
+            a == d
+                || a.starts_with(&format!("{d}{}", std::path::MAIN_SEPARATOR))
+                || d.starts_with(&format!("{a}{}", std::path::MAIN_SEPARATOR))
+        });
+        if !named || inside_app || !dir.exists() || platform.shared_folder(&dir) {
             continue;
         }
         if let Err(e) = fs::remove_dir_all(&dir) {
@@ -296,6 +302,13 @@ pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec
     }
     // the app's own data folders the Kagofile names with `purge`.
     for dir in receipt.purge.iter().filter(|d| d.exists()) {
+        if platform.shared_folder(dir) {
+            failed.push(format!(
+                "{}: other programs use this folder too, so it was kept",
+                dir.display()
+            ));
+            continue;
+        }
         let removed = if dir.is_dir() {
             fs::remove_dir_all(dir)
         } else {
