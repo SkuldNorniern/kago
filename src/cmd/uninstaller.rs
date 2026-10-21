@@ -3,7 +3,7 @@
 //! moves itself to a temp copy (a running program cannot delete itself),
 //! then asks, removes and reports, like an NSIS uninstaller.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use kago::install::Scope;
@@ -79,10 +79,7 @@ fn start(exe: &Path, (silent, purge): (bool, bool)) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let copy = std::env::temp_dir().join(format!(
-        "{package}-uninstall{}",
-        std::env::consts::EXE_SUFFIX
-    ));
+    let copy = temp_copy(package.as_str());
     // the copy must not start in the app folder either; see `remove`.
     let _ = std::env::set_current_dir(std::env::temp_dir());
     if let Err(e) = std::fs::copy(exe, &copy) {
@@ -137,7 +134,7 @@ fn remove(id: &str, scope: Scope, (silent, purge): (bool, bool), exe: &Path) -> 
             platform::tell(&title, &text);
         }
         eprintln!("uninstall: {id} is being installed or removed already");
-        delete_later(exe);
+        delete_later(exe, id);
         return ExitCode::FAILURE;
     };
     let code = match PackageId::new(id) {
@@ -147,8 +144,14 @@ fn remove(id: &str, scope: Scope, (silent, purge): (bool, bool), exe: &Path) -> 
             ExitCode::FAILURE
         }
     };
-    delete_later(exe);
+    delete_later(exe, id);
     code
+}
+
+/// the copy `start` made in the temp folder; never any other kago, like
+/// one run by hand with `--uninstall`.
+fn temp_copy(id: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("{id}-uninstall{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn remove_package(package: &PackageId, scope: Scope, (silent, purge): (bool, bool)) -> ExitCode {
@@ -290,7 +293,14 @@ fn uninstall_retrying(
 
 /// the temp copy cannot delete itself while running; a hidden helper
 /// waits a moment and deletes it, the way NSIS cleans up its `Au_.exe`.
-fn delete_later(exe: &Path) {
+fn delete_later(exe: &Path, id: &str) {
+    let copy = temp_copy(id);
+    let same = |a: &Path, b: &Path| {
+        a.display().to_string().to_lowercase() == b.display().to_string().to_lowercase()
+    };
+    if !same(exe, &copy) {
+        return;
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
