@@ -121,7 +121,11 @@ pub fn set_rule(name: &str, group: &str, rule: Option<&Firewall>) -> Result<(), 
                 let unique =
                     BSTR::from(format!("{name} (kago removing {} {i})", std::process::id()));
                 old.SetName(&unique)?;
-                rules.Remove(&unique)?;
+                if let Err(e) = rules.Remove(&unique) {
+                    // left under its own name, so it can be found again.
+                    let _ = old.SetName(&BSTR::from(name));
+                    return Err(e);
+                }
             }
             let Some(wanted) = rule else {
                 return Ok(());

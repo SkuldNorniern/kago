@@ -434,7 +434,7 @@ impl InstallPlan {
         }
         for op in &self.operations {
             match op {
-                Operation::AllowThroughFirewall { name, .. } => {
+                Operation::AllowThroughFirewall { name, .. } if self.scope == Scope::Machine => {
                     out.push(format!("firewall rule {name}"));
                 }
                 Operation::InstallService {
@@ -1218,9 +1218,15 @@ mod tests {
             op,
             Operation::AllowThroughFirewall { name, .. } if name == "Aurea"
         )));
-        assert_eq!(plan.admin_reasons(), ["firewall rule Aurea"]);
+        assert!(plan.admin_reasons().is_empty(), "per user it is left out");
         let everyone = plan.in_scope(Scope::Machine).unwrap().admin_reasons();
-        assert_eq!(everyone[0], "installing for everyone, into Program Files");
+        assert_eq!(
+            everyone,
+            [
+                "installing for everyone, into Program Files",
+                "firewall rule Aurea"
+            ]
+        );
         let twice = format!("{open}firewall main-executable udp 9000\n");
         let (plan, d) = build(&twice);
         assert!(plan.is_none());
