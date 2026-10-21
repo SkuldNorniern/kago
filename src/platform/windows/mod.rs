@@ -1,6 +1,7 @@
 //! Windows: per-user installs under `%LOCALAPPDATA%\Programs`, PATH in
 //! `HKCU\Environment`, Start Menu `.lnk`, uninstall entry in `HKCU`.
 
+mod admin_only;
 pub mod elevation;
 mod environment;
 pub mod firewall;
@@ -214,6 +215,13 @@ impl Platform for Windows {
 
     fn stop_service(&self, name: &str) -> Result<(), String> {
         service::stop_service(name)
+    }
+
+    fn secure_state(&self, dir: &Path) -> Result<(), String> {
+        if !elevation::is_elevated() {
+            return Ok(());
+        }
+        admin_only::admin_only(dir)
     }
 
     fn shared_folder(&self, dir: &Path) -> bool {

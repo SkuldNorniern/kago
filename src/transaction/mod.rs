@@ -106,12 +106,15 @@ fn lock(store: &Store, package: &PackageId) -> Result<Lock, Error> {
 ///
 /// # Errors
 ///
-/// when the platform has no state location for the scope.
+/// when the platform has no state location for the scope, or an elevated
+/// kago cannot make the one for everyone writable by administrators only.
 pub fn store(platform: &dyn Platform, scope: Scope) -> Result<Store, Error> {
-    platform
-        .state_dir(scope)
-        .map(Store::new)
-        .map_err(Error::Other)
+    let dir = platform.state_dir(scope).map_err(Error::Other)?;
+    // what an elevated kago trusts must not be writable by every user.
+    if scope == Scope::Machine {
+        platform.secure_state(&dir).map_err(Error::Other)?;
+    }
+    Ok(Store::new(dir))
 }
 
 /// installs or upgrades. `runtime` is the kago executable that uninstall

@@ -169,6 +169,17 @@ pub trait Platform {
         Ok(())
     }
 
+    /// keeps kago's state for everyone writable by administrators only,
+    /// when this process is one; else leaves it as it is.
+    ///
+    /// # Errors
+    ///
+    /// when it cannot be locked down.
+    fn secure_state(&self, dir: &Path) -> Result<(), String> {
+        let _ = dir;
+        Ok(())
+    }
+
     /// whether `dir` is a folder the system or other programs use too, or
     /// holds one, like the user's Documents: removing an app's data never
     /// takes it whole.
