@@ -192,12 +192,6 @@ impl Pen<'_> {
                     offset: 0.0,
                     color: at(from),
                 },
-                // reached a little early and held, so the far edge is
-                // exactly `to` and nothing next to it shows a step.
-                GradientStop {
-                    offset: 0.9,
-                    color: at(to),
-                },
                 GradientStop {
                     offset: 1.0,
                     color: at(to),
