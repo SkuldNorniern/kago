@@ -131,15 +131,31 @@ pub fn fill_text(text: &str, roots: &Roots) -> String {
     {
         return real.display().to_string();
     }
-    let mut out = text.to_owned();
-    for root in Root::ALL {
-        let token = format!("{{{}}}", root.as_str());
-        if out.contains(&token)
-            && let Some(dir) = roots.0.get(&root)
-        {
-            out = out.replace(&token, &dir.display().to_string());
+    // a root inside longer text, like `"{app}/x.exe" "%1"`: the path it
+    // starts runs to a quote, space, comma or semicolon, and gets this
+    // OS's separators, as programs reading it expect.
+    let mut out = String::new();
+    let mut rest = text;
+    'scan: while let Some(open) = rest.find('{') {
+        for root in Root::ALL {
+            let token = format!("{{{}}}", root.as_str());
+            if let Some(after) = rest[open..].strip_prefix(token.as_str())
+                && let Some(dir) = roots.0.get(&root)
+            {
+                let end = after
+                    .find(['"', '\'', ' ', ',', ';'])
+                    .unwrap_or(after.len());
+                out.push_str(&rest[..open]);
+                out.push_str(&dir.display().to_string());
+                out.push_str(&after[..end].replace('/', std::path::MAIN_SEPARATOR_STR));
+                rest = &after[end..];
+                continue 'scan;
+            }
         }
+        out.push_str(&rest[..=open]);
+        rest = &rest[open + 1..];
     }
+    out.push_str(rest);
     out
 }
 
@@ -221,5 +237,10 @@ mod tests {
             format!("--home={}", app.display())
         );
         assert_eq!(fill(&Value::word("3", false), &r), Value::word("3", false));
+        let exe = app.join("bin").join("aira.exe").display().to_string();
+        assert_eq!(
+            fill_text("\"{app}/bin/aira.exe\" \"%1\" {nope}/x", &r),
+            format!("\"{exe}\" \"%1\" {{nope}}/x")
+        );
     }
 }
