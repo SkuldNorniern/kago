@@ -40,7 +40,10 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
                 }
                 continue;
             };
-            let dir = store.root().join("updates").join(receipt.package.as_str());
+            // per user: the store for everyone is read-only without admin.
+            let dir = std::env::temp_dir()
+                .join("kago-updates")
+                .join(receipt.package.as_str());
             let result = newer(&receipt, &feed, &dir).and_then(|offer| match offer {
                 None => {
                     println!("{} {} is up to date", receipt.package, receipt.version);
