@@ -37,7 +37,9 @@ fn imports_in(b: &[u8]) -> Option<Vec<String>> {
             let (virtual_size, address) = (u32_at(s + 8)?, u32_at(s + 12)?);
             let (raw_size, raw) = (u32_at(s + 16)?, u32_at(s + 20)?);
             let span = virtual_size.max(raw_size);
-            (address <= rva && rva < address + span).then(|| (rva - address + raw) as usize)
+            // a broken header must not overflow.
+            let into = rva.checked_sub(address).filter(|d| *d < span)?;
+            into.checked_add(raw).map(|at| at as usize)
         })
     };
     let mut out = Vec::new();
