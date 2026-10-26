@@ -3,6 +3,7 @@
 //! the network.
 
 use super::policy::keywords;
+use super::selector::Selector;
 use crate::diagnostic::Location;
 
 keywords! {
@@ -23,6 +24,7 @@ pub struct FirewallRule {
     /// the local ports, like `7000,9000-9010`; every port when empty.
     pub ports: String,
     pub component: Option<String>,
+    pub when: Selector,
     pub at: Location,
 }
 

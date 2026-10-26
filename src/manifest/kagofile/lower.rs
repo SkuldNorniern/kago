@@ -901,13 +901,17 @@ impl Lower<'_> {
         };
         let mut to = "{app}".to_owned();
         let mut variants = 0;
+        // `to` applies to every variant, wherever it sits in the block
+        for child in node.children.iter().filter(|c| c.keyword() == "to") {
+            match child.args() {
+                [dir] => dir.text.trim_end_matches('/').clone_into(&mut to),
+                _ => self.syntax(child.at(), "expected `to <directory>`"),
+            }
+        }
         for child in &node.children {
             let args = child.args();
             match child.keyword() {
-                "to" => match args {
-                    [dir] => dir.text.trim_end_matches('/').clone_into(&mut to),
-                    _ => self.syntax(child.at(), "expected `to <directory>`"),
-                },
+                "to" => {}
                 "icon" => match args {
                     [os, path] => {
                         let when = self.when(scope, std::slice::from_ref(os));
@@ -1098,6 +1102,13 @@ impl Lower<'_> {
                 _ => return self.syntax(word.at, usage),
             }
         }
+        let when = self.when(scope, &[]);
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
         self.firewall.push(FirewallRule {
             app: app.text.clone(),
             name,
@@ -1105,6 +1116,7 @@ impl Lower<'_> {
             protocol,
             ports,
             component: scope.component.as_ref().map(|c| c.get_ref().clone()),
+            when,
             at: Location::at(self.file, self.source, node.at()),
         });
     }
@@ -1199,6 +1211,34 @@ impl Lower<'_> {
                         diagnostic::MANIFEST_VALUE,
                         registry.at,
                         format!("`{}` is not a registry key", registry.text),
+                    );
+                    return None;
+                }
+                if path.contains('/') {
+                    self.error(
+                        diagnostic::MANIFEST_VALUE,
+                        registry.at,
+                        format!(
+                            "`{}` has a `/` in the registry key; separate keys with `\\`",
+                            registry.text
+                        ),
+                    );
+                    return None;
+                }
+                let hive = path.split('\\').next().unwrap_or_default();
+                if hive.len() >= 2
+                    && hive[..2].eq_ignore_ascii_case("HK")
+                    && !["HKCU", "HKEY_CURRENT_USER", "HKLM", "HKEY_LOCAL_MACHINE"]
+                        .iter()
+                        .any(|h| hive.eq_ignore_ascii_case(h))
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            diagnostic::MANIFEST_VALUE,
+                            format!("`{hive}` is not a supported registry hive"),
+                        )
+                        .at(Location::at(self.file, self.source, registry.at))
+                        .help("use HKCU or HKLM; for file types and protocols write `HKCU\\Software\\Classes\\...`"),
                     );
                     return None;
                 }

@@ -487,6 +487,55 @@ page other \"Other\"
     }
 
     #[test]
+    fn registry_keys_need_a_supported_hive() {
+        for bad in [
+            "registry HKCR\\.foo set @ x\n",
+            "registry HKEY_CLASSES_ROOT\\x set @ x\n",
+            "registry hkcr\\x set @ x\n",
+            "registry HKCU/Software/Foo set @ x\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(m.is_none(), "{bad}");
+            assert_eq!(codes, [diagnostic::MANIFEST_VALUE], "{bad}");
+        }
+        for good in [
+            "registry HKCU\\Software\\Classes\\.foo set @ x\n",
+            "registry hklm\\Software\\Foo set @ x\n",
+            "registry HKEY_CURRENT_USER\\Software\\Foo set @ x\n",
+        ] {
+            let (m, codes) = check(&with(good));
+            assert!(codes.is_empty() && m.is_some(), "{good}: {codes:?}");
+        }
+    }
+
+    #[test]
+    fn firewall_keeps_its_when() {
+        let (m, codes) = check(&with(
+            "when windows\n  firewall main-executable\nfirewall main-executable \"B\"\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let rules = m.unwrap().firewall;
+        assert_ne!(rules[0].when, Selector::default());
+        assert_eq!(rules[1].when, Selector::default());
+    }
+
+    #[test]
+    fn app_to_applies_to_variants_above_it() {
+        let (m, codes) = check(
+            "package dev.x.tool\n  version 1.0.0\napp tool\n  windows tool.exe\n  to {app}/bin\n",
+        );
+        assert!(codes.is_empty(), "{codes:?}");
+        assert_eq!(m.unwrap().files[0].target.to_string(), "{app}/bin/tool.exe");
+    }
+
+    #[test]
+    fn quote_inside_a_word_is_a_syntax_error() {
+        let (m, codes) = check(&with("run tool --name=\"My App\"\n"));
+        assert!(m.is_none());
+        assert_eq!(codes, [diagnostic::MANIFEST_SYNTAX]);
+    }
+
+    #[test]
     fn build_lines_run_in_order() {
         let (m, codes) = check(&with(
             "build python -m PyInstaller app.spec\nbuild cargo build --release\n",
