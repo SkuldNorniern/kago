@@ -3,8 +3,8 @@ mod build;
 mod check;
 mod init;
 mod inspect;
+mod kagofile;
 mod lifecycle;
-mod plan;
 pub mod setup;
 pub mod uninstaller;
 mod update;
@@ -29,10 +29,6 @@ commands:
   inspect <setup.exe> [--plan] [--json]
                 what a built setup holds: package, components, pages,
                 prerequisites; --plan lists every step it would take
-  plan [manifest] [--target <target>] [--scope user|machine]
-       [--components <a,b>] [--json]
-                print what an install would do and what of it needs
-                administrator rights, without doing it
   build [manifest] [--target <target>] [--scope user|machine]
         [--components <a,b>] [--out <dir>] [--no-sign] [--no-build]
                 run the Kagofile's `build` lines, then build the setup
@@ -49,8 +45,6 @@ commands:
                 check installed files against the receipt
   status [package-id] [--scope user|machine] [--json]
                 list installed packages
-  recover [--scope user|machine]
-                finish or roll back installs a crash left behind
   update [<package-id>] [--check] [--silent]
                 install newer versions from where the Kagofile's `update`
                 line points; --check only says what is newer
@@ -74,8 +68,6 @@ pub fn run() -> ExitCode {
         "inspect" => {
             Args::parse_with(rest, &[], &["--plan", "--json"]).and_then(|a| inspect::run(&a))
         }
-        "plan" => Args::parse_with(rest, &["--target", "--scope", "--components"], &["--json"])
-            .and_then(|a| plan::run(&a)),
         "build" => Args::parse_with(
             rest,
             &["--target", "--scope", "--components", "--out"],
@@ -90,7 +82,6 @@ pub fn run() -> ExitCode {
         "status" => {
             Args::parse_with(rest, &["--scope"], &["--json"]).and_then(|a| lifecycle::status(&a))
         }
-        "recover" => Args::parse(rest, &["--scope"]).and_then(|a| lifecycle::recover(&a)),
         "update" => {
             Args::parse_with(rest, &[], &["--check", "--silent"]).and_then(|a| update::run(&a))
         }

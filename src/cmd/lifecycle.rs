@@ -1,4 +1,4 @@
-//! commands that change the machine: install, uninstall, recover, plus
+//! commands that change the machine: install and uninstall, plus
 //! status which only reads.
 
 use std::process::ExitCode;
@@ -7,10 +7,10 @@ use kago::install::{Scope, check_folder};
 use kago::manifest::FolderChoice;
 use kago::package::{PackageId, Target};
 use kago::platform::{self, Platform};
-use kago::transaction::{self, Recovered, Store};
+use kago::transaction::{self, Store};
 
 use super::args::Args;
-use super::plan;
+use super::kagofile;
 
 fn scope(args: &Args) -> Result<Scope, String> {
     args.value("--scope").map_or(Ok(Scope::User), str::parse)
@@ -43,7 +43,7 @@ fn open(scope: Scope) -> Result<(Box<dyn Platform>, Store), String> {
 /// installs the manifest for this machine.
 pub fn install(args: &Args) -> Result<ExitCode, String> {
     let target = Target::host().ok_or("this machine is not a kago target")?;
-    let Some((loaded, plan)) = plan::build(args, target, false)? else {
+    let Some((loaded, plan)) = kagofile::build(args, target, false)? else {
         return Ok(ExitCode::FAILURE);
     };
     if plan.scope == Scope::Machine && !platform::is_elevated() {
@@ -148,25 +148,6 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
         eprintln!("close the app if it is running, then run `kago uninstall {package}` again");
         Ok(ExitCode::FAILURE)
     }
-}
-
-pub fn recover(args: &Args) -> Result<ExitCode, String> {
-    // it recovers every package; a name would only look like it picks one.
-    if let Some(extra) = args.positional.first() {
-        return Err(format!("unexpected argument `{extra}`"));
-    }
-    let (platform, store) = open(scope(args)?)?;
-    let done = transaction::recover(platform.as_ref(), &store).map_err(|e| e.to_string())?;
-    if done.is_empty() {
-        println!("nothing to recover");
-    }
-    for r in done {
-        match r {
-            Recovered::Finished(p) => println!("{p}: finished committed install"),
-            Recovered::RolledBack(p) => println!("{p}: rolled back unfinished install"),
-        }
-    }
-    Ok(ExitCode::SUCCESS)
 }
 
 pub fn status(args: &Args) -> Result<ExitCode, String> {

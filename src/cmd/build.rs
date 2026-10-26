@@ -14,7 +14,7 @@ use kago::update::Feed;
 
 use super::args::Args;
 use super::check::targets;
-use super::plan::{self, Loaded};
+use super::kagofile::{self, Loaded};
 
 /// builds the setup executable for one target.
 pub fn run(args: &Args) -> Result<ExitCode, String> {
@@ -30,7 +30,7 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
             "a {target} setup needs a kago built for {target} as its runtime; build on that machine for now"
         ));
     }
-    let Some((loaded, mut plan)) = plan::build(args, target, true)? else {
+    let Some((loaded, mut plan)) = kagofile::build(args, target, true)? else {
         return Ok(ExitCode::FAILURE);
     };
     let signer = match &loaded.manifest.sign {

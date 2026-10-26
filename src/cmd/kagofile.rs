@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 
 use kago::install::{InstallPlan, Scope, Selection, choose, resolve};
 use kago::manifest::{Context, Manifest};
@@ -7,48 +6,7 @@ use kago::package::Target;
 use kago::payload::Payload;
 
 use super::args::Args;
-use super::check::targets;
 use super::{load, manifest_path, report};
-
-/// dry run: resolves and builds the install plan, prints it, changes
-/// nothing.
-pub fn run(args: &Args) -> Result<ExitCode, String> {
-    let target = match targets(args)?.as_slice() {
-        [one] => *one,
-        _ => return Err("`plan` takes one `--target`".to_owned()),
-    };
-    let Some((_, plan)) = build(args, target, false)? else {
-        return Ok(ExitCode::FAILURE);
-    };
-    let admin = plan.admin_reasons();
-    if args.flag("--json") {
-        let report = serde_json::json!({ "plan": plan, "admin": admin });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
-        );
-        return Ok(ExitCode::SUCCESS);
-    }
-    print!("{plan}");
-    println!();
-    if admin.is_empty() {
-        println!("administrator rights: not needed");
-    } else {
-        println!("administrator rights: needed for");
-        for reason in &admin {
-            println!("  {reason}");
-        }
-    }
-    if plan.scope_open {
-        let other = match plan.scope {
-            Scope::Machine => Scope::User,
-            Scope::User => Scope::Machine,
-        };
-        println!("  (picking {other} at install changes this; see --scope {other})");
-    }
-    println!("\nno changes made.");
-    Ok(ExitCode::SUCCESS)
-}
 
 /// manifest argument, `--scope` and `--components` to the manifest, its
 /// directory and an install plan for `target`. for a setup, the `build`

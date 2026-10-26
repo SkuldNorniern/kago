@@ -134,7 +134,7 @@ fn undone(
     let failures = roll_back(undos, platform);
     if !failures.is_empty() {
         return Error::Other(format!(
-            "{e}\nrollback was incomplete, run `kago recover`:\n  {}",
+            "{e}\nrollback was incomplete; run the setup or uninstall again to finish it:\n  {}",
             failures.join("\n  ")
         ));
     }

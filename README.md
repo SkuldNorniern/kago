@@ -418,14 +418,12 @@ Your files are signed as copies inside the setup; the ones in your build folder 
 ```
 kago init [dir] [--id <package-id>] [--force]   starter Kagofile
 kago check [--target <t>]... [--json]           validate and resolve
-kago plan [--components a,b] [--json]           what an install would do and what needs administrator rights
 kago build [--out <dir>] [--components a,b] [--no-sign] [--no-build]   build steps, then the setup exe
 kago inspect <setup.exe> [--plan] [--json]      what a built setup holds
 kago install [--components a,b] [--location <dir>] [--set field=value]   install straight from the Kagofile
 kago uninstall <package-id> [--purge]           --purge also removes the person's settings and data
 kago verify <package-id>                        compare installed files with the receipt
 kago status [--json]                            what is installed
-kago recover                                    finish or undo an install a crash cut short
 kago update [<package-id>] [--check] [--silent] install a newer version from the `update` feed
 kago version
 ```
