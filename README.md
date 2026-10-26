@@ -83,8 +83,6 @@ The format:
 - `#` starts a comment
 - put text in quotes when it has spaces and is not the last thing on the line
 
-[examples/](examples) has the Kagofiles for Ozone, Lykil Studio and Aira Studio.
-
 ### package
 
 The first block. Only the id and `version` are required.
