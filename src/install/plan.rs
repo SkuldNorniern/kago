@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest as _, Sha256};
 
 use super::need::Need;
-use super::operation::{Digest, Operation};
+use super::operation::{Digest, Operation, Program};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
@@ -232,6 +232,7 @@ impl InstallPlan {
         if diagnostics.has_errors() {
             return (None, diagnostics);
         }
+        inherit_owners(&steps.operations, &mut steps.owners);
         let choices = choices(manifest, resolved, &steps.owners, &steps.operations);
         let operations = steps.operations;
         let plan = Self {
@@ -1072,6 +1073,40 @@ fn expected<S: Sources + ?Sized>(resolved: &Resolved, sources: &S, diagnostics: 
     }
 }
 
+/// an item outside any component that points at a component's file goes with that component.
+fn inherit_owners(operations: &[Operation], owners: &mut [Option<String>]) {
+    let installed: BTreeMap<&SemanticPath, usize> = operations
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            Operation::InstallFile { target, .. } if owners[i].is_some() => Some((target, i)),
+            _ => None,
+        })
+        .collect();
+    let inherited: Vec<(usize, String)> = operations
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| owners[*i].is_none())
+        .filter_map(|(i, op)| {
+            let path = match op {
+                Operation::CreateShortcut { target: path, .. }
+                | Operation::InstallService { command: path, .. }
+                | Operation::AllowThroughFirewall { program: path, .. } => path,
+                Operation::Run { command, .. } => match &command.program {
+                    Program::Installed { path } => path,
+                    Program::System { .. } => return None,
+                },
+                _ => return None,
+            };
+            let j = *installed.get(path)?;
+            Some((i, owners[j].clone()?))
+        })
+        .collect();
+    for (i, owner) in inherited {
+        owners[i] = Some(owner);
+    }
+}
+
 /// the optional components chosen in `resolved`, each with the operations
 /// only it brings. `owners` names the component of every operation.
 fn choices(
@@ -1535,6 +1570,29 @@ component docs Documentation off
                 .any(|op| matches!(op, Operation::AllowThroughFirewall { .. })),
             "only for aarch64"
         );
+    }
+
+    #[test]
+    fn shortcuts_follow_the_component_of_their_app() {
+        let dir = payload_dir("shortcut-owner");
+        let src = format!(
+            "{AUREA}\ncomponent extra \"Extra\" off\n  app helper\n    windows x86_64 dist/windows-x86_64/aurea.exe -> {{app}}/helper.exe\nshortcut \"Helper\" -> helper\n"
+        );
+        let (m, d) = Manifest::parse("Kagofile", &src);
+        let m = m.unwrap_or_else(|| panic!("{d:?}"));
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let (r, d) = resolve(&m, &Context::target(target), Selection::with(&m, ["extra"]));
+        let r = r.unwrap_or_else(|| panic!("{d:?}"));
+        let (p, d) = InstallPlan::build(&m, &r, target, Scope::Machine, dir.as_path());
+        let plan = p.unwrap_or_else(|| panic!("{d:?}"));
+        let has_helper = |p: &InstallPlan| {
+            p.operations.iter().any(|op| {
+                matches!(op, Operation::CreateShortcut { name, .. } if name.as_str() == "Helper")
+            })
+        };
+        assert!(!has_helper(&plan.with_defaults()), "dropped with its app");
+        assert!(has_helper(&plan.select(["extra"])), "kept with its app");
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
