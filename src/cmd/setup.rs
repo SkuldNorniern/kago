@@ -120,30 +120,34 @@ pub fn run_embedded() -> Option<ExitCode> {
             return Some(ExitCode::FAILURE);
         }
     };
-    if let Some(file) = parsed.answers_file.take() {
-        let read = fs::read_to_string(&file);
-        let _ = fs::remove_file(&file);
-        match read.map_err(|e| e.to_string()).and_then(|t| {
-            serde_json::from_str::<std::collections::BTreeMap<String, String>>(&t)
-                .map_err(|e| e.to_string())
-        }) {
-            Ok(answers) => parsed.answers.extend(answers),
-            Err(e) => {
-                eprintln!("setup: {}: {e}", file.display());
-                return Some(ExitCode::FAILURE);
-            }
-        }
+    if let Err(e) = read_answers(&mut parsed) {
+        eprintln!("setup: {e}");
+        return Some(ExitCode::FAILURE);
     }
     if parsed.help {
         print!("{SETUP_USAGE}");
         return Some(ExitCode::SUCCESS);
     }
-    let plan = match Container::open(&exe, embedded.offset) {
-        Ok(c) => c.header.plan,
+    let (plan, folder) = match Container::open(&exe, embedded.offset) {
+        Ok(c) => (c.header.plan, c.header.setup.folder),
         Err(e) => {
             eprintln!("setup failed: {e}");
             return Some(ExitCode::FAILURE);
         }
+    };
+    if parsed.location.is_some() && folder == kago::manifest::FolderChoice::Fixed {
+        eprintln!("setup: {} installs into a fixed folder", plan.name);
+        return Some(ExitCode::FAILURE);
+    }
+    // whole before a restart with administrator rights, which starts in
+    // System32.
+    let location = match parsed.location.as_deref().map(std::path::absolute) {
+        Some(Ok(dir)) => Some(dir),
+        Some(Err(e)) => {
+            eprintln!("setup failed: {e}");
+            return Some(ExitCode::FAILURE);
+        }
+        None => None,
     };
     let scope = match starting_scope(&plan, parsed.scope) {
         Ok(scope) => scope,
@@ -159,6 +163,12 @@ pub fn run_embedded() -> Option<ExitCode> {
     let asks_later = window && plan.scope_open && !parsed.elevated;
     if scope == Scope::Machine && !asks_later && !platform::is_elevated() {
         let mut again = args.clone();
+        if let Some(dir) = &location
+            && let Some(at) = again.iter().position(|a| a == "--location")
+            && let Some(value) = again.get_mut(at + 1)
+        {
+            *value = dir.display().to_string();
+        }
         if plan.scope_open && parsed.scope.is_none() {
             again.extend(["--scope".to_owned(), scope.to_string()]);
         }
@@ -188,14 +198,6 @@ pub fn run_embedded() -> Option<ExitCode> {
         #[cfg(feature = "gui")]
         return Some(self::window(exe, embedded, &plan, scope, &parsed));
     }
-    let location = match parsed.location.as_deref().map(std::path::absolute) {
-        Some(Ok(dir)) => Some(dir),
-        Some(Err(e)) => {
-            eprintln!("setup failed: {e}");
-            return Some(ExitCode::FAILURE);
-        }
-        None => None,
-    };
     let choice = Choice {
         components: parsed.components.as_deref(),
         location: location.as_deref(),
@@ -212,6 +214,25 @@ pub fn run_embedded() -> Option<ExitCode> {
             ExitCode::FAILURE
         }
     })
+}
+
+/// the answers file the window that asked for administrator rights wrote,
+/// read once and deleted.
+fn read_answers(parsed: &mut SetupArgs) -> Result<(), String> {
+    let Some(file) = parsed.answers_file.take() else {
+        return Ok(());
+    };
+    let read = fs::read_to_string(&file);
+    let _ = fs::remove_file(&file);
+    let answers = read
+        .map_err(|e| e.to_string())
+        .and_then(|t| {
+            serde_json::from_str::<std::collections::BTreeMap<String, String>>(&t)
+                .map_err(|e| e.to_string())
+        })
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    parsed.answers.extend(answers);
+    Ok(())
 }
 
 /// where the install starts: the scope asked for, else the one it is
