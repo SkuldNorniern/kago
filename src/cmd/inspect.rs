@@ -79,6 +79,7 @@ fn json(setup: &Setup<'_>, operations: bool) -> serde_json::Value {
             "id": p.id, "name": p.name, "admin": p.admin,
         })).collect::<Vec<_>>(),
         "update": plan.update,
+        "admin": plan.admin_reasons(),
         "assets": header.assets.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
         "operations": operations.then_some(&plan.operations),
     })
@@ -159,6 +160,9 @@ fn text(setup: &Setup<'_>, operations: bool) {
     }
     if let Some(feed) = &plan.update {
         println!("updates:    {feed}");
+    }
+    for reason in plan.admin_reasons() {
+        println!("admin:      {reason}");
     }
     if !header.assets.is_empty() {
         let names: Vec<&str> = header.assets.iter().map(|a| a.name.as_str()).collect();
