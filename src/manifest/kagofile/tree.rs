@@ -60,7 +60,7 @@ pub fn parse(file: &str, source: &str) -> Result<Vec<Node>, Diagnostic> {
         if line[..indent].contains('\t') {
             return Err(error(start, "indent with spaces, not tabs"));
         }
-        let words = words(line, start).map_err(|at| error(at, "unclosed quote"))?;
+        let words = words(line, start).map_err(|(at, why)| error(at, why))?;
         if words.is_empty() {
             continue;
         }
@@ -91,8 +91,8 @@ fn attach(open: &mut [(usize, Node)], roots: &mut Vec<Node>, node: Node) {
     }
 }
 
-/// splits one line into words. `Err` holds the offset of an unclosed quote.
-fn words(line: &str, base: usize) -> Result<Vec<Word>, usize> {
+/// splits one line into words. `Err` holds the offset and reason of a bad quote.
+fn words(line: &str, base: usize) -> Result<Vec<Word>, (usize, &'static str)> {
     let mut out = Vec::new();
     let mut chars = line.char_indices().peekable();
     while let Some(&(i, c)) = chars.peek() {
@@ -120,7 +120,7 @@ fn words(line: &str, base: usize) -> Result<Vec<Word>, usize> {
                 }
             }
             if !closed {
-                return Err(base + i);
+                return Err((base + i, "unclosed quote"));
             }
             out.push(Word {
                 text,
@@ -129,9 +129,15 @@ fn words(line: &str, base: usize) -> Result<Vec<Word>, usize> {
             });
         } else {
             let mut text = String::new();
-            while let Some(&(_, c)) = chars.peek() {
+            while let Some(&(j, c)) = chars.peek() {
                 if c.is_whitespace() {
                     break;
+                }
+                if c == '"' {
+                    return Err((
+                        base + j,
+                        "a quote inside a word; put the whole word in quotes, like \"--name=My App\"",
+                    ));
                 }
                 text.push(c);
                 chars.next();
@@ -181,6 +187,13 @@ mod tests {
     fn hash_inside_a_word_is_not_a_comment() {
         let nodes = parse("Kagofile", "fetch https://x/a#b\n").unwrap();
         assert_eq!(nodes[0].args()[0].text, "https://x/a#b");
+    }
+
+    #[test]
+    fn quote_inside_a_word_is_an_error_at_the_quote() {
+        let src = "run tool --name=\"My App\"\n";
+        let e = parse("Kagofile", src).unwrap_err();
+        assert_eq!(e.location.unwrap().column, 17);
     }
 
     #[test]
