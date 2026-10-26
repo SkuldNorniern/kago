@@ -191,8 +191,16 @@ fn unmet(plan: &InstallPlan, platform: &dyn Platform) -> Vec<String> {
 /// compare on disk, so the same `{app}/x` in a folder moved away from is
 /// stale.
 fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
-    let on_disk =
-        |a: &SemanticPath, b: &SemanticPath| a == b && previous.absolute(a) == new.absolute(b);
+    // Windows names match whatever their case: `Tool.exe` then `tool.exe`
+    // is the same file, which must not go as stale.
+    let on_disk = |a: &SemanticPath, b: &SemanticPath| match (previous.absolute(a), new.absolute(b))
+    {
+        (Some(x), Some(y)) if cfg!(windows) => {
+            x.as_os_str().eq_ignore_ascii_case(y.as_os_str())
+                || x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase()
+        }
+        (x, y) => a == b && x == y,
+    };
     new.resources.iter().any(|n| match (old, n) {
         (Resource::File { path: a, .. }, Resource::File { path: b, .. })
         | (Resource::Directory { path: a }, Resource::Directory { path: b }) => on_disk(a, b),

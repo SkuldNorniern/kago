@@ -1199,3 +1199,19 @@ fn an_install_for_everyone_never_writes_through_a_link() {
     w.install(MANIFEST).unwrap();
     fs::remove_dir(config.join("App")).unwrap();
 }
+
+#[cfg(windows)]
+#[test]
+fn an_update_that_only_changes_a_name_s_case_keeps_the_file() {
+    let w = World::new("case");
+    let v1 = MANIFEST.replace(
+        "copy payload/themes",
+        "copy payload/config.toml -> {app}/Tool.toml",
+    );
+    w.install(&v1).unwrap();
+    let v2 = v1
+        .replace("{app}/Tool.toml", "{app}/tool.toml")
+        .replace("1.0.0", "1.1.0");
+    w.install(&v2).unwrap();
+    assert!(w.app().join("tool.toml").is_file(), "not dropped as stale");
+}
