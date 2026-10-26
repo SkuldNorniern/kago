@@ -21,6 +21,9 @@ use crate::manifest::{FolderChoice, SemanticPath, SetupLook};
 pub const MAGIC: &[u8; 8] = b"KAGOPKG1";
 pub const FORMAT: u32 = 1;
 
+/// more than any real plan needs.
+const MAX_HEADER: u64 = 64 << 20;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Header {
     pub format: u32,
@@ -197,6 +200,17 @@ impl Container {
         let Some(asset) = self.header.assets.iter().find(|a| a.name == name) else {
             return Ok(None);
         };
+        // a damaged size must not ask for more than the file holds.
+        let end = self
+            .payload_start
+            .saturating_add(asset.offset)
+            .saturating_add(asset.size);
+        if end > self.file.metadata()?.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("container: asset {name} runs past the end"),
+            ));
+        }
         let size = usize::try_from(asset.size).map_err(io::Error::other)?;
         let mut bytes = vec![0; size];
         self.file
@@ -223,6 +237,10 @@ impl Container {
             return Err(bad("bad magic"));
         }
         let len = u64::from_le_bytes(len);
+        // a damaged length must not ask for any amount of memory.
+        if len > MAX_HEADER {
+            return Err(bad("header too large"));
+        }
         let len = usize::try_from(len).map_err(|_| bad("header too large"))?;
         let mut json = vec![0; len];
         file.read_exact(&mut json)?;
@@ -303,7 +321,8 @@ impl Container {
             self.file
                 .seek(SeekFrom::Start(self.payload_start + entry.offset))?;
             let part = (&mut self.file).take(entry.packed);
-            let mut unpacked = zstd::Decoder::new(part)?;
+            // never more than the entry says, whatever a damaged frame holds.
+            let mut unpacked = zstd::Decoder::new(part)?.take(entry.size + 1);
             let copied = io::copy(&mut unpacked, &mut fs::File::create(&out)?)?;
             let (size, digest) = hash(&out)?;
             if copied != entry.size || size != entry.size || digest != entry.sha256 {
