@@ -219,6 +219,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
     };
     let mut frame = Frame {
         hits: Vec::new(),
+        caret: None,
         hovered: s.hovered(),
         pressed: s.pressed,
         anim: &mut anim,

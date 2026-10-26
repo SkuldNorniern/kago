@@ -94,6 +94,10 @@ struct State {
     pressed: Option<Hit>,
     /// Enter went down in this window; it acts when it comes up.
     enter: bool,
+    /// what an input method is still composing, like a Hangul syllable.
+    preedit: String,
+    /// where the caret was drawn, for the input method's candidates.
+    caret: Option<Area>,
     hits: Vec<(Area, Hit)>,
     anim: Anim,
     /// page drawn last frame, to start the rise when it changes.
@@ -307,7 +311,12 @@ impl State {
             WindowEvent::TextInput { ref text }
                 if matches!(self.session.wizard.page, Page::Input(_)) =>
             {
+                self.preedit.clear();
                 self.session.wizard.type_text(text);
+                true
+            }
+            WindowEvent::ImePreedit { ref text, .. } => {
+                self.preedit.clone_from(text);
                 true
             }
             // on release, and only after a press this window saw: an Enter
@@ -331,42 +340,45 @@ impl State {
                 key,
                 pressed: true,
                 modifiers,
-            } => {
-                let typing = matches!(self.session.wizard.page, Page::Input(_));
-                // Ctrl on Windows and Linux, Cmd on macOS.
-                let command = modifiers.command();
-                let wizard = &mut self.session.wizard;
-                match key {
-                    KeyCode::V if typing && command => {
-                        if let Some(text) = aurea::clipboard_text() {
-                            wizard.paste(&text);
-                        }
-                    }
-                    KeyCode::Insert if typing && modifiers.shift => {
-                        if let Some(text) = aurea::clipboard_text() {
-                            wizard.paste(&text);
-                        }
-                    }
-                    KeyCode::C | KeyCode::Insert if typing && command => {
-                        if let Some(text) = wizard.copied() {
-                            let _ = aurea::set_clipboard_text(text);
-                        }
-                    }
-                    KeyCode::Backspace if typing && command => wizard.clear(),
-                    KeyCode::Backspace if typing => wizard.erase(),
-                    KeyCode::Tab if typing => self.focus_next(),
-                    KeyCode::Escape if self.session.closable() => {
-                        self.close |= self.session.act(Action::Cancel);
-                    }
-                    KeyCode::Space if self.session.wizard.page == Page::License => {
-                        self.click(Hit::Accept);
-                    }
-                    _ => return false,
-                }
-                true
-            }
+            } => self.key(key, modifiers),
             _ => false,
         }
+    }
+
+    /// a key pressed, besides Enter. true when the canvas should redraw.
+    fn key(&mut self, key: KeyCode, modifiers: aurea::Modifiers) -> bool {
+        let typing = matches!(self.session.wizard.page, Page::Input(_));
+        // Ctrl on Windows and Linux, Cmd on macOS.
+        let command = modifiers.command();
+        let wizard = &mut self.session.wizard;
+        match key {
+            KeyCode::V if typing && command => {
+                if let Some(text) = aurea::clipboard_text() {
+                    wizard.paste(&text);
+                }
+            }
+            KeyCode::Insert if typing && modifiers.shift => {
+                if let Some(text) = aurea::clipboard_text() {
+                    wizard.paste(&text);
+                }
+            }
+            KeyCode::C | KeyCode::Insert if typing && command => {
+                if let Some(text) = wizard.copied() {
+                    let _ = aurea::set_clipboard_text(text);
+                }
+            }
+            KeyCode::Backspace if typing && command => wizard.clear(),
+            KeyCode::Backspace if typing => wizard.erase(),
+            KeyCode::Tab if typing => self.focus_next(),
+            KeyCode::Escape if self.session.closable() => {
+                self.close |= self.session.act(Action::Cancel);
+            }
+            KeyCode::Space if self.session.wizard.page == Page::License => {
+                self.click(Hit::Accept);
+            }
+            _ => return false,
+        }
+        true
     }
 }
 
@@ -451,6 +463,8 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         mouse: (-1.0, -1.0),
         pressed: None,
         enter: false,
+        preedit: String::new(),
+        caret: None,
         hits: Vec::new(),
         anim: Anim::default(),
         shown: None,
@@ -468,6 +482,7 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
     window.set_content(layout)?;
     window.show();
     request_canvas_redraw(id);
+    let mut told: Option<Area> = None;
     loop {
         let mut redraw = false;
         for event in window.wait_events(Some(super::PUMP)) {
@@ -503,6 +518,14 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         if redraw {
             request_canvas_redraw(id);
         }
+        // the input method's candidates open beside the caret.
+        let caret = state.borrow().caret;
+        if caret != told {
+            if let Some(c) = caret {
+                let _ = window.set_ime_cursor_area(aurea::render::Rect::new(c.x, c.y, c.w, c.h));
+            }
+            told = caret;
+        }
     }
 }
 
@@ -528,6 +551,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
     };
     let mut frame = Frame {
         hits: Vec::new(),
+        caret: None,
         hovered: s.hovered(),
         pressed: s.pressed,
         anim: &mut anim,
@@ -608,7 +632,7 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
             1.0 - arrived,
         )?;
     }
-    s.hits = frame.hits;
+    (s.hits, s.caret) = (frame.hits, frame.caret);
     s.anim = anim;
     Ok(())
 }
@@ -616,6 +640,8 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
 /// per-frame input and the hits drawn this frame.
 struct Frame<'a> {
     hits: Vec<(Area, Hit)>,
+    /// where the focused field's caret went.
+    caret: Option<Area>,
     hovered: Option<Hit>,
     pressed: Option<Hit>,
     anim: &'a mut Anim,
@@ -1223,16 +1249,12 @@ fn field_box(
             pen.outline(input, 9.0, if focused { 1.5 } else { 1.0 }, edge)?;
             let font = pen.font(14.0);
             let inner = Area::new(input.x + 12.0, input.y, input.w - 24.0, input.h);
-            let shown = shown_answer(pen, (field, answer), focused.then_some(inner.w), &font);
+            let composing = if focused { s.preedit.as_str() } else { "" };
+            let typed = format!("{answer}{composing}");
+            let shown = shown_answer(pen, (field, &typed), focused.then_some(inner.w), &font);
             pen.clipped(&shown, inner, &font, color::TEXT)?;
             if focused {
-                let caret = (inner.x + pen.width(&shown, &font) + 1.0).min(inner.right());
-                pen.line(
-                    (caret, input.y + 9.0),
-                    (caret, input.bottom() - 9.0),
-                    1.5,
-                    pen.accent,
-                )?;
+                caret(pen, frame, (input, inner), (&shown, composing), &font)?;
             }
             frame.hits.push((input, Hit::Field(hit)));
         }
@@ -1246,6 +1268,31 @@ fn field_box(
         )?;
     }
     Ok(FIELD_H)
+}
+
+/// the caret at the end of `shown`, with the part an input method is
+/// still `composing` underlined, as text boxes do.
+fn caret(
+    pen: &mut Pen<'_>,
+    frame: &mut Frame<'_>,
+    (input, inner): (Area, Area),
+    (shown, composing): (&str, &str),
+    font: &aurea::render::Font,
+) -> AureaResult<()> {
+    let x = (inner.x + pen.width(shown, font) + 1.0).min(inner.right());
+    if !composing.is_empty() {
+        let from = (x - pen.width(composing, font)).max(inner.x);
+        let y = input.bottom() - 9.0;
+        pen.line((from, y), (x - 1.0, y), 1.0, color::TEXT)?;
+    }
+    pen.line(
+        (x, input.y + 9.0),
+        (x, input.bottom() - 9.0),
+        1.5,
+        pen.accent,
+    )?;
+    frame.caret = Some(Area::new(x, input.y, 1.0, input.h));
+    Ok(())
 }
 
 /// what a typed field shows: dots for a secret, and while typing at the
