@@ -9,6 +9,24 @@ The setup has two looks:
 
 Both come in English, Korean and Japanese, following the system's language.
 
+<p>
+  <img src="assets/setup-welcome.png" width="420" alt="Setup welcome page with install folder and components">
+  <img src="assets/setup-page.png" width="420" alt="A setup page asking for a sync server">
+</p>
+<p>
+  <img src="assets/setup-license.png" width="420" alt="License to accept before installing">
+  <img src="assets/setup-done.png" width="420" alt="Finished install with a link and Open button">
+</p>
+<p>
+  <img src="assets/setup-welcome-ko.png" width="420" alt="The welcome page in Korean">
+  <img src="assets/setup-welcome-ja.png" width="420" alt="The welcome page in Japanese">
+</p>
+<p>
+  <img src="assets/uninstall.png" width="420" alt="The uninstaller, with a tick to remove settings and data too">
+</p>
+
+The app in the pictures is made up, with a `brand` banner, two components, a license to accept and one `page`.
+
 ## Install kago
 
 You need Rust 1.90 or newer.
