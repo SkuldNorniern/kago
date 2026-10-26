@@ -525,6 +525,7 @@ impl Run<'_> {
                 .unwrap_or_else(|| format!("{} {id}", self.plan.name)),
             command_line: crate::platform::command_line(&exe, arguments),
             automatic: !manual,
+            disabled: false,
             restart_on_failure: *restart,
         };
         let service = &service;

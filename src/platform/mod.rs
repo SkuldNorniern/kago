@@ -432,6 +432,9 @@ pub struct WindowsService {
     pub command_line: String,
     /// starts with Windows; otherwise only when asked.
     pub automatic: bool,
+    /// switched off: never starts.
+    #[serde(default)]
+    pub disabled: bool,
     pub restart_on_failure: bool,
 }
 

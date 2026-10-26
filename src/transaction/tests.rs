@@ -545,6 +545,7 @@ fn half_upgraded_service(w: &World) -> PathBuf {
             display_name: "App".into(),
             command_line: format!("\"{}\"", exe.display()),
             automatic: true,
+            disabled: false,
             restart_on_failure: false,
         }),
     })

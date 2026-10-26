@@ -10,8 +10,9 @@ use windows::Win32::System::Services::{
     QueryServiceConfig2W, QueryServiceConfigW, QueryServiceStatus, SC_ACTION, SC_ACTION_NONE,
     SC_ACTION_RESTART, SC_HANDLE, SC_MANAGER_ALL_ACCESS, SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS,
     SERVICE_AUTO_START, SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START,
-    SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
-    SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
+    SERVICE_DISABLED, SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_QUERY_CONFIG,
+    SERVICE_QUERY_STATUS, SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS,
+    StartServiceW,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -64,6 +65,7 @@ pub fn service(name: &str) -> Result<Option<WindowsService>, String> {
             display_name: config.lpDisplayName.to_string().unwrap_or_default(),
             command_line: config.lpBinaryPathName.to_string().unwrap_or_default(),
             automatic: config.dwStartType == SERVICE_AUTO_START,
+            disabled: config.dwStartType == SERVICE_DISABLED,
             restart_on_failure: restarts_on_failure(&service),
         }))
     }
@@ -122,7 +124,9 @@ pub fn set_service(name: &str, wanted: Option<&WindowsService>) -> Result<(), St
         }
         return Ok(());
     };
-    let start = if wanted.automatic {
+    let start = if wanted.disabled {
+        SERVICE_DISABLED
+    } else if wanted.automatic {
         SERVICE_AUTO_START
     } else {
         SERVICE_DEMAND_START
@@ -174,7 +178,7 @@ pub fn set_service(name: &str, wanted: Option<&WindowsService>) -> Result<(), St
         .map_err(|e| format!("cannot create service {name}: {}", e.message()))?,
     };
     restart_policy(&service, wanted.restart_on_failure);
-    if wanted.automatic {
+    if wanted.automatic && !wanted.disabled {
         // SAFETY: a live handle with start access.
         match unsafe { StartServiceW(service.0, None) } {
             Ok(()) => {}
