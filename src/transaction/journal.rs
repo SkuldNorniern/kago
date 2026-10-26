@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -120,13 +120,12 @@ impl Journal {
 }
 
 /// every complete entry in a journal. a torn last line from a crash is
-/// dropped.
+/// dropped, even one cut inside a character.
 pub fn read(path: &Path) -> Result<Vec<Entry>, Error> {
-    let file = fs::File::open(path).map_err(|e| Error::io(path, &e))?;
+    let bytes = fs::read(path).map_err(|e| Error::io(path, &e))?;
     let mut out = Vec::new();
-    for line in BufReader::new(file).lines() {
-        let line = line.map_err(|e| Error::io(path, &e))?;
-        match serde_json::from_str(&line) {
+    for line in bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+        match serde_json::from_slice(line) {
             Ok(entry) => out.push(entry),
             Err(_) => break,
         }
@@ -158,6 +157,14 @@ mod tests {
         let entries = read(&path).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(matches!(entries[1], Entry::Step(Undo::RemoveFile { .. })));
+        // cut inside a character of a path like `C:\Users\스쿨드`.
+        let whole = fs::read(&path).unwrap();
+        let mut torn = whole[..whole.len() - 12].to_vec();
+        torn.extend_from_slice(
+            b"\n{\"entry\":\"step\",\"undo\":\"remove-file\",\"path\":\"\xec\x8a",
+        );
+        fs::write(&path, torn).unwrap();
+        assert_eq!(read(&path).unwrap().len(), 2);
         fs::remove_dir_all(dir).unwrap();
     }
 }
