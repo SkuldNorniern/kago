@@ -845,6 +845,16 @@ fn install(
         })?;
     let platform = platform::host()?;
     let store = transaction::store(platform.as_ref(), plan.scope).map_err(|e| e.to_string())?;
+    // the copy for everyone goes first, which takes administrator rights:
+    // say so before anything is closed or run.
+    if let Some((Scope::Machine, _)) = other_install(platform.as_ref(), plan.scope, &plan.package)
+        && !platform::is_elevated()
+    {
+        return Err(format!(
+            "{} is installed for everyone; removing that needs administrator rights. install it for everyone, or uninstall it first",
+            plan.name
+        ));
+    }
     let staging = store.root().join("staging").join(plan.package.as_str());
     let _ = fs::remove_dir_all(&staging);
     let result = (|| {
