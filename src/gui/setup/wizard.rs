@@ -125,6 +125,8 @@ pub struct Wizard {
     /// the modern look: one welcome page picks everything else, so only
     /// the license and the package's own pages follow it.
     pub compact: bool,
+    /// updating an install: secret answers were not kept and are asked again.
+    pub updating: bool,
 }
 
 impl Wizard {
@@ -174,6 +176,7 @@ impl Wizard {
             focus: None,
             problem: None,
             compact: false,
+            updating: false,
         };
         for i in 0..wizard.chosen.len() {
             if wizard.locked(i) {
@@ -317,9 +320,13 @@ impl Wizard {
 
     /// the first field on input page `page` whose answer does not fit.
     fn page_problem(&self, page: usize) -> Option<(usize, Problem)> {
-        self.page_fields(page)
-            .into_iter()
-            .find_map(|(i, f)| f.check(&self.answers[i]).err().map(|p| (i, p)))
+        self.page_fields(page).into_iter().find_map(|(i, f)| {
+            let answer = &self.answers[i];
+            if self.updating && f.secret() && answer.is_empty() {
+                return Some((i, Problem::Again));
+            }
+            f.check(answer).err().map(|p| (i, p))
+        })
     }
 
     /// whether the person may pick between everyone and just them.
@@ -727,6 +734,35 @@ mod tests {
             &earlier,
         );
         w
+    }
+
+    #[test]
+    fn an_update_asks_for_a_secret_again() {
+        let mut w = plain(None);
+        w.compact = true;
+        w.updating = true;
+        let token = Field {
+            id: "token".into(),
+            label: "token".into(),
+            kind: crate::manifest::FieldKind::Text { secret: true },
+            default: String::new(),
+            required: false,
+        };
+        w.ask(
+            vec![InputPage {
+                id: "p".into(),
+                title: "p".into(),
+                about: None,
+                fields: vec![token],
+                skip: None,
+            }],
+            &std::collections::BTreeMap::new(),
+        );
+        w.act(Action::Install);
+        assert_eq!(w.act(Action::Next), Outcome::Stay);
+        assert_eq!(w.problem, Some((0, Problem::Again)));
+        w.type_text("s3cret");
+        assert_ne!(w.act(Action::Next), Outcome::Stay);
     }
 
     #[test]

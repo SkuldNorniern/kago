@@ -395,6 +395,7 @@ impl Session {
             wizard.offer_scope(info.for_everyone, other.clone());
         }
         wizard.ask(info.inputs.clone(), &info.answers);
+        wizard.updating = info.place.existing.installed();
         let mut session = Self {
             wizard,
             folder,

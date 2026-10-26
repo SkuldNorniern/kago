@@ -261,7 +261,7 @@ run app --register {input.key}
 - An update or repair starts each field at the answer given last time. Secret fields start empty.
 - Silent installs take answers with `--set host=example.com`, for the setup and for `kago install`; fields left out keep their last answer or default.
 
-A secret field is only hidden on screen. Its value ends up wherever you use it, like a settings file or a program's arguments, and in the receipt that lets uninstall put things back.
+A secret field is hidden on screen and never remembered, so an update or repair asks for it again; a silent one needs `--set` for it. Use it in a setting or an install `run`. `kago build` refuses one in an `undo`, an uninstall `run`, a shortcut or a service, which would keep it where others can read it. A setting it goes into keeps its value, and the receipt keeps the old value it replaced.
 
 ### the app's own data
 

@@ -72,8 +72,8 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
         }
         (None, None) => plan.with_defaults(),
     };
-    let earlier = installed.map(|r| r.answers).unwrap_or_default();
-    let plan = plan.answered(&given, &earlier)?;
+    let earlier = installed.map(|r| r.answers);
+    let plan = plan.answered(&given, earlier.as_ref())?;
     let plan = match args.value("--location") {
         None => plan,
         Some(_) if loaded.manifest.install.folder == FolderChoice::Fixed => {

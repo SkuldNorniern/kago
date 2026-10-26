@@ -662,11 +662,7 @@ fn chosen(
         }
         (None, None) => plan.with_defaults(),
     };
-    let earlier = previous
-        .as_ref()
-        .map(|r| r.answers.clone())
-        .unwrap_or_default();
-    let plan = plan.answered(choice.answers, &earlier)?;
+    let plan = plan.answered(choice.answers, previous.as_ref().map(|r| &r.answers))?;
     let app = choice
         .location
         .map(Path::to_path_buf)

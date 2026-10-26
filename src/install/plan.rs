@@ -356,12 +356,25 @@ impl InstallPlan {
     ///
     /// # Errors
     ///
-    /// when `given` names a field there is not, or an answer does not fit.
+    /// when `given` names a field there is not, an answer does not fit, or
+    /// an update (`earlier` is `Some`) lacks a secret, which is not kept.
     pub fn answered(
         &self,
         given: &BTreeMap<String, String>,
-        earlier: &BTreeMap<String, String>,
+        earlier: Option<&BTreeMap<String, String>>,
     ) -> Result<Self, String> {
+        if earlier.is_some()
+            && let Some(field) = self
+                .fields()
+                .find(|f| f.secret() && !given.contains_key(&f.id))
+        {
+            return Err(format!(
+                "{}: it is secret and not kept, so give it again with `--set {}=...`",
+                field.label, field.id
+            ));
+        }
+        let none = BTreeMap::new();
+        let earlier = earlier.unwrap_or(&none);
         if let Some(unknown) = given.keys().find(|k| !self.fields().any(|f| &f.id == *k)) {
             let known: Vec<&str> = self.fields().map(|f| f.id.as_str()).collect();
             return Err(format!(
@@ -1443,7 +1456,14 @@ component docs Documentation off
             ("key".to_owned(), "s3cret".to_owned()),
         ]);
         let earlier = BTreeMap::from([("port".to_owned(), "8080".to_owned())]);
-        let answered = plan.answered(&given, &earlier).unwrap();
+        let answered = plan.answered(&given, Some(&earlier)).unwrap();
+        let without = BTreeMap::from([("host".to_owned(), "example.com".to_owned())]);
+        assert!(
+            plan.answered(&without, Some(&earlier))
+                .unwrap_err()
+                .contains("--set key="),
+            "an update asks for the secret again"
+        );
         let values: Vec<&Value> = answered
             .operations
             .iter()
@@ -1464,12 +1484,12 @@ component docs Documentation off
 
         let wrong = BTreeMap::from([("nope".to_owned(), "x".to_owned())]);
         assert!(
-            plan.answered(&wrong, &BTreeMap::new())
+            plan.answered(&wrong, None)
                 .unwrap_err()
                 .contains("no field `nope`")
         );
         let bad = BTreeMap::from([("port".to_owned(), "0".to_owned())]);
-        assert!(plan.answered(&bad, &BTreeMap::new()).is_err());
+        assert!(plan.answered(&bad, None).is_err());
 
         let (plan, d) = build("env set X {input.missing}\n");
         assert!(plan.is_none());
