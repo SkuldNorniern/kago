@@ -226,6 +226,7 @@ impl InstallPlan {
         expected(resolved, sources, &mut diagnostics);
         let needs = needs(resolved, &mut diagnostics);
         unknown_inputs(manifest, &steps.operations, &mut diagnostics);
+        kept_secrets(manifest, &steps.operations, &mut diagnostics);
         let prerequisites = prerequisites(manifest, target, sources, &mut diagnostics);
         if diagnostics.has_errors() {
             return (None, diagnostics);
@@ -953,6 +954,54 @@ fn unknown_inputs(manifest: &Manifest, operations: &[Operation], diagnostics: &m
     }
 }
 
+/// an error for each secret answer that would be kept where others can
+/// read it: in the receipt (an `undo` or uninstall `run`), a shortcut or a
+/// service's command line. a setting or an install `run` may use it.
+fn kept_secrets(manifest: &Manifest, operations: &[Operation], diagnostics: &mut Diagnostics) {
+    let secret = |id: &str| {
+        manifest
+            .inputs
+            .iter()
+            .flat_map(|p| &p.fields)
+            .any(|f| f.id == id && f.secret())
+    };
+    let mut kept: Vec<&str> = Vec::new();
+    for op in operations {
+        match op {
+            Operation::Run {
+                phase,
+                command,
+                undo,
+                ..
+            } => {
+                if *phase == crate::manifest::RunAt::Uninstall {
+                    kept.extend(command.arguments.iter().map(String::as_str));
+                }
+                if let Some(c) = undo {
+                    kept.extend(c.arguments.iter().map(String::as_str));
+                }
+            }
+            Operation::CreateShortcut { arguments, .. }
+            | Operation::InstallService { arguments, .. } => {
+                kept.extend(arguments.iter().map(String::as_str));
+            }
+            _ => {}
+        }
+    }
+    let mut reported = BTreeSet::new();
+    for id in kept.into_iter().flat_map(input_ids) {
+        if secret(id) && reported.insert(id) {
+            diagnostics.push(
+                Diagnostic::error(
+                    diagnostic::MANIFEST_VALUE,
+                    format!("`{{input.{id}}}` is secret, but this keeps it where others can read it"),
+                )
+                .help("use it in a setting or an install `run`, not in an `undo`, an uninstall `run`, a shortcut or a service"),
+            );
+        }
+    }
+}
+
 /// what the resolved requirements need, with a diagnostic for each kago
 /// cannot check yet.
 fn needs(resolved: &Resolved, diagnostics: &mut Diagnostics) -> Vec<Need> {
@@ -1405,6 +1454,31 @@ component docs Documentation off
             [diagnostic::MANIFEST_REFERENCE]
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn secret_answers_are_never_kept_where_others_read() {
+        let dir = payload_dir("secrets");
+        let build = |extra: &str| {
+            let src =
+                format!("{AUREA}\npage login \"Login\"\n  text token \"Token\" secret\n{extra}");
+            let m = Manifest::parse("Kagofile", &src).0.unwrap();
+            let target: Target = "windows-x86_64".parse().unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, Scope::Machine, dir.as_path()).1
+        };
+        assert!(
+            build("run main-executable --login {input.token}\n").is_empty(),
+            "an install run may use it"
+        );
+        let d =
+            build("run main-executable --setup\n  undo main-executable --logout {input.token}\n");
+        assert!(
+            d.iter().any(|d| d.message.contains("input.token")),
+            "the undo is kept in the receipt: {d:?}"
+        );
     }
 
     #[test]
