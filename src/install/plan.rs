@@ -593,7 +593,7 @@ impl Steps {
         diagnostics: &mut Diagnostics,
     ) {
         let mut names = BTreeSet::new();
-        for rule in &manifest.firewall {
+        for rule in &resolved.firewall {
             if !resolved.components.contains(rule.component.as_deref()) {
                 continue;
             }
@@ -1454,6 +1454,27 @@ component docs Documentation off
             [diagnostic::MANIFEST_REFERENCE]
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn firewall_rules_follow_their_when() {
+        let dir = payload_dir("firewall-when");
+        let src = format!("{AUREA}\nwhen aarch64\n  firewall main-executable\n");
+        let m = Manifest::parse("Kagofile", &src).0.unwrap();
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+            .0
+            .unwrap();
+        let plan = InstallPlan::build(&m, &r, target, Scope::Machine, dir.as_path())
+            .0
+            .unwrap();
+        assert!(
+            !plan
+                .operations
+                .iter()
+                .any(|op| matches!(op, Operation::AllowThroughFirewall { .. })),
+            "only for aarch64"
+        );
     }
 
     #[test]
