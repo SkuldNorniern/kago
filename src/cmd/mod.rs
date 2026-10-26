@@ -47,7 +47,7 @@ commands:
                 the user's settings and data for it
   verify <package-id> [--scope user|machine]
                 check installed files against the receipt
-  status [--scope user|machine] [--json]
+  status [package-id] [--scope user|machine] [--json]
                 list installed packages
   recover [--scope user|machine]
                 finish or roll back installs a crash left behind

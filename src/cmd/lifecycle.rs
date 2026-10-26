@@ -179,6 +179,13 @@ pub fn status(args: &Args) -> Result<ExitCode, String> {
         };
         found.extend(store.receipts().unwrap_or_default());
     }
+    // one package when named.
+    if let Some(id) = args.positional.first() {
+        found.retain(|r| r.package.as_str() == id);
+        if found.is_empty() {
+            return Err(format!("{id} is not installed"));
+        }
+    }
     if args.flag("--json") {
         let list: Vec<serde_json::Value> = found
             .iter()
