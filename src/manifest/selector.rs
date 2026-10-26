@@ -29,11 +29,13 @@ pub struct Context<'a> {
 }
 
 impl Context<'_> {
+    /// building a setup for `target`, the one artifact kago makes now, so
+    /// `when setup` matches.
     #[must_use]
     pub const fn target(target: Target) -> Self {
         Self {
             target,
-            format: None,
+            format: Some(Artifact::Setup),
             profile: None,
             channel: None,
         }
@@ -187,6 +189,11 @@ mod tests {
         assert!(!s.matches(&c));
         c.format = Some(Artifact::Msi);
         assert!(s.matches(&c));
+        let (setup, _) = when(&[("format", "setup")]);
+        assert!(
+            setup.matches(&cx("windows-x86_64")),
+            "a setup is what kago builds"
+        );
     }
 
     #[test]
