@@ -7,9 +7,9 @@ use windows::Win32::Foundation::{ERROR_SERVICE_ALREADY_RUNNING, ERROR_SERVICE_DO
 use windows::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService,
     CreateServiceW, DeleteService, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
-    QueryServiceConfigW, QueryServiceStatus, SC_ACTION, SC_ACTION_NONE, SC_ACTION_RESTART,
-    SC_HANDLE, SC_MANAGER_ALL_ACCESS, SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS, SERVICE_AUTO_START,
-    SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START,
+    QueryServiceConfig2W, QueryServiceConfigW, QueryServiceStatus, SC_ACTION, SC_ACTION_NONE,
+    SC_ACTION_RESTART, SC_HANDLE, SC_MANAGER_ALL_ACCESS, SC_MANAGER_CONNECT, SERVICE_ALL_ACCESS,
+    SERVICE_AUTO_START, SERVICE_CONFIG_FAILURE_ACTIONS, SERVICE_CONTROL_STOP, SERVICE_DEMAND_START,
     SERVICE_ERROR_NORMAL, SERVICE_FAILURE_ACTIONSW, SERVICE_QUERY_CONFIG, SERVICE_QUERY_STATUS,
     SERVICE_STATUS, SERVICE_STOP, SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
 };
@@ -64,8 +64,47 @@ pub fn service(name: &str) -> Result<Option<WindowsService>, String> {
             display_name: config.lpDisplayName.to_string().unwrap_or_default(),
             command_line: config.lpBinaryPathName.to_string().unwrap_or_default(),
             automatic: config.dwStartType == SERVICE_AUTO_START,
-            restart_on_failure: false,
+            restart_on_failure: restarts_on_failure(&service),
         }))
+    }
+}
+
+/// whether any failure action of the service restarts it.
+fn restarts_on_failure(service: &Handle) -> bool {
+    let mut needed = 0u32;
+    // SAFETY: asks for the size first, then fills a buffer of that size,
+    // aligned for the structure it holds; the actions it points to live in
+    // the same buffer.
+    unsafe {
+        let _ = QueryServiceConfig2W(
+            service.0,
+            SERVICE_CONFIG_FAILURE_ACTIONS,
+            None,
+            &raw mut needed,
+        );
+        if needed == 0 {
+            return false;
+        }
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
+        let bytes =
+            std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast::<u8>(), needed as usize);
+        if QueryServiceConfig2W(
+            service.0,
+            SERVICE_CONFIG_FAILURE_ACTIONS,
+            Some(bytes),
+            &raw mut needed,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let config = &*buffer.as_ptr().cast::<SERVICE_FAILURE_ACTIONSW>();
+        if config.lpsaActions.is_null() {
+            return false;
+        }
+        std::slice::from_raw_parts(config.lpsaActions, config.cActions as usize)
+            .iter()
+            .any(|a| a.Type == SC_ACTION_RESTART)
     }
 }
 
