@@ -1,6 +1,5 @@
-//! Kagofile blocks to the raw manifest the validator checks. every value
-//! keeps the span of the word it came from, so later errors point into the
-//! Kagofile.
+//! Kagofile blocks to the raw manifest. every value keeps the span of its
+//! word, so later errors point into the Kagofile.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -914,8 +913,7 @@ impl Lower<'_> {
                         let when = self.when(scope, std::slice::from_ref(os));
                         let source = self.reference(path);
                         // an .ico is installed too: shortcuts and the
-                        // uninstall entry show it, even for an exe built
-                        // without an icon of its own.
+                        // uninstall entry show it.
                         if path.text.to_ascii_lowercase().ends_with(".ico") {
                             let file_when = self.when(scope, std::slice::from_ref(os));
                             self.files.push(RawFile {

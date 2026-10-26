@@ -8,11 +8,9 @@ use kago::payload::Payload;
 use super::args::Args;
 use super::{load, manifest_path, report};
 
-/// manifest argument, `--scope` and `--components` to the manifest, its
-/// directory and an install plan for `target`. for a setup, the `build`
+/// manifest, its directory and an install plan for `target`. for a setup, `build`
 /// lines run first unless `--no-build`, and without `--components` every
-/// component is offered so the person can choose; otherwise the defaults.
-/// `None` after diagnostics were printed.
+/// component is offered. `None` after diagnostics were printed.
 pub fn build(
     args: &Args,
     target: Target,

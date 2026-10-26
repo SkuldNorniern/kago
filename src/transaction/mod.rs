@@ -117,8 +117,8 @@ pub fn store(platform: &dyn Platform, scope: Scope) -> Result<Store, Error> {
     Ok(Store::new(dir))
 }
 
-/// installs or upgrades. `runtime` is the kago executable that uninstall
-/// entries will call; it is copied into the state store.
+/// installs or upgrades. `runtime` is copied into the state store for
+/// uninstall entries to call.
 ///
 /// # Errors
 ///
@@ -162,8 +162,7 @@ pub struct Uninstalled {
 }
 
 /// removes everything the receipt owns, keeps what ownership says to keep.
-/// when something cannot be removed the receipt stays with just those
-/// resources, so uninstall can run again.
+/// what cannot be removed stays in the receipt, so uninstall can rerun.
 ///
 /// # Errors
 ///
@@ -177,9 +176,9 @@ pub fn uninstall(
     remove(package, platform, store)
 }
 
-/// runs the package's `required` programs for uninstall, which may say no:
-/// the first that fails stops the uninstall before anything is closed or
-/// removed. [`remove`] does not run them again.
+/// runs the package's `required` uninstall programs; the first failure stops
+/// the uninstall before anything is closed or removed. [`remove`] does not
+/// rerun them.
 ///
 /// # Errors
 ///
@@ -239,11 +238,10 @@ pub fn remove(
     })
 }
 
-/// after an uninstall, what it kept on purpose too: the files it kept
-/// (user data, changed settings) and the package's own settings and data
-/// folders, with whatever the app put there. a folder only goes when it
-/// is named after the package, so a root set wrong never takes more.
-/// returns what could not be removed.
+/// after an uninstall, removes what it kept on purpose: kept files and the
+/// package's own settings and data folders. a folder only goes when it is
+/// named after the package, so a wrong root never takes more. returns what
+/// could not be removed.
 #[must_use]
 pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec<String> {
     use crate::manifest::Root;
@@ -329,10 +327,9 @@ pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec
     failed
 }
 
-/// what an earlier uninstall could not remove because it was in use:
-/// deleted when the computer next starts, like NSIS's `/REBOOTOK`, and no
-/// longer the package's. returns those paths; what cannot be scheduled
-/// stays in the receipt.
+/// schedules what an earlier uninstall could not remove (in use) for
+/// deletion at next start, like NSIS's `/REBOOTOK`. returns those paths;
+/// what cannot be scheduled stays in the receipt.
 ///
 /// # Errors
 ///
@@ -528,11 +525,10 @@ fn revert(
     }
 }
 
-/// for everyone, the folder on the way from `path`'s root to it that is a
-/// link to somewhere else. the data roots sit in `%ProgramData%`, where
-/// any user may make folders: a link there must not lead an elevated kago
-/// to write or delete in a system folder. `None` for the app's own folder,
-/// where only administrators write, and for installs just for the user.
+/// for everyone, the folder between `path`'s root and it that is a link
+/// elsewhere. data roots sit in `%ProgramData%`, where any user may make
+/// folders: a link there must not lead an elevated kago into a system
+/// folder. `None` for the app's own folder and per-user installs.
 pub(super) fn linked(
     scope: Scope,
     roots: &std::collections::BTreeMap<crate::manifest::Root, std::path::PathBuf>,

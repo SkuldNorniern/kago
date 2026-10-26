@@ -185,7 +185,6 @@ pub(in crate::gui::setup) fn run(
             if s.close && s.removal.closable() {
                 return Ok(s.removal.removed());
             }
-            // the bar slides for as long as removing takes.
             redraw |= s.anim.busy() || matches!(s.removal.page, Page::Working);
         }
         if redraw {

@@ -557,7 +557,6 @@ fn draw(ctx: &mut dyn DrawingContext, s: &mut State) -> AureaResult<()> {
         anim: &mut anim,
     };
     pen.fill(Area::new(0.0, 0.0, w, h), color::BACKGROUND)?;
-    // the side panel, like NSIS's welcome bitmap, takes the left edge.
     let left = if let Some(side) = &s.art.side {
         pen.ctx
             .draw_image_rect(side, aurea::render::Rect::new(0.0, 0.0, SIDE_W, h))?;
@@ -1141,7 +1140,6 @@ fn welcome(
                 on,
             )?;
         }
-        // a quiet link at the bottom left, beside the brand text.
         let link = lang.line(Line::LicenseRead);
         let link_font = pen.bold(13.0);
         let link_w = pen.width(link, &link_font);

@@ -1,6 +1,5 @@
-//! the manifest as written, before checking. the Kagofile lowers into this;
-//! strings stay strings and `validate` turns them into checked types. spans
-//! point into the Kagofile.
+//! the manifest as written, before checking. strings stay strings and
+//! `validate` turns them into checked types.
 
 use serde_spanned::Spanned;
 

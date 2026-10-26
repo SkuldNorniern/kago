@@ -104,16 +104,15 @@ pub(super) fn install(
         roots: roots.used(&used),
         resources,
     };
-    // the receipt changes inside the transaction too: a crash before the
-    // commit mark puts back the old one with the old files.
+    // a crash before the commit mark puts back the old receipt and files.
     if let Err(e) = run.commit(&receipt) {
         let undos = std::mem::take(&mut run.undos);
         drop(journal);
         return Err(undone(&e, &undos, platform, store, &plan.package));
     }
     drop(journal);
-    // committed. a backup still held open (the old exe of a running app)
-    // keeps the journal around; the next kago run finishes the cleanup.
+    // committed. a backup still held open (a running exe) keeps the journal;
+    // the next kago run finishes the cleanup.
     let _ = cleanup(store, &plan.package);
 
     if let Some(previous) = previous {
@@ -155,8 +154,8 @@ fn purge_folders(plan: &InstallPlan, roots: &Roots) -> Vec<PathBuf> {
 }
 
 /// removes what the old version owned and the new one does not. best
-/// effort: the new version is committed either way. its uninstall hooks do
-/// not run: an upgrade replaces the package, it does not uninstall it.
+/// effort: the new version is committed either way. uninstall hooks do not
+/// run on upgrade.
 fn drop_stale(previous: &Receipt, receipt: &Receipt, platform: &dyn Platform) {
     let stale: Vec<Resource> = previous
         .resources
@@ -188,9 +187,9 @@ fn unmet(plan: &InstallPlan, platform: &dyn Platform) -> Vec<String> {
 }
 
 /// whether the new receipt still owns what `old` names, maybe under
-/// another hash or size, like a replaced file. then it must not be deleted.
-/// files and folders compare on disk: the same `{app}/x` in a folder the
-/// install moved away from is stale.
+/// another hash or size; then it must not be deleted. files and folders
+/// compare on disk, so the same `{app}/x` in a folder moved away from is
+/// stale.
 fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
     let on_disk =
         |a: &SemanticPath, b: &SemanticPath| a == b && previous.absolute(a) == new.absolute(b);
@@ -443,9 +442,9 @@ impl Run<'_> {
     }
 
     /// an existing file the user may own: user data always stays, a
-    /// preserve-if-modified file stays when it differs from what the older
-    /// version installed (or nothing recorded it). returns the hash to record,
-    /// the older one, so uninstall still sees the change.
+    /// preserve-if-modified file stays when it differs from the older
+    /// version's (or nothing recorded it). returns the older hash to record,
+    /// so uninstall still sees the change.
     fn path_entry(&mut self, directory: &SemanticPath, scope: Scope) -> Result<(), Error> {
         let entry = self.resolve(directory)?;
         let text = entry.display().to_string();
@@ -534,9 +533,8 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// sets a value outside the package and owns it, so uninstall can
-    /// put back what was there. an update keeps what was there before
-    /// the first install, not the older version's value.
+    /// sets a value outside the package and owns it, so uninstall can put
+    /// back what was there. an update keeps the pre-install value.
     fn change(&mut self, place: &Place, edit: Edit, value: &Value) -> Result<(), Error> {
         let slot = crate::install::slot(place, self.plan.scope, self.roots, &|name| {
             std::env::var(name).ok()
@@ -646,9 +644,9 @@ impl Run<'_> {
         Ok(())
     }
 
-    /// a program for `install` runs now, and a failing one rolls the
-    /// install back; its `undo` runs on rollback and at uninstall. one for
-    /// `uninstall` is kept for then; a `required` one can stop it.
+    /// an `install` program runs now; failing rolls the install back, and
+    /// its `undo` runs on rollback and uninstall. an `uninstall` one is kept
+    /// for then; a `required` one can stop it.
     fn run(
         &mut self,
         phase: RunAt,
@@ -794,9 +792,8 @@ impl Run<'_> {
         write(dest)
     }
 
-    /// `{app}/uninstall.exe`: the runtime as a window program, like NSIS's
-    /// uninstaller. owned like any other file, so updates replace it and
-    /// uninstall removes it.
+    /// `{app}/uninstall.exe`: the runtime as a window program, like NSIS's.
+    /// owned like any file: updates replace it, uninstall removes it.
     fn uninstaller(&mut self) -> Result<PathBuf, Error> {
         let path: SemanticPath = format!("{{app}}/uninstall{}", std::env::consts::EXE_SUFFIX)
             .parse()

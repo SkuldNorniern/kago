@@ -1,7 +1,6 @@
-//! `prerequisite`: another vendor's installer the package needs on the
-//! machine first, like the Visual C++ runtime. it ships inside the setup
-//! and runs only when its check says it is missing. the ones kago knows,
-//! like `vcredist`, are actions in its library.
+//! `prerequisite`: another vendor's installer the package needs first, like
+//! the Visual C++ runtime. it ships in the setup and runs only when its
+//! check fails. known ones, like `vcredist`, are actions in the library.
 
 use super::Check;
 use crate::diagnostic::Location;

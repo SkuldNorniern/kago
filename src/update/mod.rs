@@ -1,7 +1,6 @@
-//! updates from where releases are published. `kago build` writes a
-//! `latest.json` next to the setup; an installed package remembers that
-//! file's URL, and `kago update` reads it, downloads the newer setup,
-//! checks its sha256 and runs it.
+//! `kago build` writes `latest.json` next to the setup; an installed package
+//! remembers its URL and `kago update` downloads the newer setup, checks its
+//! sha256 and runs it.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -41,9 +40,8 @@ pub struct Offer {
 }
 
 impl Feed {
-    /// a feed for one setup. `kago build` merges it into any feed of the
-    /// same version already in the output folder, so one file covers
-    /// every target.
+    /// a feed for one setup, merged into any same-version feed already in
+    /// the output folder so one file covers every target.
     #[must_use]
     pub fn new(package: PackageId, version: Version, target: Target, setup: Setup) -> Self {
         Self {

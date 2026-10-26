@@ -180,9 +180,8 @@ pub trait Platform {
         Ok(())
     }
 
-    /// whether `dir` is a folder the system or other programs use too, or
-    /// holds one, like the user's Documents: removing an app's data never
-    /// takes it whole.
+    /// whether `dir` is, or holds, a folder others use too, like the user's
+    /// Documents: removing an app's data never takes it whole.
     fn shared_folder(&self, dir: &Path) -> bool {
         let _ = dir;
         false

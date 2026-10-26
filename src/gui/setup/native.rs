@@ -119,7 +119,6 @@ pub(super) fn run(info: &Info, lang: Lang, mut session: Session) -> AureaResult<
         }
         if session.wizard.page != page || redraw {
             page = session.wizard.page;
-            // the old widgets go with the old content.
             drop(std::mem::take(&mut live));
             let (content, next) = render(info, lang, &session, &tx, &art)?;
             window.set_content(content)?;

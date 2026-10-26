@@ -4,10 +4,9 @@
 //! "KAGOPKG1"  u64 header length  header json  payload bytes...
 //! ```
 //!
-//! the header holds the plan with each file source replaced by its payload
-//! index, and the offset, packed size, size and sha-256 of every payload
-//! entry. each entry is one zstd frame. nothing in it is an absolute install
-//! path; roots are resolved at install time.
+//! the header holds the plan with file sources replaced by payload index,
+//! and each entry's offset, packed size, size and sha-256. each entry is one
+//! zstd frame. no absolute install paths; roots resolve at install time.
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -280,8 +279,8 @@ impl Container {
         self.extract_plan(plan, dir, observe)
     }
 
-    /// unpacks only the files `plan` installs, like the header's plan after
-    /// [`InstallPlan::select`], so unticked components are never unpacked.
+    /// unpacks only the files `plan` installs (after
+    /// [`InstallPlan::select`]), so unticked components stay packed.
     ///
     /// # Errors
     ///

@@ -1,7 +1,6 @@
-//! the setup window, in two looks over one wizard: `modern` drawn on an
-//! Aurea canvas like Lykil and Aira Studio, `native` a classic NSIS-style
-//! wizard of system widgets. the install runs on a worker thread and
-//! reports back over a channel; this module never touches the machine.
+//! the setup window, in two looks over one wizard: `modern` on an Aurea
+//! canvas, `native` an NSIS-style wizard of system widgets. the install runs
+//! on a worker thread; this module never touches the machine.
 
 mod modern;
 mod native;

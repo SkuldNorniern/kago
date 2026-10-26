@@ -1,6 +1,5 @@
-//! the Kagofile: kago's own manifest language. one statement per line,
-//! blocks by indentation, lowered into the raw manifest the validator
-//! checks.
+//! the Kagofile: kago's manifest language, lowered into the raw manifest
+//! the validator checks.
 
 mod action;
 mod lower;

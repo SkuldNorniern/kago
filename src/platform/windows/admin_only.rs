@@ -1,7 +1,6 @@
 //! kago's state for everyone, in `%ProgramData%\Kago`, writable by
-//! administrators only. `%ProgramData%` lets every user add files to new
-//! folders; a journal or receipt planted there would have an elevated kago
-//! run its undo programs or delete what it lists.
+//! administrators only: users can add files to new folders there, and a
+//! planted journal would make an elevated kago run its undo programs.
 
 use std::path::Path;
 

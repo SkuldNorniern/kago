@@ -116,9 +116,8 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// writes `latest.json` next to the setup at `out`, merged into the one
-/// already there when that is for the same version, so one file lists the
-/// setup of every target.
+/// writes `latest.json` next to the setup, merged into an existing one of the
+/// same version so one file lists every target.
 fn write_feed(
     out: &Path,
     plan: &kago::install::InstallPlan,
@@ -193,9 +192,8 @@ fn presentation(loaded: &Loaded, target: Target) -> Result<Setup, String> {
     })
 }
 
-/// signs the package's own `.exe` and `.dll` files that are not signed
-/// yet. copies are signed, under `scratch`: the build's files stay as
-/// they are.
+/// signs unsigned `.exe` and `.dll` files of the package, as copies under
+/// `scratch`.
 fn sign_programs(
     signer: &Signer,
     plan: &mut kago::install::InstallPlan,
@@ -236,9 +234,8 @@ fn sign_programs(
     Ok(())
 }
 
-/// the runtime signed twice over, as a console program for
-/// `QuietUninstallString` and as the windowed `uninstall.exe`: a signed
-/// file cannot be patched later, so the install takes these as they are.
+/// the runtime signed as a console program (`QuietUninstallString`) and as the
+/// windowed `uninstall.exe`; a signed file cannot be patched later.
 fn signed_runtimes(
     signer: &Signer,
     stub: &[u8],

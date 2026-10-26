@@ -1,5 +1,4 @@
-//! `check`: how to tell whether something is on the machine, like a
-//! runtime a component is for or a prerequisite installed already.
+//! `check`: how to tell whether something is on the machine.
 
 /// a test of the machine.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

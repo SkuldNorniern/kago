@@ -1,7 +1,5 @@
-//! `kago update`: looks for newer versions of installed packages where
-//! their Kagofile said releases are published, and installs them by
-//! running the new setup. the app itself can run this, with the runtime
-//! kago installs next to its receipts.
+//! `kago update`: finds newer versions of installed packages from their
+//! published releases and runs the new setup. the app can run this too.
 
 use std::process::{Command, ExitCode};
 

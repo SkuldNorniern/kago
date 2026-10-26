@@ -1,12 +1,9 @@
-//! how a setup looks beyond the defaults: the `brand` block. what NSIS
-//! Modern UI does with `BrandingText`, `MUI_HEADERIMAGE_BITMAP`,
-//! `MUI_WELCOMEFINISHPAGE_BITMAP`, the welcome and finish texts and
-//! `MUI_FINISHPAGE_LINK`.
+//! how a setup looks beyond the defaults: the `brand` block.
 
 /// all optional; a setup without a `brand` block uses kago's defaults.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Brand {
-    /// small text at the bottom left, like NSIS's `BrandingText`.
+    /// small text at the bottom left.
     pub text: Option<String>,
     /// main color of the modern look, as RGB.
     pub accent: Option<[u8; 3]>,

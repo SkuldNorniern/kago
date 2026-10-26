@@ -1,7 +1,7 @@
 //! installed receipt schema. what an install owns, read by uninstall, repair and update.
 //!
-//! a receipt is written only at commit. it is the authority for what kago
-//! may remove later, never the current manifest.
+//! written only at commit; the authority for what kago may remove later,
+//! never the current manifest.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

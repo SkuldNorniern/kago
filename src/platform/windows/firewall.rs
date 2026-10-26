@@ -1,7 +1,6 @@
-//! Windows Firewall rules that let a program accept connections, through
-//! the firewall's COM API. each needs administrator rights. kago only
-//! touches rules in its own group: one another program or Windows made,
-//! even with the same name, stays as it is.
+//! Windows Firewall rules through its COM API; each needs administrator
+//! rights. kago only touches rules in its own group, even when another
+//! rule has the same name.
 
 use std::path::PathBuf;
 
@@ -106,10 +105,7 @@ pub fn rule(name: &str, group: &str) -> Result<Option<Firewall>, String> {
     })
 }
 
-/// makes the rule `name` in `group` say what `rule` says: it lets
-/// `rule.program` accept connections on private and work networks, and on
-/// public ones when asked, over every protocol or only `rule.protocol` on
-/// `rule.ports`. `None` removes it.
+/// makes the rule `name` in `group` say what `rule` says; `None` removes it.
 pub fn set_rule(name: &str, group: &str, rule: Option<&Firewall>) -> Result<(), String> {
     with_policy(|policy| {
         // SAFETY: plain COM calls on live interfaces.

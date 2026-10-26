@@ -1,8 +1,6 @@
-//! the uninstaller's window, like an NSIS uninstaller: asks first, shows it
-//! working, then says what is gone and what stayed. it takes the look of
-//! the setup that installed the package. the removal itself runs on a
-//! worker thread and reports back over a channel; this module never
-//! touches the machine.
+//! the uninstaller's window: asks, shows progress, then what is gone and what
+//! stayed. takes the look of the setup that installed it. removal runs on a
+//! worker thread; this module never touches the machine.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};

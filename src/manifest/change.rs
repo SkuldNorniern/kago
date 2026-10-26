@@ -45,11 +45,9 @@ impl std::fmt::Display for Place {
 }
 
 keywords! {
-    /// what a change does to its place. `set` sets the value and uninstall
-    /// puts back what was there; `add` adds an item to a list once and
-    /// uninstall takes it out; `init` sets a value only when there is none
-    /// and leaves it at uninstall, for fields a file needs like a format
-    /// version.
+    /// what a change does to its place. `set` sets the value, uninstall
+    /// restores it; `add` adds a list item once, uninstall removes it; `init`
+    /// sets a value only when there is none and keeps it at uninstall.
     Edit { Set => "set", Add => "add", Init => "init" }
 }
 

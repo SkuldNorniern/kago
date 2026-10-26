@@ -1,6 +1,5 @@
-//! Windows services through the Service Control Manager: programs that
-//! run for everyone without anyone signed in. each needs administrator
-//! rights, and the program has to speak the service protocol itself.
+//! Windows services through the Service Control Manager. each needs
+//! administrator rights; the program must speak the service protocol itself.
 
 use std::time::{Duration, Instant};
 
