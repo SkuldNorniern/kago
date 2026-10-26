@@ -107,7 +107,10 @@ pub fn check_location(dir: &Path) -> Result<(), LocationError> {
 /// when the path cannot hold an install or the folder has other files.
 pub fn check_folder(dir: &Path, installed: Option<&Path>) -> Result<(), LocationError> {
     check_location(dir)?;
-    if installed.is_some_and(|now| now == dir) {
+    // Windows folders match whatever their case.
+    if installed
+        .is_some_and(|now| now.as_os_str().eq_ignore_ascii_case(dir.as_os_str()) || now == dir)
+    {
         return Ok(());
     }
     let has_files = std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some());
