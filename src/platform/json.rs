@@ -48,7 +48,7 @@ pub fn set(file: &Path, key: &[String], value: Option<&Value>) -> Result<(), Str
             parent.insert(last.clone(), v.clone());
         }
         None => {
-            parent.remove(last);
+            parent.shift_remove(last);
         }
     }
     write(file, &root)
@@ -179,11 +179,17 @@ fn write(file: &Path, root: &Map<String, Value>) -> Result<(), String> {
     }
     let mut text = serde_json::to_string_pretty(root).map_err(|e| e.to_string())?;
     text.push('\n');
-    let mut tmp = file.as_os_str().to_owned();
+    // renaming over a symlink would replace the link, so write to its target.
+    let target = if fs::symlink_metadata(file).is_ok_and(|m| m.file_type().is_symlink()) {
+        fs::canonicalize(file).map_err(|e| format!("{}: {e}", file.display()))?
+    } else {
+        file.to_path_buf()
+    };
+    let mut tmp = target.as_os_str().to_owned();
     tmp.push(".kago");
     let tmp = std::path::PathBuf::from(tmp);
     fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    fs::rename(&tmp, file).map_err(|e| format!("{}: {e}", file.display()))
+    fs::rename(&tmp, &target).map_err(|e| format!("{}: {e}", file.display()))
 }
 
 #[cfg(test)]
@@ -249,6 +255,34 @@ mod tests {
             set(&file, &key("a.b.c.d"), Some(&Value::from(1))).is_err(),
             "1 is not an object"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn key_order_survives_edits() {
+        let dir = temp("order");
+        let file = dir.join("settings.json");
+        fs::write(
+            &file,
+            r#"{"zeta":1,"mid":{"b":1,"a":2},"alpha":[],"beta":3}"#,
+        )
+        .unwrap();
+        let order =
+            |file: &Path| -> Vec<String> { read(file).unwrap().unwrap().keys().cloned().collect() };
+        let expected = ["zeta", "mid", "alpha", "beta"];
+
+        set(&file, &key("mid.c"), Some(&Value::from(3))).unwrap();
+        assert_eq!(order(&file), expected);
+        assert!(add(&file, &key("alpha"), &Value::from("x")).unwrap());
+        assert_eq!(order(&file), expected);
+        remove(&file, &key("alpha"), &Value::from("x")).unwrap();
+        assert_eq!(order(&file), expected);
+        set(&file, &key("mid.b"), None).unwrap();
+        let mid = value(&file, &key("mid")).unwrap().unwrap();
+        let inner: Vec<_> = mid.as_object().unwrap().keys().cloned().collect();
+        assert_eq!(inner, ["a", "c"]);
+        set(&file, &key("zeta"), None).unwrap();
+        assert_eq!(order(&file), ["mid", "alpha", "beta"]);
         fs::remove_dir_all(dir).unwrap();
     }
 
