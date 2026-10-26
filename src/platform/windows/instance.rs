@@ -22,7 +22,8 @@ impl Drop for Instance {
 /// takes the mutex `name`, waiting up to `wait_ms` for another holder to
 /// let go. `None` while another process holds it.
 pub fn claim(name: &str, wait_ms: u32) -> Option<Instance> {
-    let name = HSTRING::from(format!("Local\\{name}"));
+    // global, so setups in other sessions (RDP, user switching) exclude each other.
+    let name = HSTRING::from(format!("Global\\{name}"));
     // SAFETY: a plain named mutex; the handle is closed by `Instance`, or
     // below when it is not ours.
     unsafe {
