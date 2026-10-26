@@ -170,6 +170,7 @@ impl InstallPlan {
             }
         }
         files.sort_by(|a, b| a.target.cmp(&b.target));
+        twice(files.iter().map(|f| &f.target), target, &mut diagnostics);
 
         let mut directories = BTreeSet::new();
         for f in &files {
@@ -915,6 +916,29 @@ fn input_ids(text: &str) -> Vec<&str> {
         .collect()
 }
 
+/// an error for each target two files install to, like a folder's file
+/// and the same file named on its own. on Windows names match whatever
+/// their case.
+fn twice<'a>(
+    targets: impl Iterator<Item = &'a SemanticPath>,
+    target: Target,
+    diagnostics: &mut Diagnostics,
+) {
+    let mut seen = BTreeSet::new();
+    for path in targets {
+        let mut key = path.to_string();
+        if target.os() == crate::package::Os::Windows {
+            key = key.to_lowercase();
+        }
+        if !seen.insert(key) {
+            diagnostics.push(Diagnostic::error(
+                diagnostic::RESOLVE_CONFLICT,
+                format!("two files install to {path}"),
+            ));
+        }
+    }
+}
+
 /// an error for each `{input.<id>}` with no such field.
 fn unknown_inputs(manifest: &Manifest, operations: &[Operation], diagnostics: &mut Diagnostics) {
     let known = |id: &str| {
@@ -1454,6 +1478,22 @@ component docs Documentation off
             [diagnostic::MANIFEST_REFERENCE]
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_s_file_and_a_file_on_the_same_target_conflict() {
+        let dir = payload_dir("folder-twice");
+        let src = format!("{AUREA}\ncopy themes/light.toml -> {{app}}/themes/Light.toml\n");
+        let m = Manifest::parse("Kagofile", &src).0.unwrap();
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+            .0
+            .unwrap();
+        let (_, d) = InstallPlan::build(&m, &r, target, Scope::Machine, dir.as_path());
+        assert!(
+            d.iter().any(|d| d.code == diagnostic::RESOLVE_CONFLICT),
+            "{d:?}"
+        );
     }
 
     #[test]
