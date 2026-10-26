@@ -151,7 +151,10 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
 }
 
 pub fn recover(args: &Args) -> Result<ExitCode, String> {
-    args.at_most_one()?;
+    // it recovers every package; a name would only look like it picks one.
+    if let Some(extra) = args.positional.first() {
+        return Err(format!("unexpected argument `{extra}`"));
+    }
     let (platform, store) = open(scope(args)?)?;
     let done = transaction::recover(platform.as_ref(), &store).map_err(|e| e.to_string())?;
     if done.is_empty() {
