@@ -250,9 +250,23 @@ impl Wizard {
         }
     }
 
-    /// typing goes into field `index`.
+    /// typing goes into field `index`, when it is one to type in.
     pub fn focus(&mut self, index: usize) {
-        self.focus = Some(index);
+        if self.typed(index) {
+            self.focus = Some(index);
+        }
+    }
+
+    /// whether field `index` takes typed text, unlike a choice or a tick.
+    fn typed(&self, index: usize) -> bool {
+        self.fields().any(|(at, f)| {
+            at == index
+                && matches!(
+                    f.kind,
+                    crate::manifest::FieldKind::Text { .. }
+                        | crate::manifest::FieldKind::Number { .. }
+                )
+        })
     }
 
     /// typed text, into the focused field.
@@ -421,7 +435,7 @@ impl Wizard {
             && let Some(problem) = self.page_problem(page)
         {
             self.problem = Some(problem);
-            self.focus = Some(problem.0);
+            self.focus = self.typed(problem.0).then_some(problem.0);
             return Outcome::Stay;
         }
         self.problem = None;
@@ -713,6 +727,35 @@ mod tests {
             &earlier,
         );
         w
+    }
+
+    #[test]
+    fn typing_never_goes_into_a_choice() {
+        let mut w = plain(None);
+        let choice = Field {
+            id: "mode".into(),
+            label: "mode".into(),
+            kind: crate::manifest::FieldKind::Choice {
+                options: vec!["local".into(), "cloud".into()],
+            },
+            default: "local".into(),
+            required: true,
+        };
+        w.ask(
+            vec![InputPage {
+                id: "p".into(),
+                title: "p".into(),
+                about: None,
+                fields: vec![choice],
+                skip: None,
+            }],
+            &std::collections::BTreeMap::new(),
+        );
+        w.focus(0);
+        w.type_text("x");
+        w.erase();
+        assert_eq!(w.focus, None);
+        assert_eq!(w.answers, ["local"]);
     }
 
     #[test]

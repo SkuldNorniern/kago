@@ -1221,13 +1221,9 @@ fn field_box(
                 color::mix(color::SURFACE, color::BORDER, 0.6)
             };
             pen.outline(input, 9.0, if focused { 1.5 } else { 1.0 }, edge)?;
-            let shown = if field.secret() {
-                "\u{2022}".repeat(answer.chars().count())
-            } else {
-                answer.clone()
-            };
             let font = pen.font(14.0);
             let inner = Area::new(input.x + 12.0, input.y, input.w - 24.0, input.h);
+            let shown = shown_answer(pen, (field, answer), focused.then_some(inner.w), &font);
             pen.clipped(&shown, inner, &font, color::TEXT)?;
             if focused {
                 let caret = (inner.x + pen.width(&shown, &font) + 1.0).min(inner.right());
@@ -1250,6 +1246,25 @@ fn field_box(
         )?;
     }
     Ok(FIELD_H)
+}
+
+/// what a typed field shows: dots for a secret, and while typing at the
+/// end of a long answer, that end within `typing` wide.
+fn shown_answer(
+    pen: &mut Pen<'_>,
+    (field, answer): (&crate::manifest::Field, &str),
+    typing: Option<f32>,
+    font: &aurea::render::Font,
+) -> String {
+    let shown = if field.secret() {
+        "\u{2022}".repeat(answer.chars().count())
+    } else {
+        answer.to_owned()
+    };
+    match typing {
+        Some(width) => pen.tail(&shown, width, font),
+        None => shown,
+    }
 }
 
 /// one of the package's own pages: its title, what it is about and its

@@ -254,6 +254,23 @@ impl Pen<'_> {
         self.text(&shown, area.x, y, font, c)
     }
 
+    /// the end of `text` that fits `width`, after an ellipsis when cut.
+    pub fn tail(&mut self, text: &str, width: f32, font: &Font) -> String {
+        if self.width(text, font) <= width {
+            return text.to_owned();
+        }
+        let mut chars: std::collections::VecDeque<char> = text.chars().collect();
+        loop {
+            let shown: String = std::iter::once('\u{2026}')
+                .chain(chars.iter().copied())
+                .collect();
+            if chars.len() <= 1 || self.width(&shown, font) <= width {
+                return shown;
+            }
+            chars.pop_front();
+        }
+    }
+
     /// `text` broken into lines that fit `width`, at spaces when it can.
     /// keeps the text's own line breaks.
     pub fn lines(&mut self, text: &str, width: f32, font: &Font) -> Vec<String> {
