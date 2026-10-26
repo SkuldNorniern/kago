@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::manifest::{
-    Change, Command, Context, Expect, File, Manifest, PathKind, PathSource, Requirement,
-    ResourceScope, Run, Selector, SemanticPath, Service, Shortcut,
+    Change, Command, Context, Expect, File, FirewallRule, Manifest, PathKind, PathSource,
+    Requirement, ResourceScope, Run, Selector, SemanticPath, Service, Shortcut,
 };
+use crate::package::Os;
 
 /// components picked for one install. items without a component are
 /// always in.
@@ -72,6 +73,8 @@ pub struct Resolved {
     pub runs: Vec<ResolvedRun>,
     /// values set outside the package, for this target.
     pub changes: Vec<Change>,
+    /// firewall rules for this target, `when` applied.
+    pub firewall: Vec<FirewallRule>,
     pub components: Selection,
 }
 
@@ -150,6 +153,12 @@ pub fn resolve(
         .filter(|c| r.active(c.component.as_deref(), &c.when))
         .cloned()
         .collect();
+    let firewall = manifest
+        .firewall
+        .iter()
+        .filter(|f| r.active(f.component.as_deref(), &f.when))
+        .cloned()
+        .collect();
     if let Some(entry) = &manifest.application.entrypoint {
         r.lookup("`application.entrypoint`", entry, None);
     }
@@ -163,6 +172,7 @@ pub fn resolve(
         services,
         runs,
         changes,
+        firewall,
         components,
     };
     ((!diagnostics.has_errors()).then_some(resolved), diagnostics)
@@ -203,9 +213,13 @@ impl Resolver<'_> {
     }
 
     fn check_conflicts(&mut self, files: &[File]) {
-        let mut targets: BTreeMap<&SemanticPath, &File> = BTreeMap::new();
+        // windows paths ignore case
+        let fold = self.cx.target.os() == Os::Windows;
+        let mut targets: BTreeMap<String, &File> = BTreeMap::new();
         for f in files {
-            if let Some(other) = targets.insert(&f.target, f) {
+            let key = f.target.to_string();
+            let key = if fold { key.to_lowercase() } else { key };
+            if let Some(other) = targets.insert(key, f) {
                 self.diagnostics.push(
                     Diagnostic::error(
                         diagnostic::RESOLVE_CONFLICT,
@@ -373,6 +387,36 @@ mod tests {
             &Context::target(target.parse().unwrap()),
             Selection::defaults(m),
         )
+    }
+
+    #[test]
+    fn firewall_rules_follow_when() {
+        let m = manifest(&format!(
+            "{AUREA}\nwhen windows\n  firewall main-executable \"Win\"\nwhen linux\n  firewall main-executable \"Lin\"\n"
+        ));
+        let names = |target| {
+            let (r, d) = resolve_for(&m, target);
+            assert!(d.is_empty(), "{d:?}");
+            let rules = r.unwrap().firewall;
+            rules
+                .iter()
+                .map(|f| f.name.clone().unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names("windows-x86_64"), ["Win"]);
+        assert_eq!(names("linux-x86_64"), ["Lin"]);
+    }
+
+    #[test]
+    fn windows_targets_conflict_ignoring_case() {
+        let src = "package dev.x.tool\n  version 1.0.0\napp tool\n  windows tool.exe\n  linux tool\ncopy helper.exe -> {app}/Tool.exe\ncopy helper -> {app}/Tool\n";
+        let m = manifest(src);
+        let (r, d) = resolve_for(&m, "windows-x86_64");
+        assert!(r.is_none());
+        assert_eq!(d.iter().next().unwrap().code, diagnostic::RESOLVE_CONFLICT);
+        // case matters elsewhere
+        let (r, d) = resolve_for(&m, "linux-x86_64");
+        assert!(r.is_some(), "{d:?}");
     }
 
     #[test]
