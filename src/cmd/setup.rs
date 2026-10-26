@@ -415,6 +415,7 @@ fn handoff(exe: PathBuf) -> kago::gui::setup::Elevate {
         // answers may be secret, and any program can read another's
         // command line: they go in a file only this user can read, which
         // the elevated setup deletes once read.
+        let mut written = None;
         if !picked.answers.is_empty() {
             let file = std::env::temp_dir().join(format!(
                 "kago-answers-{}-{}.json",
@@ -429,8 +430,16 @@ fn handoff(exe: PathBuf) -> kago::gui::setup::Elevate {
                 kago::platform::ElevationError::Failed(format!("{}: {e}", file.display()))
             })?;
             args.extend(["--answers".to_owned(), file.display().to_string()]);
+            written = Some(file);
         }
-        platform::run_elevated(&exe, &args, false).map(|_| ())
+        let started = platform::run_elevated(&exe, &args, false).map(|_| ());
+        // declined or failed: nobody reads it, so it must not stay behind.
+        if started.is_err()
+            && let Some(file) = written
+        {
+            let _ = fs::remove_file(file);
+        }
+        started
     })
 }
 
