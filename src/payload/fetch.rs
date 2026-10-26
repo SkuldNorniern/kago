@@ -35,14 +35,14 @@ pub fn fetch(
         }
     }
     let partial = cache.join(format!("download-{}.partial", std::process::id()));
-    let out = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--output",
-        ])
+    let mut curl = Command::new("curl");
+    curl.args(["--fail", "--location", "--silent", "--show-error"]);
+    // an https link never goes on over plain http.
+    if url.starts_with("https://") {
+        curl.args(["--proto-redir", "=https"]);
+    }
+    let out = curl
+        .arg("--output")
         .arg(&partial)
         .arg(url)
         .output()

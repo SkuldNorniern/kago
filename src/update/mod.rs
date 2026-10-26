@@ -159,10 +159,31 @@ pub fn download(offer: &Offer, dir: &Path) -> Result<PathBuf, String> {
         ));
     }
     let file = crate::payload::fetch(&offer.url, Some(&offer.sha256), dir, "")?;
-    let name = offer.url.rsplit('/').next().unwrap_or("setup.exe");
-    let named = dir.join(name);
+    let named = dir.join(setup_name(&offer.url));
     fs::rename(&file, &named).map_err(|e| format!("{}: {e}", named.display()))?;
     Ok(named)
+}
+
+/// the setup's file name from its URL: the last part without a query,
+/// only characters a file name may hold, so it stays in the update folder.
+fn setup_name(url: &str) -> String {
+    let last = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("");
+    let name: String = last
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+        .collect();
+    let name = name.trim_start_matches('.');
+    if name.is_empty() {
+        format!("setup{}", std::env::consts::EXE_SUFFIX)
+    } else {
+        name.to_owned()
+    }
 }
 
 /// https, or a local file for testing feeds.
@@ -227,6 +248,16 @@ mod tests {
         let text = serde_json::to_string(&f).unwrap();
         assert!(text.contains("\"version\":\"1.2.0\""));
         assert_eq!(serde_json::from_str::<Feed>(&text).unwrap(), f);
+    }
+
+    #[test]
+    fn setup_names_stay_in_the_update_folder() {
+        assert_eq!(
+            setup_name("https://x/r/download/Ozone-1.2.0-setup.exe?token=1"),
+            "Ozone-1.2.0-setup.exe"
+        );
+        assert_eq!(setup_name(r"https://x/..\..\Startup\evil.exe"), "evil.exe");
+        assert!(!setup_name("https://x/..").contains(".."));
     }
 
     #[test]
