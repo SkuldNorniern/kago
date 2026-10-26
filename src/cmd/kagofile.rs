@@ -39,10 +39,8 @@ pub fn build(
             }
             Selection::with(&manifest, picked)
         }
-        None if offer => {
-            Selection::with(&manifest, manifest.components.iter().map(|c| c.id.as_str()))
-        }
-        None => Selection::defaults(&manifest),
+        // every one, picked later: by the person, or as installed now.
+        None => Selection::with(&manifest, manifest.components.iter().map(|c| c.id.as_str())),
     };
 
     let (resolved, diagnostics) = resolve(&manifest, &Context::target(target), selection);

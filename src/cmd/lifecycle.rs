@@ -60,11 +60,19 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
             .ok_or_else(|| format!("`--set {set}`: expected <field>=<value>"))?;
         given.insert(id.to_owned(), value.to_owned());
     }
-    let earlier = store
+    let installed = store
         .read_receipt(&plan.package)
-        .map_err(|e| e.to_string())?
-        .map(|r| r.answers)
-        .unwrap_or_default();
+        .map_err(|e| e.to_string())?;
+    // without --components an update keeps what is installed now.
+    let plan = match (&installed, args.value("--components")) {
+        (_, Some(_)) => plan,
+        (Some(r), None) => {
+            let kept = plan.kept_choices(&r.components, &r.offered);
+            plan.select(kept.iter().map(String::as_str))
+        }
+        (None, None) => plan.with_defaults(),
+    };
+    let earlier = installed.map(|r| r.answers).unwrap_or_default();
     let plan = plan.answered(&given, &earlier)?;
     let plan = match args.value("--location") {
         None => plan,
