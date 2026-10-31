@@ -3,7 +3,7 @@
 //! worker thread; this module never touches the machine.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 
 use aurea::elements::{
@@ -87,41 +87,51 @@ pub(super) struct Removal {
     /// the person ticked removing their settings and data too.
     pub purge: bool,
     work: Option<Work>,
-    tx: Sender<Result<Removed, String>>,
-    rx: Receiver<Result<Removed, String>>,
+    lang: Lang,
+    /// set by `confirm`; dropped once the result is taken, so a worker that
+    /// dies without sending shows up as a disconnect.
+    rx: Option<Receiver<Result<Removed, String>>>,
 }
 
 impl Removal {
-    fn new(work: Work) -> Self {
-        let (tx, rx) = mpsc::channel();
+    fn new(work: Work, lang: Lang) -> Self {
         Self {
             page: Page::Ask,
             purge: false,
             work: Some(work),
-            tx,
-            rx,
+            lang,
+            rx: None,
         }
     }
 
     /// the person said yes: removing starts.
     pub fn confirm(&mut self) {
         if let (Page::Ask, Some(work)) = (&self.page, self.work.take()) {
-            let tx = self.tx.clone();
+            let (tx, rx) = mpsc::channel();
             let purge = self.purge;
             thread::spawn(move || {
                 let _ = tx.send(work(purge));
             });
+            self.rx = Some(rx);
             self.page = Page::Working;
         }
     }
 
     /// takes the result once there is one. true when the page changed.
     pub fn pump(&mut self) -> bool {
-        match self.rx.try_recv() {
-            Ok(Ok(done)) => self.page = Page::Done(done),
-            Ok(Err(e)) => self.page = Page::Failed(e),
-            Err(_) => return false,
-        }
+        let Some(rx) = &self.rx else {
+            return false;
+        };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err(self.lang.line(Line::RemovalStopped).to_owned()),
+        };
+        self.rx = None;
+        self.page = match result {
+            Ok(done) => Page::Done(done),
+            Err(e) => Page::Failed(e),
+        };
         true
     }
 
@@ -164,7 +174,7 @@ where
     F: FnOnce(bool) -> Result<Removed, String> + Send + 'static,
 {
     let lang = Lang::detect();
-    let removal = Removal::new(Box::new(remove));
+    let removal = Removal::new(Box::new(remove), lang);
     match info.look {
         SetupLook::Modern => super::modern::uninstall(info, lang, removal),
         SetupLook::Native => native(info, lang, removal),
@@ -302,5 +312,32 @@ impl aurea::elements::Element for Shared {
     unsafe fn invalidate_platform(&self, rect: Option<aurea::render::Rect>) {
         // SAFETY: same element, same thread; the caller's guarantees hold.
         unsafe { self.0.invalidate_platform(rect) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn a_worker_that_panics_ends_on_failed() {
+        let mut removal = Removal::new(
+            Box::new(|_: bool| -> Result<Removed, String> { panic!("worker died") }),
+            Lang::En,
+        );
+        assert!(!removal.pump());
+        removal.confirm();
+        for _ in 0..500 {
+            if removal.pump() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        match &removal.page {
+            Page::Failed(e) => assert_eq!(e.as_str(), Lang::En.line(Line::RemovalStopped)),
+            _ => panic!("a panicked worker must end on Page::Failed"),
+        }
     }
 }
