@@ -522,7 +522,8 @@ pub fn programs_using(files: &[PathBuf]) -> Result<Vec<String>, String> {
 }
 
 /// closes the programs that have any of `files` open: asks first, then
-/// ends those that stay.
+/// ends those without a window. one with a window that stays is an error,
+/// as it may hold unsaved work.
 ///
 /// # Errors
 ///
