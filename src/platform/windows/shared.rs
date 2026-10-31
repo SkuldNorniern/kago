@@ -3,6 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
+use windows::Win32::UI::Shell::{
+    FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music, FOLDERID_Pictures,
+    FOLDERID_SavedGames, FOLDERID_Videos,
+};
+use windows::core::GUID;
+
 /// folders named by environment variables, like `%APPDATA%`.
 const KNOWN: &[&str] = &[
     "USERPROFILE",
@@ -61,6 +67,32 @@ const INSIDE: &[&str] = &[
     "virtualstore",
 ];
 
+/// folders the shell may have moved off the profile, like Documents on
+/// another drive.
+const SHELL_FOLDERS: [GUID; 7] = [
+    FOLDERID_Documents,
+    FOLDERID_Pictures,
+    FOLDERID_Music,
+    FOLDERID_Videos,
+    FOLDERID_Downloads,
+    FOLDERID_Desktop,
+    FOLDERID_SavedGames,
+];
+
+/// where the shell keeps the known folder `id`; `None` when it has none.
+fn known_folder(id: &GUID) -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the id is a static GUID and no token is given; the path is read
+    // before CoTaskMemFree frees the buffer SHGetKnownFolderPath made.
+    unsafe {
+        let path = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
+        let text = path.to_string();
+        CoTaskMemFree(Some(path.0.cast()));
+        text.ok().map(PathBuf::from)
+    }
+}
+
 fn lower(p: &Path) -> String {
     p.display()
         .to_string()
@@ -76,6 +108,12 @@ pub fn shared(dir: &Path) -> bool {
         .iter()
         .filter_map(std::env::var_os)
         .map(|v| lower(&PathBuf::from(v)))
+        .chain(
+            SHELL_FOLDERS
+                .iter()
+                .filter_map(known_folder)
+                .map(|p| lower(&p)),
+        )
         .filter(|k| !k.is_empty())
         .collect();
     let at = lower(dir);
@@ -108,6 +146,8 @@ mod tests {
         assert!(shared(&local.join("Kago")));
         assert!(shared(&var("APPDATA").join("Microsoft")));
         assert!(shared(&home.join("Documents")));
+        let documents = known_folder(&FOLDERID_Documents).expect("a Documents folder");
+        assert!(shared(&documents), "{}", documents.display());
         assert!(!shared(&local.join("Aira Studio")));
         assert!(!shared(&home.join("Documents").join("My Game")));
         assert!(!shared(&var("APPDATA").join("Aira")));
