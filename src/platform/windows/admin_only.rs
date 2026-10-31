@@ -4,9 +4,9 @@
 
 use std::path::Path;
 
-use windows::Win32::Foundation::{HLOCAL, LocalFree};
+use windows::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, GetSecurityInfo,
     ProgressInvokeNever, SDDL_REVISION_1, SE_FILE_OBJECT, TREE_SEC_INFO_RESET,
     TreeSetNamedSecurityInfoW,
 };
@@ -15,6 +15,10 @@ use windows::Win32::Security::{
     GetSecurityDescriptorOwner, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
     WinBuiltinAdministratorsSid, WinLocalSystemSid,
+};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL,
 };
 use windows::core::{BOOL, HSTRING};
 
@@ -120,6 +124,57 @@ fn drop_foreign(dir: &Path) -> Result<(), String> {
         removed.map_err(|e| failed(&path, e))?;
     }
     Ok(())
+}
+
+/// whether the link at `path` itself, not what it points at, is owned by
+/// Administrators or SYSTEM. any failure reads as not.
+#[must_use]
+pub fn link_owned_by_admins(path: &Path) -> bool {
+    // SAFETY: the name lives across the call; the link is opened, not
+    // followed, and only its owner is asked for.
+    let Ok(handle) = (unsafe {
+        CreateFileW(
+            &HSTRING::from(path),
+            READ_CONTROL.0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        )
+    }) else {
+        return false;
+    };
+    let mut owner = PSID::default();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `handle` is open; the out pointers are valid. `sd` is wrapped
+    // at once so it is freed whatever happened, and owner points into it.
+    let e = unsafe {
+        GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&raw mut owner),
+            None,
+            None,
+            None,
+            Some(&raw mut sd),
+        )
+    };
+    // held to the end: `owner` points into it.
+    let _sd = Descriptor(sd);
+    // SAFETY: the handle came from CreateFileW and is closed exactly once.
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    if !e.is_ok() {
+        return false;
+    }
+    // SAFETY: `owner` points into `sd`, which lives until this returns.
+    unsafe {
+        IsWellKnownSid(owner, WinBuiltinAdministratorsSid).as_bool()
+            || IsWellKnownSid(owner, WinLocalSystemSid).as_bool()
+    }
 }
 
 /// whether `dir` is owned by Administrators or SYSTEM with its rights its

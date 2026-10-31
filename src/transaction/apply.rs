@@ -345,7 +345,7 @@ impl Run<'_> {
     /// another user could have made; see [`super::linked`].
     fn real(&self, path: &SemanticPath) -> Result<PathBuf, Error> {
         let dest = self.resolve(path)?;
-        match super::linked(self.plan.scope, &self.roots.0, path) {
+        match super::linked(self.platform, self.plan.scope, &self.roots.0, path) {
             Some(link) => Err(Error::Other(format!(
                 "{} is a link to somewhere else; an install for everyone only writes to real folders there",
                 link.display()
@@ -907,8 +907,15 @@ fn copy_runtime(current: &Path, runtime: &Path) -> Result<(), Error> {
     fs::copy(current, &tmp).map_err(|e| Error::io(&tmp, &e))?;
     match fs::rename(&tmp, runtime) {
         Ok(()) => Ok(()),
-        // the runtime is running (uninstalling something); keep it.
+        // the runtime is running (uninstalling something). Windows lets a
+        // running exe be renamed, so move it aside and take its place.
         Err(_) if runtime.exists() => {
+            let old = runtime.with_extension("old");
+            let _ = fs::remove_file(&old);
+            if fs::rename(runtime, &old).is_ok() && fs::rename(&tmp, runtime).is_err() {
+                // back where the uninstall entries point.
+                let _ = fs::rename(&old, runtime);
+            }
             let _ = fs::remove_file(&tmp);
             Ok(())
         }

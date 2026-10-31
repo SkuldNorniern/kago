@@ -1262,3 +1262,23 @@ fn an_update_without_a_secret_leaves_the_setting_using_it() {
     uninstall(&World::id(), &w.fake, &w.store).unwrap();
     assert_eq!(held(), None, "still owned, so it is taken back");
 }
+
+/// moving between scopes: the new copy goes in first, finds the setting the
+/// old one owns, and sets it again once the old one took it back.
+#[test]
+fn a_shared_setting_survives_moving_between_scopes() {
+    let w = World::new("move-scope");
+    let manifest = format!("{MANIFEST}\nenv set KAGO_MOVED yes\n");
+    let other = Store::new(w.dir.join("other-state"));
+    let runtime = w.dir.join("kago.exe");
+    install(&w.plan(&manifest), &w.fake, &other, &runtime).unwrap();
+    let held = || w.fake.values.borrow().values().next().cloned();
+    let new = w.plan(&manifest);
+    install(&new, &w.fake, &w.store, &runtime).unwrap();
+    remove(&World::id(), &w.fake, &other).unwrap();
+    assert_eq!(held(), None, "the old copy took it back");
+    install(&new, &w.fake, &w.store, &runtime).unwrap();
+    assert!(held().is_some(), "set again");
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(held(), None, "and owned by the new copy");
+}

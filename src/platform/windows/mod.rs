@@ -17,6 +17,7 @@ mod shared;
 mod shortcut;
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::{Platform, Registration};
@@ -83,6 +84,23 @@ pub fn registry_has(key: &str, value: Option<&str>) -> bool {
             .flatten()
             .is_some_and(|t| !t.value.is_empty()),
     }
+}
+
+/// `path` for the wide-string Win32 calls: past 260 characters, a path needs
+/// the `\\?\` prefix, or `\\?\UNC\` for a network share.
+fn long_path(path: &Path) -> OsString {
+    use std::os::windows::ffi::OsStrExt;
+    let text = path.as_os_str();
+    let plain = text.to_string_lossy();
+    if !path.is_absolute() || plain.starts_with(r"\\?\") || text.encode_wide().count() < 260 {
+        return text.to_os_string();
+    }
+    if let Some(unc) = plain.strip_prefix(r"\\") {
+        return OsString::from(format!(r"\\?\UNC\{unc}"));
+    }
+    let mut out = OsString::from(r"\\?\");
+    out.push(text);
+    out
 }
 
 impl Platform for Windows {
@@ -245,13 +263,17 @@ impl Platform for Windows {
         shared::shared(dir)
     }
 
+    fn admin_link(&self, path: &Path) -> bool {
+        admin_only::link_owned_by_admins(path)
+    }
+
     fn delete_at_restart(&self, path: &Path) -> Result<(), String> {
         use windows::Win32::Storage::FileSystem::{MOVEFILE_DELAY_UNTIL_REBOOT, MoveFileExW};
         // SAFETY: the path string lives until the call returns; no target
         // means delete.
         unsafe {
             MoveFileExW(
-                &windows::core::HSTRING::from(path),
+                &windows::core::HSTRING::from(long_path(path)),
                 windows::core::PCWSTR::null(),
                 MOVEFILE_DELAY_UNTIL_REBOOT,
             )
@@ -370,5 +392,27 @@ mod tests {
     fn desktop_is_a_folder_that_exists() {
         let dir = desktop().expect("a desktop folder");
         assert!(dir.is_dir(), "{}", dir.display());
+    }
+
+    #[test]
+    fn long_paths_get_the_verbatim_prefix_only_when_needed() {
+        let short = r"C:\Program Files\Tool";
+        assert_eq!(long_path(Path::new(short)), OsString::from(short));
+        let deep = format!(r"C:\{}", r"deep\".repeat(60));
+        assert_eq!(
+            long_path(Path::new(&deep)),
+            OsString::from(format!(r"\\?\{deep}"))
+        );
+        assert_eq!(
+            long_path(Path::new(&format!(r"\\?\{deep}"))),
+            OsString::from(format!(r"\\?\{deep}"))
+        );
+        let share = format!(r"\\server\share\{}", r"deep\".repeat(60));
+        assert_eq!(
+            long_path(Path::new(&share)),
+            OsString::from(format!(r"\\?\UNC\server\share\{}", r"deep\".repeat(60)))
+        );
+        let relative = r"relative\".repeat(40);
+        assert_eq!(long_path(Path::new(&relative)), OsString::from(relative));
     }
 }

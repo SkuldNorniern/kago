@@ -256,7 +256,9 @@ pub fn purge(receipt: &Receipt, platform: &dyn Platform, kept: &[String]) -> Vec
                 path,
                 ownership: Ownership::UserData | Ownership::PreserveIfModified,
                 ..
-            } if linked(receipt.scope, &receipt.roots, path).is_none() => receipt.absolute(path),
+            } if linked(platform, receipt.scope, &receipt.roots, path).is_none() => {
+                receipt.absolute(path)
+            }
             _ => None,
         })
         .collect();
@@ -481,7 +483,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 value,
                 previous,
             } => revert(platform, slot, *edit, value, previous.as_ref()),
-            Resource::File { .. } => match remove_owned_file(receipt, resource) {
+            Resource::File { .. } => match remove_owned_file(platform, receipt, resource) {
                 Ok(Some(kept)) => {
                     out.kept.push(kept);
                     continue;
@@ -536,8 +538,10 @@ fn revert(
 /// for everyone, the folder between `path`'s root and it that is a link
 /// elsewhere. data roots sit in `%ProgramData%`, where any user may make
 /// folders: a link there must not lead an elevated kago into a system
-/// folder. `None` for the app's own folder and per-user installs.
+/// folder. `None` for the app's own folder and per-user installs. a link an
+/// administrator made on purpose is not one of those.
 pub(super) fn linked(
+    platform: &dyn Platform,
     scope: Scope,
     roots: &std::collections::BTreeMap<crate::manifest::Root, std::path::PathBuf>,
     path: &crate::manifest::SemanticPath,
@@ -560,15 +564,20 @@ pub(super) fn linked(
     }
     // the file itself may be a link: moving or removing it never follows.
     on_the_way.pop();
-    on_the_way
-        .into_iter()
-        .find(|dir| fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink()))
+    on_the_way.into_iter().find(|dir| {
+        fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_symlink())
+            && !platform.admin_link(dir)
+    })
 }
 
 /// removes one file of the package, unless ownership keeps it: then
 /// where it is, to report as kept. the person's own file it replaced
 /// goes back.
-fn remove_owned_file(receipt: &Receipt, file: &Resource) -> Result<Option<String>, String> {
+fn remove_owned_file(
+    platform: &dyn Platform,
+    receipt: &Receipt,
+    file: &Resource,
+) -> Result<Option<String>, String> {
     let Resource::File {
         path,
         sha256,
@@ -582,7 +591,7 @@ fn remove_owned_file(receipt: &Receipt, file: &Resource) -> Result<Option<String
     let abs = receipt
         .absolute(path)
         .ok_or_else(|| format!("{path}: root missing from receipt"))?;
-    if let Some(link) = linked(receipt.scope, &receipt.roots, path) {
+    if let Some(link) = linked(platform, receipt.scope, &receipt.roots, path) {
         return Err(format!(
             "{}: {} is a link to somewhere else, so it was left",
             abs.display(),

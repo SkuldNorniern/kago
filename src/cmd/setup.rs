@@ -339,8 +339,11 @@ fn window(
                 .map(|r| plan.kept_choices(&r.components, &r.offered));
             let earlier = receipt.map(|r| r.answers).unwrap_or_default();
             let (there, folder_other) = place(host, plan, other_scope);
-            // the elevated setup installs for everyone only.
-            let open = plan.scope_open && !parsed.elevated;
+            // the elevated setup installs for everyone only, and leaving a
+            // copy for everyone needs the rights only that setup has.
+            let open = plan.scope_open
+                && !parsed.elevated
+                && (platform::is_elevated() || installed(host, plan, Scope::Machine).is_none());
             let folder = (c.header.setup.folder == FolderChoice::Choose).then(|| {
                 let installed = move |everyone: bool| {
                     if everyone == (scope == Scope::Machine) {
@@ -822,6 +825,34 @@ fn other_install(
         .map(|_| (other, store))
 }
 
+/// removes the copy installed the other way, now this one is in. whether
+/// it took back settings, which both may have set and it alone owned: the
+/// new install then sets them again and owns them.
+fn remove_other(
+    platform: &dyn kago::platform::Platform,
+    plan: &InstallPlan,
+    scope: Scope,
+    other: &transaction::Store,
+) -> Result<bool, String> {
+    let old = other.read_receipt(&plan.package).ok().flatten();
+    let left = |e: String| {
+        format!(
+            "{} is installed, but the {scope} copy could not be removed: {e}",
+            plan.name
+        )
+    };
+    let done =
+        transaction::remove(&plan.package, platform, other).map_err(|e| left(e.to_string()))?;
+    if let Some(failed) = done.failed.first() {
+        return Err(left(failed.clone()));
+    }
+    Ok(old.is_some_and(|r| {
+        r.resources
+            .iter()
+            .any(|r| matches!(r, kago::receipt::Resource::Changed { .. }))
+    }))
+}
+
 /// what the person installing picked.
 struct Choice<'a> {
     /// optional components to install, the defaults when `None`.
@@ -908,18 +939,14 @@ fn install(
         run_prerequisites(&mut container, &plan, &staging, &mut |name| {
             progress(before, Stage::Prerequisite(name));
         })?;
-        // the same package installed the other way (just for this user, or
-        // for everyone) goes first, so there are never two. what ownership
-        // keeps, like user data, stays.
-        if let Some((scope, other)) = other_install(platform.as_ref(), plan.scope, &plan.package) {
-            let done = transaction::uninstall(&plan.package, platform.as_ref(), &other)
-                .map_err(|e| format!("cannot remove the {scope} install first: {e}"))?;
-            // never two: stop while something of it is left.
-            if let Some(failed) = done.failed.first() {
-                return Err(format!("cannot remove the {scope} install first: {failed}"));
-            }
+        // the same package installed the other way may say no; it goes once
+        // this one is in, so a failed install leaves it as it was.
+        let other = other_install(platform.as_ref(), plan.scope, &plan.package);
+        if let Some((scope, other)) = &other {
+            transaction::ask(&plan.package, other)
+                .map_err(|e| format!("cannot remove the {scope} install: {e}"))?;
         }
-        let receipt = transaction::install_observed(
+        let mut receipt = transaction::install_observed(
             &plan,
             platform.as_ref(),
             &store,
@@ -927,6 +954,13 @@ fn install(
             &mut |i, n, op| progress(share(files + i, files + n), Stage::Apply(op)),
         )
         .map_err(|e| e.to_string())?;
+        if let Some((scope, other)) = other {
+            let shared = remove_other(platform.as_ref(), &plan, scope, &other)?;
+            if shared {
+                receipt = transaction::install(&plan, platform.as_ref(), &store, &runtime)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
         let launch = plan.operations.iter().find_map(|op| match op {
             Operation::RegisterApplication {
                 entrypoint: Some(e),

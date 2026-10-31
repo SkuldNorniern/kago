@@ -187,6 +187,12 @@ pub trait Platform {
         false
     }
 
+    /// whether the link at `path` itself, not what it points at, belongs to an administrator.
+    fn admin_link(&self, path: &Path) -> bool {
+        let _ = path;
+        false
+    }
+
     /// has the file or empty folder at `path` deleted when the computer
     /// next starts, for one still in use now.
     ///
