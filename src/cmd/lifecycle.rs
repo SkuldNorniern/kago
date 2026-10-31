@@ -95,6 +95,10 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
         "installing {} {} for {}",
         plan.name, plan.version, plan.scope
     );
+    if let Some(old) = store.read_receipt(&plan.package).ok().flatten() {
+        platform::close_programs(&old.files())
+            .map_err(|e| format!("cannot close the programs using {}: {e}", plan.name))?;
+    }
     let receipt = transaction::install(&plan, platform.as_ref(), &store, &runtime)
         .map_err(|e| e.to_string())?;
     if let Some(app) = receipt.roots.get(&kago::manifest::Root::App) {
@@ -125,8 +129,14 @@ pub fn uninstall(args: &Args) -> Result<ExitCode, String> {
     }
     let (platform, store) = open(scope)?;
     let receipt = store.read_receipt(&package).map_err(|e| e.to_string())?;
+    // the package may say no, before anything is closed.
+    transaction::ask(&package, &store).map_err(|e| e.to_string())?;
+    if let Some(receipt) = &receipt {
+        platform::close_programs(&receipt.files())
+            .map_err(|e| format!("cannot close the programs using {package}: {e}"))?;
+    }
     let mut done =
-        transaction::uninstall(&package, platform.as_ref(), &store).map_err(|e| e.to_string())?;
+        transaction::remove(&package, platform.as_ref(), &store).map_err(|e| e.to_string())?;
     if args.flag("--purge")
         && let Some(receipt) = &receipt
     {
