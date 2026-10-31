@@ -353,6 +353,14 @@ pub fn remove_at_restart(
         _ => 0,
     });
     for resource in resources {
+        // the person's own original, kept for uninstall to put back.
+        if let Resource::File {
+            replaced: Some(_), ..
+        } = &resource
+        {
+            left.push(resource);
+            continue;
+        }
         let path = match &resource {
             Resource::File { path, .. } | Resource::Directory { path } => receipt.absolute(path),
             Resource::Shortcut { path } => Some(path.clone()),
