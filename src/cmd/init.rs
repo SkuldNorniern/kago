@@ -9,6 +9,26 @@ use kago::manifest::FILE_NAME;
 
 use super::args::Args;
 
+/// the text of the quoted TOML string at the start of `raw`, unescaped. a `#`
+/// after the closing quote is a comment and is not read. unquoted values give
+/// `None`, since nothing here uses them.
+fn quoted(raw: &str) -> Option<String> {
+    let mut chars = raw.trim().strip_prefix('"')?.chars();
+    let mut out = String::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                other => out.push(other),
+            },
+            other => out.push(other),
+        }
+    }
+    None
+}
+
 /// what a Cargo.toml says about the package, read without a TOML parser:
 /// `key = "value"` lines of `[package]` and the names of `[[bin]]` tables.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -31,11 +51,9 @@ fn read_crate(text: &str) -> Crate {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let value = value.split('#').next().unwrap_or("").trim();
-        let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {
+        let Some(value) = quoted(value) else {
             continue;
         };
-        let value = value.to_owned();
         match (table.as_str(), key.trim()) {
             ("[package]", "name") => out.name = Some(value),
             ("[package]", "description") => out.description = Some(value),
@@ -136,9 +154,8 @@ fn toml_table(text: &str, wanted: &str) -> Vec<(String, String)> {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let value = value.split('#').next().unwrap_or("").trim();
-        if let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-            out.push((key.trim().to_owned(), value.to_owned()));
+        if let Some(value) = quoted(value) {
+            out.push((key.trim().to_owned(), value));
         }
     }
     out
@@ -288,6 +305,16 @@ fn project(dir: &Path) -> Project {
     }
 }
 
+/// a value for a Kagofile line: quoted, with `\` and `"` escaped, when a `#`
+/// would start a comment or a `"` would break the word.
+fn kago_text(value: &str) -> String {
+    if value.contains(['#', '"']) {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        value.to_owned()
+    }
+}
+
 /// a Kagofile for the project in `dir`, with `id` as the package id.
 fn kagofile(dir: &Path, id: &str) -> String {
     let project = project(dir);
@@ -304,10 +331,10 @@ fn kagofile(dir: &Path, id: &str) -> String {
     line(&format!("  version {}", project.version));
     line("  publisher Your Name");
     if let Some(description) = &project.description {
-        line(&format!("  description {description}"));
+        line(&format!("  description {}", kago_text(description)));
     }
     if let Some(homepage) = &project.homepage {
-        line(&format!("  homepage {homepage}"));
+        line(&format!("  homepage {}", kago_text(homepage)));
     }
     line("");
     if !project.build.is_empty() {
@@ -460,6 +487,28 @@ mod tests {
         );
         assert!(text.contains("windows dist/tracker-tool/tracker-tool.exe"));
         assert!(text.contains("copy dist/tracker-tool/_internal"));
+    }
+
+    #[test]
+    fn hash_inside_quotes_survives_the_round_trip() {
+        let dir = std::env::temp_dir().join(format!("kago-init-hash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"editor\"\nversion = \"0.1.0\"\ndescription = \"Editor for C# files\" # shown\nhomepage = \"https://x.dev/#docs\"\n",
+        )
+        .unwrap();
+        let text = kagofile(&dir, "dev.test.editor");
+        let (m, d) = Manifest::parse_in("Kagofile", &text, &dir);
+        assert!(!d.has_errors(), "{d:?}\n{text}");
+        let m = m.unwrap();
+        assert_eq!(
+            m.package.description.as_deref(),
+            Some("Editor for C# files")
+        );
+        assert_eq!(m.package.homepage.as_deref(), Some("https://x.dev/#docs"));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
