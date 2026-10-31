@@ -80,6 +80,7 @@ pub enum Line {
     Kept,
     NotRemoved,
     UninstallFailed,
+    RemovalStopped,
     InstallingTitle,
     InstallingBody,
     DoneTitle,
@@ -116,7 +117,13 @@ pub enum Line {
     ErrKept,
     ErrClose,
     ErrOnlyEveryone,
+    ErrNeedsAdmin,
     ErrLeftBehind,
+    ErrUnpack,
+    ErrPrerequisite,
+    ErrAnswers,
+    ErrSpace,
+    ErrFolder,
 }
 
 impl Lang {
@@ -496,6 +503,11 @@ const fn table(line: Line) -> [&'static str; 3] {
             "제거 실패",
             "アンインストールに失敗しました",
         ],
+        Line::RemovalStopped => [
+            "The removal stopped unexpectedly. Try again.",
+            "제거가 예기치 않게 중단되었습니다. 다시 시도하세요.",
+            "削除が予期せず停止しました。もう一度お試しください。",
+        ],
         Line::InstallingTitle => ["Installing", "설치 중", "インストール中"],
         Line::InstallingBody => [
             "Please wait while {name} is being installed.",
@@ -618,6 +630,11 @@ const fn table(line: Line) -> [&'static str; 3] {
             "{name}을(를) 사용 중인 프로그램을 닫지 못했습니다: {item}",
             "{name} を使用しているプログラムを閉じられませんでした: {item}",
         ],
+        Line::ErrNeedsAdmin => [
+            "Installing for everyone needs administrator rights.",
+            "모든 사용자용으로 설치하려면 관리자 권한이 필요합니다.",
+            "すべてのユーザー向けのインストールには管理者権限が必要です。",
+        ],
         Line::ErrOnlyEveryone => [
             "{name} is installed for everyone. Removing that needs administrator rights: install it for everyone, or uninstall it first.",
             "{name}은(는) 모든 사용자용으로 설치되어 있습니다. 제거하려면 관리자 권한이 필요하므로, 모든 사용자용으로 설치하거나 먼저 제거하세요.",
@@ -627,6 +644,31 @@ const fn table(line: Line) -> [&'static str; 3] {
             "{name} is installed, but the other copy could not be removed: {item}",
             "{name}이(가) 설치되었지만 다른 사본을 제거하지 못했습니다: {item}",
             "{name} はインストールされましたが、もう一方のコピーを削除できませんでした: {item}",
+        ],
+        Line::ErrUnpack => [
+            "Could not unpack the files: {item}",
+            "파일의 압축을 풀지 못했습니다: {item}",
+            "ファイルを展開できませんでした: {item}",
+        ],
+        Line::ErrPrerequisite => [
+            "A required component could not be installed: {item}",
+            "필요한 구성 요소를 설치하지 못했습니다: {item}",
+            "必要なコンポーネントをインストールできませんでした: {item}",
+        ],
+        Line::ErrAnswers => [
+            "An answer needs another look: {item}",
+            "입력한 값을 확인해 주세요: {item}",
+            "入力内容を確認してください: {item}",
+        ],
+        Line::ErrSpace => [
+            "There is not enough free space: {item}",
+            "디스크 공간이 부족합니다: {item}",
+            "空き容量が足りません: {item}",
+        ],
+        Line::ErrFolder => [
+            "This folder cannot be used: {item}",
+            "이 폴더는 사용할 수 없습니다: {item}",
+            "このフォルダーは使用できません: {item}",
         ],
     }
 }

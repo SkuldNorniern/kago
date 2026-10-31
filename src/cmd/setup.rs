@@ -389,7 +389,8 @@ fn window(
     };
     // picking everyone in a window without administrator rights starts
     // this setup again with them, carrying what was picked.
-    let elevate = (info.other.is_some() && !platform::is_elevated()).then(|| handoff(exe.clone()));
+    // whether or not the choice is shown: a copy for everyone needs it too.
+    let elevate = (plan.scope_open && !platform::is_elevated()).then(|| handoff(exe.clone()));
     let fields = plan.clone();
     let lang = kago::gui::setup::Lang::detect();
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
@@ -647,21 +648,21 @@ fn chosen(
     store: &transaction::Store,
     platform: &dyn kago::platform::Platform,
     staging: &Path,
-) -> Result<InstallPlan, String> {
+) -> Result<InstallPlan, Failure> {
     if let Some(chosen) = choice.components
         && let Some(unknown) = chosen
             .iter()
             .find(|c| !plan.choices.iter().any(|choice| &choice.id == *c))
     {
         let known: Vec<&str> = plan.choices.iter().map(|c| c.id.as_str()).collect();
-        return Err(format!(
+        return Err(Failure::Text(format!(
             "unknown component `{unknown}`; this setup has {}",
             if known.is_empty() {
                 "none".to_owned()
             } else {
                 known.join(", ")
             }
-        ));
+        )));
     }
     if let Some(dir) = choice.location {
         let installed = store
@@ -669,8 +670,9 @@ fn chosen(
             .ok()
             .flatten()
             .and_then(|r| r.roots.get(&kago::manifest::Root::App).cloned());
-        kago::install::check_folder(dir, installed.as_deref())
-            .map_err(|e| format!("{}: {e}", dir.display()))?;
+        kago::install::check_folder(dir, installed.as_deref()).map_err(|e| Failure::Folder {
+            why: format!("{}: {e}", dir.display()),
+        })?;
     }
     // an update or repair keeps what is installed.
     let previous = store.read_receipt(&plan.package).ok().flatten();
@@ -682,11 +684,13 @@ fn chosen(
         }
         (None, None) => plan.with_defaults(),
     };
-    let plan = plan.answered(
-        choice.answers,
-        previous.as_ref().map(|r| &r.answers),
-        &skipped_pages(&plan),
-    )?;
+    let plan = plan
+        .answered(
+            choice.answers,
+            previous.as_ref().map(|r| &r.answers),
+            &skipped_pages(&plan),
+        )
+        .map_err(|why| Failure::Answers { why })?;
     let app = choice
         .location
         .map(Path::to_path_buf)
@@ -696,7 +700,7 @@ fn chosen(
             roots.0.get(&kago::manifest::Root::App).cloned()
         });
     if let Some(app) = app {
-        check_space(plan.payload_size(), staging, &app)?;
+        check_space(plan.payload_size(), staging, &app).map_err(|why| Failure::Space { why })?;
     }
     Ok(plan)
 }
@@ -860,7 +864,13 @@ enum Failure {
     Install(transaction::Error),
     Close { name: String, why: String },
     OnlyEveryone { name: String },
+    NeedsAdmin,
     LeftBehind { name: String, why: String },
+    Unpack { why: String },
+    Prerequisite { why: String },
+    Answers { why: String },
+    Space { why: String },
+    Folder { why: String },
     Text(String),
 }
 
@@ -871,6 +881,7 @@ impl std::fmt::Display for Failure {
             Self::Close { name, why } => {
                 write!(f, "cannot close the programs using {name}: {why}")
             }
+            Self::NeedsAdmin => f.write_str("installing for everyone needs administrator rights"),
             Self::OnlyEveryone { name } => write!(
                 f,
                 "{name} is installed for everyone; removing that needs administrator rights. install it for everyone, or uninstall it first"
@@ -879,6 +890,11 @@ impl std::fmt::Display for Failure {
                 f,
                 "{name} is installed, but the other copy could not be removed: {why}"
             ),
+            Self::Unpack { why } => write!(f, "cannot unpack: {why}"),
+            Self::Prerequisite { why }
+            | Self::Answers { why }
+            | Self::Space { why }
+            | Self::Folder { why } => f.write_str(why),
             Self::Text(text) => f.write_str(text),
         }
     }
@@ -910,9 +926,15 @@ fn window_failure(lang: kago::gui::setup::Lang, failure: &Failure) -> String {
         },
         Failure::Close { name, why } => lang.fill(Line::ErrClose, &[("name", name), ("item", why)]),
         Failure::OnlyEveryone { name } => lang.fill(Line::ErrOnlyEveryone, &[("name", name)]),
+        Failure::NeedsAdmin => lang.line(Line::ErrNeedsAdmin).to_owned(),
         Failure::LeftBehind { name, why } => {
             lang.fill(Line::ErrLeftBehind, &[("name", name), ("item", why)])
         }
+        Failure::Unpack { why } => lang.fill(Line::ErrUnpack, &[("item", why)]),
+        Failure::Prerequisite { why } => lang.fill(Line::ErrPrerequisite, &[("item", why)]),
+        Failure::Answers { why } => lang.fill(Line::ErrAnswers, &[("item", why)]),
+        Failure::Space { why } => lang.fill(Line::ErrSpace, &[("item", why)]),
+        Failure::Folder { why } => lang.fill(Line::ErrFolder, &[("item", why)]),
         Failure::Text(text) => text.clone(),
     }
 }
@@ -952,6 +974,11 @@ fn install(
                 everyone_or_user(plan.scope)
             )
         })?;
+    // the state for everyone is read-only without the rights: say that, not
+    // "access denied".
+    if plan.scope == Scope::Machine && !platform::is_elevated() {
+        return Err(Failure::NeedsAdmin);
+    }
     let platform = platform::host()?;
     let store = transaction::store(platform.as_ref(), plan.scope).map_err(|e| e.to_string())?;
     // the copy for everyone goes first, which takes administrator rights:
@@ -977,7 +1004,7 @@ fn install(
                 files = n;
                 progress(share(i, n + operations), Stage::Unpack(target));
             })
-            .map_err(|e| format!("cannot unpack: {e}"))?;
+            .map_err(|e| Failure::Unpack { why: e.to_string() })?;
         let plan = match choice.location {
             Some(dir) => plan.at(dir),
             None => plan,
@@ -1005,7 +1032,8 @@ fn install(
         let before = share(files, files + operations);
         run_prerequisites(&mut container, &plan, &staging, &mut |name| {
             progress(before, Stage::Prerequisite(name));
-        })?;
+        })
+        .map_err(|why| Failure::Prerequisite { why })?;
         // the same package installed the other way may say no; it goes once
         // this one is in, so a failed install leaves it as it was.
         let other = other_install(platform.as_ref(), plan.scope, &plan.package);
