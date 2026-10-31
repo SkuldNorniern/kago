@@ -109,6 +109,14 @@ pub enum Line {
     FieldMin,
     FieldMax,
     FieldOption,
+    ErrLocked,
+    ErrDowngrade,
+    ErrUnmet,
+    ErrRolledBack,
+    ErrKept,
+    ErrClose,
+    ErrOnlyEveryone,
+    ErrLeftBehind,
 }
 
 impl Lang {
@@ -579,6 +587,46 @@ const fn table(line: Line) -> [&'static str; 3] {
             "Pick one of the options.",
             "선택지 중 하나를 고르세요.",
             "選択肢から選んでください。",
+        ],
+        Line::ErrLocked => [
+            "Another setup is changing this app. Wait for it to finish and try again.",
+            "다른 설치 프로그램이 이 앱을 변경하고 있습니다. 끝난 뒤 다시 시도하세요.",
+            "別のセットアップがこのアプリを変更しています。終わってからもう一度お試しください。",
+        ],
+        Line::ErrDowngrade => [
+            "Version {installed} is installed, which is newer than {offered}. This app does not allow going back.",
+            "더 새로운 버전 {installed}이(가) 설치되어 있어 {offered}(으)로 되돌릴 수 없습니다.",
+            "より新しいバージョン {installed} がインストールされているため、{offered} には戻せません。",
+        ],
+        Line::ErrUnmet => [
+            "This app needs {item}. Nothing was changed.",
+            "이 앱에는 {item}이(가) 필요합니다. 아무것도 변경되지 않았습니다.",
+            "このアプリには {item} が必要です。何も変更されていません。",
+        ],
+        Line::ErrRolledBack => [
+            "{item}\n\nNothing was changed: the install was undone.",
+            "{item}\n\n설치를 되돌려서 아무것도 변경되지 않았습니다.",
+            "{item}\n\nインストールを元に戻したため、何も変更されていません。",
+        ],
+        Line::ErrKept => [
+            "{item}\n\nUninstall stopped. Nothing was removed.",
+            "{item}\n\n제거를 중단했습니다. 아무것도 삭제되지 않았습니다.",
+            "{item}\n\nアンインストールを中止しました。何も削除されていません。",
+        ],
+        Line::ErrClose => [
+            "Could not close the programs using {name}: {item}",
+            "{name}을(를) 사용 중인 프로그램을 닫지 못했습니다: {item}",
+            "{name} を使用しているプログラムを閉じられませんでした: {item}",
+        ],
+        Line::ErrOnlyEveryone => [
+            "{name} is installed for everyone. Removing that needs administrator rights: install it for everyone, or uninstall it first.",
+            "{name}은(는) 모든 사용자용으로 설치되어 있습니다. 제거하려면 관리자 권한이 필요하므로, 모든 사용자용으로 설치하거나 먼저 제거하세요.",
+            "{name} はすべてのユーザー向けにインストールされています。削除には管理者権限が必要なため、すべてのユーザー向けにインストールするか、先にアンインストールしてください。",
+        ],
+        Line::ErrLeftBehind => [
+            "{name} is installed, but the other copy could not be removed: {item}",
+            "{name}이(가) 설치되었지만 다른 사본을 제거하지 못했습니다: {item}",
+            "{name} はインストールされましたが、もう一方のコピーを削除できませんでした: {item}",
         ],
     }
 }

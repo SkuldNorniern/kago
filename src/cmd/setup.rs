@@ -391,6 +391,7 @@ fn window(
     // this setup again with them, carrying what was picked.
     let elevate = (info.other.is_some() && !platform::is_elevated()).then(|| handoff(exe.clone()));
     let fields = plan.clone();
+    let lang = kago::gui::setup::Lang::detect();
     let work = move |reporter: &kago::gui::setup::Reporter, picked: Picked| {
         let mut report = |fraction, stage: Stage<'_>| {
             let step = window_step(&stage).map(|item| fields.masked(&picked.answers, item));
@@ -406,9 +407,11 @@ fn window(
                 Scope::User
             },
         };
-        install(&exe, embedded, &choice, &mut report).map(|done| Installed {
-            launch: done.launch,
-        })
+        install(&exe, embedded, &choice, &mut report)
+            .map(|done| Installed {
+                launch: done.launch,
+            })
+            .map_err(|e| window_failure(lang, &e))
     };
     let running = running_check(plan.package.clone());
     match run(look, &info, folder, (elevate, Some(running)), work) {
@@ -831,15 +834,12 @@ fn other_install(
 fn remove_other(
     platform: &dyn kago::platform::Platform,
     plan: &InstallPlan,
-    scope: Scope,
     other: &transaction::Store,
-) -> Result<bool, String> {
+) -> Result<bool, Failure> {
     let old = other.read_receipt(&plan.package).ok().flatten();
-    let left = |e: String| {
-        format!(
-            "{} is installed, but the {scope} copy could not be removed: {e}",
-            plan.name
-        )
+    let left = |why: String| Failure::LeftBehind {
+        name: plan.name.clone(),
+        why,
     };
     let done =
         transaction::remove(&plan.package, platform, other).map_err(|e| left(e.to_string()))?;
@@ -851,6 +851,70 @@ fn remove_other(
             .iter()
             .any(|r| matches!(r, kago::receipt::Resource::Changed { .. }))
     }))
+}
+
+/// why an install stopped. the silent setup prints it in English; the
+/// window translates it with [`window_failure`].
+#[derive(Debug)]
+enum Failure {
+    Install(transaction::Error),
+    Close { name: String, why: String },
+    OnlyEveryone { name: String },
+    LeftBehind { name: String, why: String },
+    Text(String),
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Install(e) => write!(f, "{e}"),
+            Self::Close { name, why } => {
+                write!(f, "cannot close the programs using {name}: {why}")
+            }
+            Self::OnlyEveryone { name } => write!(
+                f,
+                "{name} is installed for everyone; removing that needs administrator rights. install it for everyone, or uninstall it first"
+            ),
+            Self::LeftBehind { name, why } => write!(
+                f,
+                "{name} is installed, but the other copy could not be removed: {why}"
+            ),
+            Self::Text(text) => f.write_str(text),
+        }
+    }
+}
+
+impl From<String> for Failure {
+    fn from(text: String) -> Self {
+        Self::Text(text)
+    }
+}
+
+/// the window's words for `failure`, in the language the person uses.
+#[cfg(feature = "gui")]
+fn window_failure(lang: kago::gui::setup::Lang, failure: &Failure) -> String {
+    use kago::gui::setup::Line;
+    use kago::transaction::Error;
+
+    match failure {
+        Failure::Install(error) => match error {
+            Error::Locked(_) => lang.line(Line::ErrLocked).to_owned(),
+            Error::Downgrade { installed, offered } => lang.fill(
+                Line::ErrDowngrade,
+                &[("installed", installed), ("offered", offered)],
+            ),
+            Error::Unmet(needs) => lang.fill(Line::ErrUnmet, &[("item", &needs.join(", "))]),
+            Error::RolledBack(why) => lang.fill(Line::ErrRolledBack, &[("item", why)]),
+            Error::Kept(why) => lang.fill(Line::ErrKept, &[("item", why)]),
+            other => other.to_string(),
+        },
+        Failure::Close { name, why } => lang.fill(Line::ErrClose, &[("name", name), ("item", why)]),
+        Failure::OnlyEveryone { name } => lang.fill(Line::ErrOnlyEveryone, &[("name", name)]),
+        Failure::LeftBehind { name, why } => {
+            lang.fill(Line::ErrLeftBehind, &[("name", name), ("item", why)])
+        }
+        Failure::Text(text) => text.clone(),
+    }
 }
 
 /// what the person installing picked.
@@ -874,7 +938,7 @@ fn install(
     embedded: Embedded,
     choice: &Choice<'_>,
     progress: &mut dyn FnMut(f32, Stage<'_>),
-) -> Result<Done, String> {
+) -> Result<Done, Failure> {
     let mut container = Container::open(exe, embedded.offset).map_err(|e| e.to_string())?;
     let plan = container
         .header
@@ -895,14 +959,13 @@ fn install(
     if let Some((Scope::Machine, _)) = other_install(platform.as_ref(), plan.scope, &plan.package)
         && !platform::is_elevated()
     {
-        return Err(format!(
-            "{} is installed for everyone; removing that needs administrator rights. install it for everyone, or uninstall it first",
-            plan.name
-        ));
+        return Err(Failure::OnlyEveryone {
+            name: plan.name.clone(),
+        });
     }
     let staging = store.root().join("staging").join(plan.package.as_str());
     let _ = fs::remove_dir_all(&staging);
-    let result = (|| {
+    let result = (|| -> Result<Done, Failure> {
         // choose first: what is not installed is not unpacked either.
         let plan = chosen(&plan, choice, &store, platform.as_ref(), &staging)?;
         let operations = plan.operations.len();
@@ -933,8 +996,12 @@ fn install(
         // the installed app, or anything else using its files, is closed:
         // the window asked first; a silent install closes it like Inno's
         // CloseApplications.
-        platform::close_programs(&installed_files(platform.as_ref(), &plan.package))
-            .map_err(|e| format!("cannot close the programs using {}: {e}", plan.name))?;
+        platform::close_programs(&installed_files(platform.as_ref(), &plan.package)).map_err(
+            |why| Failure::Close {
+                name: plan.name.clone(),
+                why,
+            },
+        )?;
         let before = share(files, files + operations);
         run_prerequisites(&mut container, &plan, &staging, &mut |name| {
             progress(before, Stage::Prerequisite(name));
@@ -942,9 +1009,8 @@ fn install(
         // the same package installed the other way may say no; it goes once
         // this one is in, so a failed install leaves it as it was.
         let other = other_install(platform.as_ref(), plan.scope, &plan.package);
-        if let Some((scope, other)) = &other {
-            transaction::ask(&plan.package, other)
-                .map_err(|e| format!("cannot remove the {scope} install: {e}"))?;
+        if let Some((_, other)) = &other {
+            transaction::ask(&plan.package, other).map_err(Failure::Install)?;
         }
         let mut receipt = transaction::install_observed(
             &plan,
@@ -953,12 +1019,12 @@ fn install(
             &runtime,
             &mut |i, n, op| progress(share(files + i, files + n), Stage::Apply(op)),
         )
-        .map_err(|e| e.to_string())?;
-        if let Some((scope, other)) = other {
-            let shared = remove_other(platform.as_ref(), &plan, scope, &other)?;
+        .map_err(Failure::Install)?;
+        if let Some((_, other)) = other {
+            let shared = remove_other(platform.as_ref(), &plan, &other)?;
             if shared {
                 receipt = transaction::install(&plan, platform.as_ref(), &store, &runtime)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(Failure::Install)?;
             }
         }
         let launch = plan.operations.iter().find_map(|op| match op {

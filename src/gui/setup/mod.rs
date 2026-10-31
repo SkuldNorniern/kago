@@ -20,7 +20,7 @@ use aurea::AureaResult;
 use crate::format::image::Rgba;
 use crate::install::LocationError;
 use crate::manifest::SetupLook;
-use text::{Lang, Line};
+pub use text::{Lang, Line};
 use wizard::{Action, Outcome, Wizard};
 
 /// how long a setup window waits for input before it looks at the worker
