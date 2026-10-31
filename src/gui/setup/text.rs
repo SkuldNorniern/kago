@@ -105,7 +105,6 @@ pub enum Line {
     Continue,
     RemoveData,
     FieldRequired,
-    FieldAgain,
     FieldNumber,
     FieldMin,
     FieldMax,
@@ -186,7 +185,6 @@ impl Lang {
             Problem::TooSmall(n) => self.fill(Line::FieldMin, &[("item", &n.to_string())]),
             Problem::TooBig(n) => self.fill(Line::FieldMax, &[("item", &n.to_string())]),
             Problem::NotAnOption => self.line(Line::FieldOption).to_owned(),
-            Problem::Again => self.line(Line::FieldAgain).to_owned(),
         }
     }
 
@@ -557,11 +555,6 @@ const fn table(line: Line) -> [&'static str; 3] {
             "設定とデータも削除する",
         ],
         Line::Continue => ["Next", "다음", "次へ"],
-        Line::FieldAgain => [
-            "Enter this again: secret answers are not kept.",
-            "다시 입력하세요. 비밀 값은 저장되지 않습니다.",
-            "もう一度入力してください。秘密の値は保存されません。",
-        ],
         Line::FieldRequired => [
             "Fill this in to go on.",
             "계속하려면 입력하세요.",

@@ -125,7 +125,7 @@ pub struct Wizard {
     /// the modern look: one welcome page picks everything else, so only
     /// the license and the package's own pages follow it.
     pub compact: bool,
-    /// updating an install: secret answers were not kept and are asked again.
+    /// updating an install: a secret left empty keeps what uses it as it is.
     pub updating: bool,
 }
 
@@ -323,7 +323,7 @@ impl Wizard {
         self.page_fields(page).into_iter().find_map(|(i, f)| {
             let answer = &self.answers[i];
             if self.updating && f.secret() && answer.is_empty() {
-                return Some((i, Problem::Again));
+                return None;
             }
             f.check(answer).err().map(|p| (i, p))
         })
@@ -495,7 +495,11 @@ impl Wizard {
                 self.close_ok = true;
                 self.start()
             }
-            (Page::Running, Action::Back) => self.show(self.before),
+            // a yes to closing what ran then is no yes for later.
+            (Page::Running, Action::Back) => {
+                self.close_ok = false;
+                self.show(self.before)
+            }
             (_, Action::Next) if choosing => self.next(),
             (_, Action::Back) if choosing => self.back(),
             (Page::Welcome | Page::License, Action::Install) => {
@@ -737,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn an_update_asks_for_a_secret_again() {
+    fn an_update_may_leave_a_secret_empty() {
         let mut w = plain(None);
         w.compact = true;
         w.updating = true;
@@ -746,7 +750,7 @@ mod tests {
             label: "token".into(),
             kind: crate::manifest::FieldKind::Text { secret: true },
             default: String::new(),
-            required: false,
+            required: true,
         };
         w.ask(
             vec![InputPage {
@@ -759,10 +763,8 @@ mod tests {
             &std::collections::BTreeMap::new(),
         );
         w.act(Action::Install);
-        assert_eq!(w.act(Action::Next), Outcome::Stay);
-        assert_eq!(w.problem, Some((0, Problem::Again)));
-        w.type_text("s3cret");
         assert_ne!(w.act(Action::Next), Outcome::Stay);
+        assert_eq!(w.problem, None);
     }
 
     #[test]

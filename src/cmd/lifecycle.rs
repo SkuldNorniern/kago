@@ -73,7 +73,8 @@ pub fn install(args: &Args) -> Result<ExitCode, String> {
         (None, None) => plan.with_defaults(),
     };
     let earlier = installed.map(|r| r.answers);
-    let plan = plan.answered(&given, earlier.as_ref())?;
+    let skipped = super::setup::skipped_pages(&plan);
+    let plan = plan.answered(&given, earlier.as_ref(), &skipped)?;
     let plan = match args.value("--location") {
         None => plan,
         Some(_) if loaded.manifest.install.folder == FolderChoice::Fixed => {

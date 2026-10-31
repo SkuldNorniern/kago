@@ -11,8 +11,8 @@ use super::operation::{Digest, Operation, Program};
 use super::{Resolved, Scope};
 use crate::diagnostic::{self, Diagnostic, Diagnostics};
 use crate::manifest::{
-    Check, Detect, Downgrade, Field, File, InputPage, Manifest, Place, ResourceScope, ScopeChoice,
-    SemanticPath, SetupLook, Value,
+    Check, Detect, Downgrade, Edit, Field, File, InputPage, Manifest, Place, ResourceScope,
+    ScopeChoice, SemanticPath, SetupLook, Value,
 };
 use crate::package::{PackageId, Target, Version};
 
@@ -35,6 +35,9 @@ impl Sources for Path {
 /// components and payload give the same plan.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct InstallPlan {
+    /// settings an update leaves as they are, whose secret was not given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub untouched: Vec<(Place, Edit)>,
     pub package: PackageId,
     pub name: String,
     pub version: Version,
@@ -257,6 +260,7 @@ impl InstallPlan {
             update: manifest.update.as_ref().map(|u| u.feed.clone()),
             location: None,
             needs,
+            untouched: Vec::new(),
             inputs: manifest.inputs.clone(),
             purge: manifest.purge.clone(),
             answers: BTreeMap::new(),
@@ -357,25 +361,16 @@ impl InstallPlan {
     ///
     /// # Errors
     ///
-    /// when `given` names a field there is not, an answer does not fit, or
-    /// an update (`earlier` is `Some`) lacks a secret, which is not kept.
+    /// when `given` names a field there is not, an answer on a page not in
+    /// `skipped` does not fit, or an update (`earlier` is `Some`) runs a
+    /// program with a secret that was not given. secrets are not kept: a
+    /// setting using one stays as it is, see [`Self::untouched`].
     pub fn answered(
         &self,
         given: &BTreeMap<String, String>,
         earlier: Option<&BTreeMap<String, String>>,
+        skipped: &[String],
     ) -> Result<Self, String> {
-        if earlier.is_some()
-            && let Some(field) = self
-                .fields()
-                .find(|f| f.secret() && !given.contains_key(&f.id))
-        {
-            return Err(format!(
-                "{}: it is secret and not kept, so give it again with `--set {}=...`",
-                field.label, field.id
-            ));
-        }
-        let none = BTreeMap::new();
-        let earlier = earlier.unwrap_or(&none);
         if let Some(unknown) = given.keys().find(|k| !self.fields().any(|f| &f.id == *k)) {
             let known: Vec<&str> = self.fields().map(|f| f.id.as_str()).collect();
             return Err(format!(
@@ -388,52 +383,80 @@ impl InstallPlan {
             ));
         }
         let mut answers = BTreeMap::new();
-        for field in self.fields() {
-            let answer = given
-                .get(&field.id)
-                .or_else(|| earlier.get(&field.id).filter(|a| field.check(a).is_ok()))
-                .cloned()
-                .unwrap_or_else(|| field.default.clone());
-            field
-                .check(&answer)
-                .map_err(|problem| format!("{}: {problem}", field.label))?;
-            answers.insert(field.id.clone(), answer);
+        let mut lost = BTreeSet::new();
+        for page in &self.inputs {
+            for field in &page.fields {
+                let secret = earlier.is_some() && field.secret();
+                let new = given.get(&field.id).filter(|a| !(secret && a.is_empty()));
+                if secret && new.is_none() {
+                    lost.insert(field.id.as_str());
+                    continue;
+                }
+                let answer = new
+                    .or_else(|| {
+                        earlier
+                            .and_then(|e| e.get(&field.id))
+                            .filter(|a| field.check(a).is_ok())
+                    })
+                    .cloned()
+                    .unwrap_or_else(|| field.default.clone());
+                if !skipped.contains(&page.id) {
+                    field
+                        .check(&answer)
+                        .map_err(|problem| format!("{}: {problem}", field.label))?;
+                }
+                answers.insert(field.id.clone(), answer);
+            }
         }
         let fill = |text: &str| fill_inputs(text, &answers);
-        let operations = self
-            .operations
-            .iter()
-            .map(|op| {
-                let mut op = op.clone();
-                match &mut op {
-                    Operation::Change { value, .. } => {
-                        let whole = value
+        let uses_lost = |text: &str| input_ids(text).iter().any(|id| lost.contains(id));
+        let mut untouched = Vec::new();
+        let mut operations = Vec::new();
+        for op in &self.operations {
+            let mut op = op.clone();
+            match &mut op {
+                Operation::Change { place, edit, value } => {
+                    if value.as_str().is_some_and(uses_lost) {
+                        untouched.push((place.clone(), *edit));
+                        continue;
+                    }
+                    let whole = value
+                        .as_str()
+                        .and_then(|t| t.strip_prefix("{input."))
+                        .and_then(|t| t.strip_suffix('}'))
+                        .and_then(|id| self.fields().find(|f| f.id == id));
+                    *value = match whole {
+                        Some(field) => field.value(&answers[&field.id]),
+                        None => value
                             .as_str()
-                            .and_then(|t| t.strip_prefix("{input."))
-                            .and_then(|t| t.strip_suffix('}'))
-                            .and_then(|id| self.fields().find(|f| f.id == id));
-                        *value = match whole {
-                            Some(field) => field.value(&answers[&field.id]),
-                            None => value
-                                .as_str()
-                                .map_or_else(|| value.clone(), |t| Value::text(fill(t))),
-                        };
-                    }
-                    Operation::Run { command, undo, .. } => {
-                        for c in std::iter::once(command).chain(undo.as_mut()) {
-                            c.arguments = c.arguments.iter().map(|a| fill(a)).collect();
-                        }
-                    }
-                    Operation::CreateShortcut { arguments, .. }
-                    | Operation::InstallService { arguments, .. } => {
-                        *arguments = arguments.iter().map(|a| fill(a)).collect();
-                    }
-                    _ => {}
+                            .map_or_else(|| value.clone(), |t| Value::text(fill(t))),
+                    };
                 }
-                op
-            })
-            .collect();
+                Operation::Run { command, undo, .. } => {
+                    for c in std::iter::once(command).chain(undo.as_mut()) {
+                        if let Some(id) = c
+                            .arguments
+                            .iter()
+                            .flat_map(|a| input_ids(a))
+                            .find(|id| lost.contains(id))
+                        {
+                            return Err(format!(
+                                "`{id}` is secret and not kept, and a program needs it: give it again with `--set {id}=...`"
+                            ));
+                        }
+                        c.arguments = c.arguments.iter().map(|a| fill(a)).collect();
+                    }
+                }
+                Operation::CreateShortcut { arguments, .. }
+                | Operation::InstallService { arguments, .. } => {
+                    *arguments = arguments.iter().map(|a| fill(a)).collect();
+                }
+                _ => {}
+            }
+            operations.push(op);
+        }
         Ok(Self {
+            untouched,
             operations,
             answers,
             ..self.clone()
@@ -1491,13 +1514,13 @@ component docs Documentation off
             ("key".to_owned(), "s3cret".to_owned()),
         ]);
         let earlier = BTreeMap::from([("port".to_owned(), "8080".to_owned())]);
-        let answered = plan.answered(&given, Some(&earlier)).unwrap();
+        let answered = plan.answered(&given, Some(&earlier), &[]).unwrap();
         let without = BTreeMap::from([("host".to_owned(), "example.com".to_owned())]);
         assert!(
-            plan.answered(&without, Some(&earlier))
+            plan.answered(&without, Some(&earlier), &[])
                 .unwrap_err()
                 .contains("--set key="),
-            "an update asks for the secret again"
+            "a program that needs the secret asks for it again"
         );
         let values: Vec<&Value> = answered
             .operations
@@ -1519,12 +1542,17 @@ component docs Documentation off
 
         let wrong = BTreeMap::from([("nope".to_owned(), "x".to_owned())]);
         assert!(
-            plan.answered(&wrong, None)
+            plan.answered(&wrong, None, &[])
                 .unwrap_err()
                 .contains("no field `nope`")
         );
         let bad = BTreeMap::from([("port".to_owned(), "0".to_owned())]);
-        assert!(plan.answered(&bad, None).is_err());
+        assert!(plan.answered(&bad, None, &[]).is_err());
+        let page = plan.inputs[0].id.clone();
+        assert!(
+            plan.answered(&bad, None, &[page]).is_ok(),
+            "a skipped page is not checked"
+        );
 
         let (plan, d) = build("env set X {input.missing}\n");
         assert!(plan.is_none());

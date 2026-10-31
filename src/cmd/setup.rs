@@ -552,6 +552,20 @@ fn window_components(
         .collect()
 }
 
+/// ids of the pages whose `skip` check finds its thing: left out, their
+/// fields keep their last answer or default.
+pub(super) fn skipped_pages(plan: &InstallPlan) -> Vec<String> {
+    plan.inputs
+        .iter()
+        .filter(|page| {
+            page.skip
+                .as_ref()
+                .is_some_and(|skip| platform::satisfied(&skip.check))
+        })
+        .map(|page| page.id.clone())
+        .collect()
+}
+
 /// the pages to show: one whose `skip` check finds its thing is left out.
 #[cfg(feature = "gui")]
 fn shown_pages(plan: &InstallPlan) -> Vec<kago::manifest::InputPage> {
@@ -662,7 +676,11 @@ fn chosen(
         }
         (None, None) => plan.with_defaults(),
     };
-    let plan = plan.answered(choice.answers, previous.as_ref().map(|r| &r.answers))?;
+    let plan = plan.answered(
+        choice.answers,
+        previous.as_ref().map(|r| &r.answers),
+        &skipped_pages(&plan),
+    )?;
     let app = choice
         .location
         .map(Path::to_path_buf)
@@ -894,8 +912,12 @@ fn install(
         // for everyone) goes first, so there are never two. what ownership
         // keeps, like user data, stays.
         if let Some((scope, other)) = other_install(platform.as_ref(), plan.scope, &plan.package) {
-            transaction::uninstall(&plan.package, platform.as_ref(), &other)
+            let done = transaction::uninstall(&plan.package, platform.as_ref(), &other)
                 .map_err(|e| format!("cannot remove the {scope} install first: {e}"))?;
+            // never two: stop while something of it is left.
+            if let Some(failed) = done.failed.first() {
+                return Err(format!("cannot remove the {scope} install first: {failed}"));
+            }
         }
         let receipt = transaction::install_observed(
             &plan,

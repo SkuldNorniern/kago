@@ -79,6 +79,11 @@ pub(super) fn install(
         drop(journal);
         return Err(undone(&e, &undos, platform, store, &plan.package));
     }
+    if let Err(e) = run.keep_untouched() {
+        let undos = std::mem::take(&mut run.undos);
+        drop(journal);
+        return Err(undone(&e, &undos, platform, store, &plan.package));
+    }
     let resources = std::mem::take(&mut run.resources);
     let used: Vec<SemanticPath> = resources
         .iter()
@@ -305,6 +310,25 @@ impl Run<'_> {
         self.step(undo)?;
         self.store.write_receipt(receipt)?;
         self.journal.write(&Entry::Commit)
+    }
+
+    /// settings this update leaves alone stay owned, with what they
+    /// replaced at the first install, so uninstall still puts that back.
+    fn keep_untouched(&mut self) -> Result<(), Error> {
+        let (plan, previous) = (self.plan, self.previous);
+        for (place, edit) in &plan.untouched {
+            let slot = crate::install::slot(place, plan.scope, self.roots, &|name| {
+                std::env::var(name).ok()
+            })
+            .map_err(Error::Other)?;
+            let kept = previous.and_then(|p| {
+                p.resources.iter().find(|r| {
+                    matches!(r, Resource::Changed { slot: s, edit: e, .. } if *s == slot && e == edit)
+                })
+            });
+            self.resources.extend(kept.cloned());
+        }
+        Ok(())
     }
 
     fn step(&mut self, undo: Undo) -> Result<(), Error> {

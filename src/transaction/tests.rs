@@ -376,6 +376,27 @@ fn what_stays_in_use_goes_at_restart_files_first() {
 }
 
 #[test]
+fn a_file_kept_for_the_person_is_not_scheduled_at_restart() {
+    let w = World::new("restart-replaced");
+    let manifest = MANIFEST.replace(
+        "copy payload/config.toml -> {config}/config.toml keep",
+        "copy payload/config.toml -> {config}/config.toml",
+    );
+    let config = w.dir.join("machine").join("config").join("App");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(config.join("config.toml"), b"mine").unwrap();
+    w.install(&manifest).unwrap();
+    remove_at_restart(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(
+        !w.fake
+            .at_restart
+            .borrow()
+            .contains(&config.join("config.toml"))
+    );
+    assert!(w.store.read_receipt(&World::id()).unwrap().is_some());
+}
+
+#[test]
 fn an_entry_left_with_only_files_for_the_restart_goes_too() {
     let w = World::new("restart-entry");
     let receipt = w.install(MANIFEST).unwrap();
@@ -1215,4 +1236,29 @@ fn an_update_that_only_changes_a_name_s_case_keeps_the_file() {
         .replace("1.0.0", "1.1.0");
     w.install(&v2).unwrap();
     assert!(w.app().join("tool.toml").is_file(), "not dropped as stale");
+}
+
+#[test]
+fn an_update_without_a_secret_leaves_the_setting_using_it() {
+    let w = World::new("secret-kept");
+    let manifest = format!(
+        "{MANIFEST}\npage login \"Login\"\n  text token \"Token\" secret\n\nenv set KAGO_TOKEN {{input.token}}\n"
+    );
+    let answers = BTreeMap::from([("token".to_owned(), "s3cret".to_owned())]);
+    let first = w.plan(&manifest).answered(&answers, None, &[]).unwrap();
+    install(&first, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    let held = || w.fake.values.borrow().values().next().cloned();
+    assert_eq!(held().unwrap().as_str(), Some("s3cret"));
+
+    let newer = manifest.replace("1.0.0", "1.1.0");
+    let earlier = BTreeMap::new();
+    let second = w
+        .plan(&newer)
+        .answered(&BTreeMap::new(), Some(&earlier), &[])
+        .unwrap();
+    install(&second, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    assert_eq!(held().unwrap().as_str(), Some("s3cret"), "not blanked");
+
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert_eq!(held(), None, "still owned, so it is taken back");
 }

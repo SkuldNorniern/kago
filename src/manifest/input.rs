@@ -47,8 +47,6 @@ pub enum Problem {
     TooSmall(i64),
     TooBig(i64),
     NotAnOption,
-    /// a secret, which is not kept: an update needs it again.
-    Again,
 }
 
 impl std::fmt::Display for Problem {
@@ -59,7 +57,6 @@ impl std::fmt::Display for Problem {
             Self::TooSmall(min) => write!(f, "it is below {min}"),
             Self::TooBig(max) => write!(f, "it is above {max}"),
             Self::NotAnOption => f.write_str("it is not one of the options"),
-            Self::Again => f.write_str("it is secret and not kept, so give it again"),
         }
     }
 }
