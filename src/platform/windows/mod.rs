@@ -41,6 +41,20 @@ fn env_dir(name: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("%{name}% is not set"))
 }
 
+/// the desktop the person sees, which `OneDrive` may have moved out of the profile.
+fn desktop() -> Option<PathBuf> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{FOLDERID_Desktop, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    // SAFETY: the folder id is a static GUID and no token is given; the path
+    // is read before CoTaskMemFree frees the buffer SHGetKnownFolderPath made.
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).ok()?;
+        let text = path.to_string();
+        CoTaskMemFree(Some(path.0.cast()));
+        text.ok().map(PathBuf::from)
+    }
+}
+
 /// whether what `detect` names is on this machine.
 /// whether the registry key `key` (`HKLM\...`, `HKCU\...`) exists and,
 /// when `value` is given, holds that value set to something other than 0
@@ -109,7 +123,10 @@ impl Platform for Windows {
             (Root::Cache, data.join("Cache")),
             (Root::Logs, data.join("Logs")),
             (Root::State, data.join("State")),
-            (Root::Desktop, home.join("Desktop")),
+            (
+                Root::Desktop,
+                desktop().unwrap_or_else(|| home.join("Desktop")),
+            ),
             (
                 Root::Applications,
                 roaming.join(r"Microsoft\Windows\Start Menu\Programs"),
@@ -346,5 +363,12 @@ mod tests {
         let version = Windows.os_version().expect("a windows version");
         assert!(version.split('.').count() == 3, "{version}");
         assert!(crate::install::at_least(&version, "10.0"), "{version}");
+    }
+
+    /// reads only: the desktop of the user running the tests is a folder.
+    #[test]
+    fn desktop_is_a_folder_that_exists() {
+        let dir = desktop().expect("a desktop folder");
+        assert!(dir.is_dir(), "{}", dir.display());
     }
 }
