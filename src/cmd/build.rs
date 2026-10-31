@@ -49,20 +49,21 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let name = folder_name(&plan.name).replace(' ', "-");
     let out = out_dir.join(format!("{name}-{}-setup-{target}.exe", plan.version));
+    let scratch = out_dir.join(".kago-sign");
+    let stub_tmp = out_dir.join(".kago-stub.exe");
+    // removed on every exit, so a failed build leaves no scratch behind.
+    let _cleanup = Scratch(vec![stub_tmp.clone(), scratch.clone()]);
 
     let me = std::env::current_exe().map_err(|e| format!("cannot find kago itself: {e}"))?;
-    let stub_tmp;
     let stub: &Path = match setup::embedded(&me).map_err(|e| e.to_string())? {
         // running from a setup exe: build from its runtime part only.
         Some(embedded) => {
-            stub_tmp = out_dir.join(".kago-stub.exe");
             setup::extract_stub(&me, embedded, &stub_tmp).map_err(|e| e.to_string())?;
             &stub_tmp
         }
         None => &me,
     };
     let icon = icon(&loaded, target)?;
-    let scratch = out_dir.join(".kago-sign");
     if let Some((signer, true)) = &signer {
         sign_programs(signer, &mut plan, &scratch)?;
     }
@@ -92,7 +93,12 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
     }
     let signature = match &signer {
         Some((signer, _)) => {
-            signer.sign(&out, &format!("{} Setup", plan.name), homepage)?;
+            // an unsigned file must not pass for a finished release.
+            signer
+                .sign(&out, &format!("{} Setup", plan.name), homepage)
+                .inspect_err(|_| {
+                    let _ = fs::remove_file(&out);
+                })?;
             Some(signer.trusted(&out))
         }
         None => None,
@@ -114,6 +120,21 @@ pub fn run(args: &Args) -> Result<ExitCode, String> {
         }
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// paths removed when dropped: a file or a folder, errors ignored.
+struct Scratch(Vec<PathBuf>);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        for path in &self.0 {
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            };
+        }
+    }
 }
 
 /// writes `latest.json` next to the setup, merged into an existing one of the
