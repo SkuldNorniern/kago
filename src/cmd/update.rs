@@ -106,7 +106,7 @@ fn install(
         .status()
         .map_err(|e| format!("cannot start {}: {e}", setup.display()))?;
     if status.success() {
-        println!("{} updated to {}", receipt.package, offer.version);
+        println!("{} {} setup finished", receipt.package, offer.version);
         Ok(())
     } else {
         Err(format!(
