@@ -222,7 +222,12 @@ fn remove_package(package: &PackageId, scope: Scope, (silent, purge): (bool, boo
     }
     let _ = silent;
     match uninstall_retrying(package, platform.as_ref(), &store, purge) {
-        Ok(done) if done.failed.is_empty() => ExitCode::SUCCESS,
+        Ok(done) if done.failed.is_empty() => {
+            for path in done.at_restart {
+                eprintln!("removed when the computer restarts: {path}");
+            }
+            ExitCode::SUCCESS
+        }
         Ok(done) => {
             for failed in done.failed {
                 eprintln!("could not remove {failed}");
@@ -267,7 +272,10 @@ fn uninstall_retrying(
     // what still runs from the app folder goes first; what cannot be
     // closed shows up as not removed.
     if let Ok(Some(receipt)) = store.read_receipt(package) {
-        let _ = platform::close_programs(&receipt.files());
+        // what stays open is reported as not removed below.
+        if let Err(e) = platform::close_programs(&receipt.files()) {
+            eprintln!("uninstall: {e}");
+        }
     }
     let mut done = transaction::remove(package, platform, store)?;
     for _ in 0..20 {
