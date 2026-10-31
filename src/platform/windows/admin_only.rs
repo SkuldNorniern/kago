@@ -45,6 +45,8 @@ pub fn admin_only(dir: &Path) -> Result<(), String> {
     if locked(dir) {
         return Ok(());
     }
+    // the reset below would make what a user planted look like ours.
+    drop_foreign(dir)?;
     let mut sd = PSECURITY_DESCRIPTOR::default();
     // SAFETY: the string lives across the call; `sd` is an out pointer.
     unsafe {
@@ -95,15 +97,46 @@ pub fn admin_only(dir: &Path) -> Result<(), String> {
     })
 }
 
+/// removes everything under `dir` no administrator made: links, and what
+/// any other account owns.
+fn drop_foreign(dir: &Path) -> Result<(), String> {
+    let failed = |path: &Path, e: std::io::Error| format!("{}: {e}", path.display());
+    for entry in std::fs::read_dir(dir).map_err(|e| failed(dir, e))? {
+        let entry = entry.map_err(|e| failed(dir, e))?;
+        let path = entry.path();
+        let kind = entry.file_type().map_err(|e| failed(&path, e))?;
+        if !kind.is_symlink() && rights(&path).is_some_and(|(admin, _)| admin) {
+            if kind.is_dir() {
+                drop_foreign(&path)?;
+            }
+            continue;
+        }
+        let removed = if kind.is_file() {
+            std::fs::remove_file(&path)
+        } else {
+            // a link goes alone, never what it points at.
+            std::fs::remove_dir_all(&path)
+        };
+        removed.map_err(|e| failed(&path, e))?;
+    }
+    Ok(())
+}
+
 /// whether `dir` is owned by Administrators or SYSTEM with its rights its
 /// own: then only an administrator could have put anything in it.
 fn locked(dir: &Path) -> bool {
+    rights(dir) == Some((true, true))
+}
+
+/// whether Administrators or SYSTEM own `path`, and whether its rights are
+/// its own, not inherited. `None` when they cannot be read.
+fn rights(path: &Path) -> Option<(bool, bool)> {
     let mut owner = PSID::default();
     let mut sd = PSECURITY_DESCRIPTOR::default();
     // SAFETY: the name lives across the call; out pointers are valid.
     let e = unsafe {
         GetNamedSecurityInfoW(
-            &HSTRING::from(dir),
+            &HSTRING::from(path),
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
             Some(&raw mut owner),
@@ -114,7 +147,7 @@ fn locked(dir: &Path) -> bool {
         )
     };
     if e.is_err() {
-        return false;
+        return None;
     }
     let sd = Descriptor(sd);
     let (mut control, mut revision) = (0u16, 0u32);
@@ -125,6 +158,38 @@ fn locked(dir: &Path) -> bool {
         let protected = GetSecurityDescriptorControl(sd.0, &raw mut control, &raw mut revision)
             .is_ok()
             && control & SE_DACL_PROTECTED.0 != 0;
-        admin && protected
+        Some((admin, protected))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// a temp folder this process owns; when elevated its files may read as
+    /// an administrator's, so only the link is sure to go.
+    #[test]
+    fn links_and_what_others_made_go() {
+        let dir = std::env::temp_dir().join(format!("kago-foreign-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let elsewhere = dir.join("elsewhere");
+        let store = dir.join("store");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), b"x").unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(store.join("link"))
+            .arg(&elsewhere)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+        drop_foreign(&store).unwrap();
+        assert!(!store.join("link").exists());
+        assert!(
+            elsewhere.join("keep.txt").is_file(),
+            "what it points at stays"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
