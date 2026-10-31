@@ -441,9 +441,10 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         | Resource::FirewallRule { .. }
         | Resource::Service { .. }
         | Resource::Changed { .. } => 3,
-        Resource::File { .. } if is_uninstaller(r) => 5,
-        Resource::File { .. } => 4,
-        Resource::Directory { path } => 6 + usize::MAX / 2 - path.segments().count(),
+        Resource::SettingsFile { .. } => 4,
+        Resource::File { .. } if is_uninstaller(r) => 6,
+        Resource::File { .. } => 5,
+        Resource::Directory { path } => 7 + usize::MAX / 2 - path.segments().count(),
         Resource::Registration { .. } => usize::MAX,
     };
     let mut ordered: Vec<&Resource> = resources.iter().collect();
@@ -483,6 +484,7 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
                 value,
                 previous,
             } => revert(platform, slot, *edit, value, previous.as_ref()),
+            Resource::SettingsFile { path } => remove_settings_file(path),
             Resource::File { .. } => match remove_owned_file(platform, receipt, resource) {
                 Ok(Some(kept)) => {
                     out.kept.push(kept);
@@ -613,6 +615,24 @@ fn remove_owned_file(
             .map_err(|e| format!("cannot put back {}: {e}", abs.display())),
         _ => Ok(None),
     }
+}
+
+/// removes a settings file kago made once only an empty object is left in
+/// it, then its folder if that is empty too. someone else's content stays.
+fn remove_settings_file(path: &Path) -> Result<(), String> {
+    let empty = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| {
+            serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')).ok()
+        })
+        .is_some_and(|v| v.as_object().is_some_and(serde_json::Map::is_empty));
+    if empty {
+        remove_file(path)?;
+    }
+    if let Some(dir) = path.parent() {
+        let _ = fs::remove_dir(dir);
+    }
+    Ok(())
 }
 
 fn remove_file(path: &Path) -> Result<(), String> {

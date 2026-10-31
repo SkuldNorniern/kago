@@ -48,7 +48,9 @@ pub fn set(file: &Path, key: &[String], value: Option<&Value>) -> Result<(), Str
             parent.insert(last.clone(), v.clone());
         }
         None => {
-            parent.shift_remove(last);
+            if parent.shift_remove(last).is_some() {
+                prune(&mut root, key);
+            }
         }
     }
     write(file, &root)
@@ -86,9 +88,35 @@ pub fn remove(file: &Path, key: &[String], item: &Value) -> Result<(), String> {
     let before = list.len();
     list.retain(|v| !same(v, item));
     if list.len() != before {
+        prune(&mut root, key);
         write(file, &root)?;
     }
     Ok(())
+}
+
+/// drops what `key` leads to once it is empty: the list or object at the
+/// end, then each object on the way, deepest first. the root stays.
+fn prune(map: &mut Map<String, Value>, key: &[String]) {
+    let Some((first, rest)) = key.split_first() else {
+        return;
+    };
+    let Some(child) = map.get_mut(first) else {
+        return;
+    };
+    if !rest.is_empty() {
+        match child {
+            Value::Object(inner) => prune(inner, rest),
+            _ => return,
+        }
+    }
+    let empty = match child {
+        Value::Object(inner) => inner.is_empty(),
+        Value::Array(items) => items.is_empty(),
+        _ => false,
+    };
+    if empty {
+        map.shift_remove(first);
+    }
 }
 
 /// the object holding the last name of a key, made on the way when
@@ -249,7 +277,7 @@ mod tests {
         assert_eq!(value(&file, &key("a.b")).unwrap(), Some(Value::from("x")));
         assert_eq!(value(&file, &key("a.c")).unwrap(), None);
         set(&file, &key("a.b"), None).unwrap();
-        assert_eq!(read_back(&file), serde_json::json!({ "a": {} }));
+        assert_eq!(read_back(&file), serde_json::json!({}));
         assert!(set(&file, &key("a.b.c"), Some(&Value::from(1))).is_ok());
         assert!(
             set(&file, &key("a.b.c.d"), Some(&Value::from(1))).is_err(),
@@ -276,13 +304,43 @@ mod tests {
         assert!(add(&file, &key("alpha"), &Value::from("x")).unwrap());
         assert_eq!(order(&file), expected);
         remove(&file, &key("alpha"), &Value::from("x")).unwrap();
-        assert_eq!(order(&file), expected);
+        assert_eq!(order(&file), ["zeta", "mid", "beta"], "alpha is empty now");
         set(&file, &key("mid.b"), None).unwrap();
         let mid = value(&file, &key("mid")).unwrap().unwrap();
         let inner: Vec<_> = mid.as_object().unwrap().keys().cloned().collect();
         assert_eq!(inner, ["a", "c"]);
         set(&file, &key("zeta"), None).unwrap();
-        assert_eq!(order(&file), ["mid", "alpha", "beta"]);
+        assert_eq!(order(&file), ["mid", "beta"]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn emptied_objects_on_the_way_go_but_others_stay() {
+        let dir = temp("prune");
+        let file = dir.join("settings.json");
+        fs::write(
+            &file,
+            r#"{"empty":{},"a":{"b":{"c":1},"d":2},"l":{"items":["x"]}}"#,
+        )
+        .unwrap();
+        set(&file, &key("a.b.c"), None).unwrap();
+        assert_eq!(
+            read_back(&file),
+            serde_json::json!({"empty": {}, "a": {"d": 2}, "l": {"items": ["x"]}})
+        );
+        remove(&file, &key("l.items"), &Value::from("x")).unwrap();
+        assert_eq!(
+            read_back(&file),
+            serde_json::json!({"empty": {}, "a": {"d": 2}})
+        );
+        set(&file, &key("a.d"), None).unwrap();
+        assert_eq!(read_back(&file), serde_json::json!({"empty": {}}));
+        set(&file, &key("nothing.here"), None).unwrap();
+        assert_eq!(
+            read_back(&file),
+            serde_json::json!({"empty": {}}),
+            "a missing key prunes nothing"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

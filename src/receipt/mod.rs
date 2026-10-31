@@ -102,6 +102,11 @@ pub enum Resource {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         previous: Option<Value>,
     },
+    /// a JSON settings file the install created. uninstall removes it once
+    /// nothing is left in it.
+    SettingsFile {
+        path: PathBuf,
+    },
     /// uninstall entry, desktop file or similar platform registration.
     Registration {
         key: String,

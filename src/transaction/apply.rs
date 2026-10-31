@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use super::journal::{Entry, Journal, Undo};
 use super::recovery::{cleanup, move_file, roll_back};
 use super::{Error, Store, remove_resources};
-use crate::install::{InstallPlan, Need, Operation, Roots, Scope, at_least, hash};
+use crate::install::{InstallPlan, Need, Operation, Roots, Scope, Slot, at_least, hash};
 use crate::manifest::{
     Downgrade, Edit, Ownership, Place, Root, RunAt, SemanticPath, ShortcutLocation, Value,
 };
@@ -214,7 +214,8 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
         | (Resource::Service { name: a }, Resource::Service { name: b })
         | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b }) => a == b,
-        (Resource::Shortcut { path: a }, Resource::Shortcut { path: b }) => a == b,
+        (Resource::Shortcut { path: a }, Resource::Shortcut { path: b })
+        | (Resource::SettingsFile { path: a }, Resource::SettingsFile { path: b }) => a == b,
         // a value set is the same wherever it is set; an added item is
         // only the same item.
         (
@@ -327,7 +328,41 @@ impl Run<'_> {
                 })
             });
             self.resources.extend(kept.cloned());
+            if let Slot::Json { file, .. } = &slot {
+                let made = previous.and_then(|p| {
+                    p.resources
+                        .iter()
+                        .find(|r| matches!(r, Resource::SettingsFile { path } if path == file))
+                });
+                if let Some(made) = made
+                    && !self.resources.contains(made)
+                {
+                    self.resources.push(made.clone());
+                }
+            }
         }
+        Ok(())
+    }
+
+    /// owns a JSON settings file the write is about to create. rolled back
+    /// by removing it; an update keeps owning one the old version owned.
+    fn settings_file(&mut self, slot: &Slot) -> Result<(), Error> {
+        let Slot::Json { file, .. } = slot else {
+            return Ok(());
+        };
+        let owned = |r: &Resource| matches!(r, Resource::SettingsFile { path } if path == file);
+        if self.resources.iter().any(owned) {
+            return Ok(());
+        }
+        let kept = self.previous.is_some_and(|p| p.resources.iter().any(owned));
+        if file.exists() && !kept {
+            return Ok(());
+        }
+        if !file.exists() {
+            self.step(Undo::RemoveFile { path: file.clone() })?;
+        }
+        self.resources
+            .push(Resource::SettingsFile { path: file.clone() });
         Ok(())
     }
 
@@ -574,6 +609,7 @@ impl Run<'_> {
         })
         .map_err(Error::Other)?;
         let value = crate::install::fill(value, self.roots);
+        self.settings_file(&slot)?;
         let earlier = self.previous.and_then(|p| {
             p.resources.iter().find_map(|r| match r {
                 Resource::Changed {

@@ -66,6 +66,7 @@ pub fn verify(receipt: &Receipt) -> Verified {
             | Resource::FirewallRule { .. }
             | Resource::Service { .. }
             | Resource::Changed { .. }
+            | Resource::SettingsFile { .. }
             | Resource::Registration { .. } => out.unchecked += 1,
         }
     }

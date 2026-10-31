@@ -1094,10 +1094,37 @@ fn a_failed_install_takes_its_changes_back() {
     let op = plan.operations.remove(register);
     plan.operations.push(op);
     assert!(install(&plan, &fake, &w.store, &w.dir.join("kago.exe")).is_err());
+    assert!(!settings.exists(), "the file the install made is gone");
+    assert!(fake.values.borrow().is_empty());
+}
+
+#[test]
+fn settings_file_the_install_made_goes_at_uninstall() {
+    let w = World::new("settings-made");
+    let settings = w.dir.join("machine/config/App/made.json");
+    w.install(&format!(
+        "{MANIFEST}json {{config}}/made.json\n  set a.b 1\n"
+    ))
+    .unwrap();
+    assert!(settings.is_file());
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(!settings.exists());
+}
+
+#[test]
+fn settings_file_with_someone_elses_key_stays_at_uninstall() {
+    let w = World::new("settings-kept");
+    let settings = w.dir.join("machine/config/App/kept.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, r#"{"other":1}"#).unwrap();
+    w.install(&format!(
+        "{MANIFEST}json {{config}}/kept.json\n  set a.b 1\n"
+    ))
+    .unwrap();
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
     let left: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-    assert_eq!(left, serde_json::json!({ "drivers": [] }));
-    assert!(fake.values.borrow().is_empty());
+    assert_eq!(left, serde_json::json!({ "other": 1 }));
 }
 
 #[test]
