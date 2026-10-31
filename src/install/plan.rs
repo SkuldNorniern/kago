@@ -174,6 +174,7 @@ impl InstallPlan {
         }
         files.sort_by(|a, b| a.target.cmp(&b.target));
         twice(files.iter().map(|f| &f.target), target, &mut diagnostics);
+        windows_names(files.iter().map(|f| &f.target), target, &mut diagnostics);
 
         let mut directories = BTreeSet::new();
         for f in &files {
@@ -709,6 +710,16 @@ impl Steps {
         diagnostics: &mut Diagnostics,
     ) {
         for c in &resolved.changes {
+            if let Some(key) = hkcu_key(&c.place).filter(|_| scope == Scope::Machine) {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        diagnostic::INSTALL_SCOPE,
+                        format!("`{key}` is the installing admin's own settings in an install for everyone, not those of who uses the app"),
+                    )
+                    .at(c.at.clone())
+                    .help("use `HKLM\\...`, or `scope user`"),
+                );
+            }
             let everyone_only = matches!(&c.place, Place::Registry { key, .. }
             if key.split('\\').next().is_some_and(|h| {
                 h.eq_ignore_ascii_case("HKLM") || h.eq_ignore_ascii_case("HKEY_LOCAL_MACHINE")
@@ -974,6 +985,51 @@ fn twice<'a>(
             ));
         }
     }
+}
+
+/// an error for each file target Windows cannot hold, like `aux.txt`.
+fn windows_names<'a>(
+    targets: impl Iterator<Item = &'a SemanticPath>,
+    target: Target,
+    diagnostics: &mut Diagnostics,
+) {
+    if target.os() != crate::package::Os::Windows {
+        return;
+    }
+    for path in targets {
+        if !path.segments().all(windows_name) {
+            diagnostics.push(Diagnostic::error(
+                diagnostic::MANIFEST_VALUE,
+                format!("`{path}` cannot be a file name on Windows"),
+            ));
+        }
+    }
+}
+
+/// whether Windows accepts one path segment as a name.
+fn windows_name(segment: &str) -> bool {
+    let base = segment
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let number = base
+        .strip_prefix("COM")
+        .or_else(|| base.strip_prefix("LPT"));
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || number.is_some_and(|n| matches!(n, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"));
+    let bad_char = segment.contains(|c: char| "<>:\"|?*".contains(c));
+    !(reserved || bad_char || segment.ends_with('.') || segment.ends_with(' '))
+}
+
+/// the key of a registry place under HKCU, if it is one.
+fn hkcu_key(place: &Place) -> Option<&str> {
+    let Place::Registry { key, .. } = place else {
+        return None;
+    };
+    let hive = key.split('\\').next()?;
+    (hive.eq_ignore_ascii_case("HKCU") || hive.eq_ignore_ascii_case("HKEY_CURRENT_USER"))
+        .then_some(key.as_str())
 }
 
 /// an error for each `{input.<id>}` with no such field.
@@ -1577,6 +1633,58 @@ component docs Documentation off
             d.iter().any(|d| d.code == diagnostic::RESOLVE_CONFLICT),
             "{d:?}"
         );
+    }
+
+    #[test]
+    fn windows_reserved_names_are_not_file_names() {
+        let dir = payload_dir("reserved-names");
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let named = |name: &str| {
+            let src = format!("{AUREA}\ncopy themes/light.toml -> {{app}}/{name}\n");
+            let m = Manifest::parse("Kagofile", &src).0.unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            let (_, d) = InstallPlan::build(&m, &r, target, Scope::Machine, dir.as_path());
+            d.iter().any(|d| {
+                d.code == diagnostic::MANIFEST_VALUE
+                    && d.message.contains("cannot be a file name on Windows")
+            })
+        };
+        assert!(named("aux.txt"));
+        assert!(named("Com1.log"));
+        assert!(named("a?b.txt"));
+        assert!(named("trailing."));
+        assert!(!named("auxiliary.txt"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hkcu_values_in_an_install_for_everyone_warn() {
+        let dir = payload_dir("hkcu-scope");
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let build = |scope: Scope| {
+            let src = format!("{AUREA}\nregistry HKCU\\Software\\Kago\n  set Mode on\n");
+            let m = Manifest::parse("Kagofile", &src).0.unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, scope, dir.as_path())
+        };
+        let (p, d) = build(Scope::Machine);
+        assert!(p.is_some(), "a warning does not stop the plan: {d:?}");
+        assert!(
+            d.iter().any(|d| d.code == diagnostic::INSTALL_SCOPE
+                && d.severity == crate::diagnostic::Severity::Warning
+                && d.message.contains("`HKCU\\Software\\Kago`")),
+            "{d:?}"
+        );
+        let (_, d) = build(Scope::User);
+        assert!(
+            d.iter().all(|d| d.code != diagnostic::INSTALL_SCOPE),
+            "{d:?}"
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

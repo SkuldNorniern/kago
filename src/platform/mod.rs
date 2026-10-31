@@ -581,6 +581,7 @@ pub fn set_exe_icon(exe: &Path, icon: &crate::format::ico::IconGroup) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
     use crate::manifest::Check;
 
     #[test]
@@ -615,6 +616,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_missing_service_reads_as_none() {
         assert_eq!(
