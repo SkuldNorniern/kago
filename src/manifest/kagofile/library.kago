@@ -40,11 +40,16 @@ action webview2 file
 # a file type one of the package's programs opens: double-clicking such a
 # file starts the program with it. the extension starts with a dot.
 #   file-type .airaproj AiraStudio.Project "Aira project" {app}/aira-studio.exe
-action file-type ext id name program icon=$program
+# the document gets its own icon, apart from the program's, and a longer
+# description (the fifth word, quoted) for Explorer's Type column. the
+# icon is a path in the install, so a `copy` puts the .ico there.
+#   file-type .airaproj AiraStudio.Project "Aira project" {app}/aira-studio.exe "Aira Studio project file" icon={app}/airaproj.ico
+action file-type ext id name program description=$name icon=$program
   registry Software\Classes\$ext
     set @ $id
   registry Software\Classes\$id
     set @ $name
+    set FriendlyTypeName $description
   registry Software\Classes\$id\DefaultIcon
     set @ "$icon,0"
   registry Software\Classes\$id\shell\open\command

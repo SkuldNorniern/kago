@@ -605,8 +605,40 @@ page other \"Other\"
             r"Software\Classes\Aurea.Project\shell\open\command (default)",
             "\"{app}/bin/aurea.exe\" \"%1\""
         ));
+        assert!(has(
+            r"Software\Classes\Aurea.Project FriendlyTypeName",
+            "Aurea project"
+        ));
         assert!(has(r"Software\Classes\aurea URL Protocol", ""));
         assert!(has(r"Software\Classes\aurea (default)", "URL:Aurea"));
+    }
+
+    #[test]
+    fn a_file_type_takes_its_own_icon_and_description() {
+        let (m, codes) = check(&with(
+            "file-type .aurea Aurea.Project \"Aurea\" {app}/bin/aurea.exe \"Aurea project file\" icon={app}/doc.ico\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let set: Vec<(String, String)> = m
+            .unwrap()
+            .changes
+            .iter()
+            .map(|c| (c.place.to_string(), c.value.to_string()))
+            .collect();
+        let has = |place: &str, value: &str| set.iter().any(|(p, v)| p == place && v == value);
+        assert!(has(
+            r"Software\Classes\Aurea.Project\DefaultIcon (default)",
+            "{app}/doc.ico,0"
+        ));
+        assert!(has(
+            r"Software\Classes\Aurea.Project FriendlyTypeName",
+            "Aurea project file"
+        ));
+        assert!(has(r"Software\Classes\Aurea.Project (default)", "Aurea"));
+        assert!(has(
+            r"Software\Classes\Aurea.Project\shell\open\command (default)",
+            "\"{app}/bin/aurea.exe\" \"%1\""
+        ));
     }
 
     #[test]

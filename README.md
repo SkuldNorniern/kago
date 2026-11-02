@@ -312,7 +312,7 @@ kago's own library is written the same way ([library.kago](src/manifest/kagofile
 | `check steamvr` | whether SteamVR has run on this machine |
 | `vcredist <installer>` | the Visual C++ runtime as a prerequisite |
 | `webview2 <installer>` | the WebView2 runtime as a prerequisite |
-| `file-type <.ext> <id> "Name" <program> [icon=<file>]` | files with that extension open in the program, with its icon; taken back at uninstall |
+| `file-type <.ext> <id> "Name" <program> ["Description"] [icon=<path>]` | files with that extension open in the program. `icon` is a path in the install, an `.ico` a `copy` put there (the program's own icon when left out); the description is Explorer's Type column (the name when left out). taken back at uninstall |
 | `url-protocol <scheme> "Name" <program>` | links like `scheme://...` start the program with the link |
 
 ### components
