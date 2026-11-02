@@ -111,6 +111,7 @@ The first block. Only the id and `version` are required.
 | `name <text>` | shown everywhere; default: the last part of the id |
 | `version 1.2.0` | or read it: `version from toml pyproject.toml project.version`, `version from json package.json version`, `version from file VERSION`, `version from git` (newest tag), `version from cargo [path]` |
 | `publisher`, `description`, `homepage` | shown in the setup and in Settings › Apps |
+| `icon windows <file>.ico` | the setup's and the Settings › Apps icon, for a suite whose icon isn't any one app's; default: the first app's |
 | `setup modern` / `setup native` | the look; modern by default |
 | `folder choose` / `folder fixed` | whether people may pick the install folder; choose by default |
 | `downgrade deny` / `downgrade allow` | whether an older version may replace a newer one; deny by default |

@@ -224,7 +224,7 @@ impl InstallPlan {
         let register = Operation::RegisterApplication {
             display_name: manifest.application.display_name.clone(),
             entrypoint,
-            icon,
+            icon: package_icon(resolved).or(icon),
         };
         steps.push(register, None);
         steps.runs(resolved, scope, scope_open, &mut diagnostics);
@@ -856,6 +856,15 @@ impl Steps {
 
 /// with `scope choose`, PATH entries follow the pick, and a service has
 /// to be a per-user sign-in item.
+/// the package's own icon, for a suite whose entry isn't any one app.
+fn package_icon(resolved: &Resolved) -> Option<SemanticPath> {
+    resolved
+        .files
+        .iter()
+        .find(|f| f.logical_id.as_deref() == Some("package-icon"))
+        .map(|f| f.target.clone())
+}
+
 fn fixed_with_open_scope(resolved: &Resolved, diagnostics: &mut Diagnostics) {
     for p in &resolved.paths {
         if p.scope != ResourceScope::ResolvedInstall {
@@ -1793,6 +1802,44 @@ component docs Documentation off
             .unwrap();
         let (p, d) = InstallPlan::build(&m, &r, target, Scope::User, dir.as_path());
         assert!(p.is_some(), "per user it only warns: {d:?}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_package_icon_goes_on_the_uninstall_entry_and_not_the_shortcut() {
+        let dir = std::env::temp_dir().join(format!("kago-plan-suite-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("tool.exe"), b"MZ").unwrap();
+        fs::write(dir.join("tool.ico"), b"ico").unwrap();
+        fs::write(dir.join("suite.ico"), b"ico").unwrap();
+        let src = "package dev.x.suite
+  version 1.0.0
+  icon windows suite.ico
+app tool
+  windows tool.exe
+  icon windows tool.ico
+shortcut
+";
+        let m = Manifest::parse("Kagofile", src).0.unwrap();
+        assert!(m.application.icons[0].source.ends_with("suite.ico"));
+        let target: Target = "windows-x86_64".parse().unwrap();
+        let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+            .0
+            .unwrap();
+        let p = InstallPlan::build(&m, &r, target, Scope::User, dir.as_path())
+            .0
+            .unwrap();
+        let suite: SemanticPath = "{app}/suite.ico".parse().unwrap();
+        let tool: SemanticPath = "{app}/tool.ico".parse().unwrap();
+        assert!(p.operations.iter().any(
+            |op| matches!(op, Operation::RegisterApplication { icon: Some(i), .. } if *i == suite)
+        ));
+        assert!(
+            p.operations.iter().any(
+                |op| matches!(op, Operation::CreateShortcut { icon: Some(i), .. } if *i == tool)
+            )
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

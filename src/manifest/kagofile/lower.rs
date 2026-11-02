@@ -754,6 +754,8 @@ impl Lower<'_> {
                 "publisher" => package.publisher = Some(text),
                 "description" => package.description = Some(text),
                 "homepage" => package.homepage = Some(text),
+                // the setup's and the uninstall entry's own, apart from any app's.
+                "icon" => self.icon_line(child, "package", &Scope::default()),
                 "version" => {
                     has_version = true;
                     match version::read(child.args(), self.base) {
@@ -895,6 +897,33 @@ impl Lower<'_> {
         spanned(word)
     }
 
+    /// `icon <os> <file>`, for the app or package called `owner`. an .ico is
+    /// installed too: shortcuts and the uninstall entry show it.
+    fn icon_line(&mut self, node: &Node, owner: &str, scope: &Scope) {
+        let [os, path] = node.args() else {
+            self.syntax(node.at(), "expected `icon <os> <file>`");
+            return;
+        };
+        let when = self.when(scope, std::slice::from_ref(os));
+        let source = self.reference(path);
+        if path.text.to_ascii_lowercase().ends_with(".ico") {
+            let file_when = self.when(scope, std::slice::from_ref(os));
+            self.files.push(RawFile {
+                logical_id: Some(spanned_text(path, format!("{owner}-icon"))),
+                component: scope.component.clone(),
+                source: source.clone(),
+                target: spanned_text(path, format!("{{app}}/{}", basename(&path.text))),
+                ownership: None,
+                when: file_when,
+            });
+        }
+        self.icons.push(RawIcon {
+            source,
+            size: None,
+            when,
+        });
+    }
+
     fn app(&mut self, node: &Node, scope: &Scope) {
         let Some([id]) = self.args(node, 1, "app <id>") else {
             return;
@@ -912,34 +941,7 @@ impl Lower<'_> {
             let args = child.args();
             match child.keyword() {
                 "to" => {}
-                "icon" => match args {
-                    [os, path] => {
-                        let when = self.when(scope, std::slice::from_ref(os));
-                        let source = self.reference(path);
-                        // an .ico is installed too: shortcuts and the
-                        // uninstall entry show it.
-                        if path.text.to_ascii_lowercase().ends_with(".ico") {
-                            let file_when = self.when(scope, std::slice::from_ref(os));
-                            self.files.push(RawFile {
-                                logical_id: Some(spanned_text(path, format!("{}-icon", id.text))),
-                                component: scope.component.clone(),
-                                source: source.clone(),
-                                target: spanned_text(
-                                    path,
-                                    format!("{{app}}/{}", basename(&path.text)),
-                                ),
-                                ownership: None,
-                                when: file_when,
-                            });
-                        }
-                        self.icons.push(RawIcon {
-                            source,
-                            size: None,
-                            when,
-                        });
-                    }
-                    _ => self.syntax(child.at(), "expected `icon <os> <file>`"),
-                },
+                "icon" => self.icon_line(child, &id.text, scope),
                 _ => {
                     // `<os> [arch] [libc] <file> [-> <path>]`
                     let (args, dest) = match args {
