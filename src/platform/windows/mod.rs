@@ -2,6 +2,7 @@
 //! `HKCU\Environment`, Start Menu `.lnk`, uninstall entry in `HKCU`.
 
 mod admin_only;
+mod driver;
 pub mod elevation;
 mod environment;
 pub mod firewall;
@@ -250,6 +251,30 @@ impl Platform for Windows {
 
     fn stop_service(&self, name: &str) -> Result<(), String> {
         service::stop_service(name)
+    }
+
+    fn add_driver(&self, inf: &Path) -> Result<super::DriverAdded, String> {
+        driver::add(inf)
+    }
+
+    fn remove_driver(&self, published: &str) -> Result<(), String> {
+        driver::remove(published)
+    }
+
+    fn device(&self, id: &str) -> Result<Option<String>, String> {
+        driver::find(id)
+    }
+
+    fn create_device(&self, id: &str, inf: &Path) -> Result<String, String> {
+        driver::create(id, inf)
+    }
+
+    fn update_devices(&self, id: &str, inf: &Path) -> Result<(), String> {
+        driver::update(id, inf)
+    }
+
+    fn remove_device(&self, instance: &str) -> Result<(), String> {
+        driver::remove_device(instance)
     }
 
     fn secure_state(&self, dir: &Path) -> Result<(), String> {

@@ -85,6 +85,16 @@ pub enum Resource {
         name: String,
         group: String,
     },
+    /// a driver package in the driver store, by the name Windows gave it
+    /// there, like `oem12.inf`.
+    Driver {
+        published: String,
+    },
+    /// a software device the install made for a driver.
+    Device {
+        instance: String,
+        hardware_id: String,
+    },
     /// the package's own program to run first at uninstall.
     UninstallHook {
         command: String,

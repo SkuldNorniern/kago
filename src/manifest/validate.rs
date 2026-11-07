@@ -117,6 +117,7 @@ impl Validator<'_> {
             sign: None,
             prerequisites: Vec::new(),
             firewall: Vec::new(),
+            drivers: Vec::new(),
             changes: Vec::new(),
         };
         self.references(&manifest, &raw);

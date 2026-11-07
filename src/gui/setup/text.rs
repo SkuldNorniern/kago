@@ -102,6 +102,7 @@ pub enum Line {
     Service,
     Prerequisite,
     Firewall,
+    Driver,
     /// Next without the arrow, for the modern look.
     Continue,
     RemoveData,
@@ -568,6 +569,11 @@ const fn table(line: Line) -> [&'static str; 3] {
             "Firewall rule: {item}",
             "방화벽 규칙: {item}",
             "ファイアウォール規則: {item}",
+        ],
+        Line::Driver => [
+            "Install driver: {item}",
+            "드라이버 설치: {item}",
+            "ドライバーをインストール: {item}",
         ],
         Line::RemoveData => [
             "Also remove my settings and data",

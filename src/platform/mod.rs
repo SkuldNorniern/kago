@@ -159,6 +159,72 @@ pub trait Platform {
         Err("services for everyone are Windows-only for now".to_owned())
     }
 
+    /// copies the driver package at `inf`, a file the install placed, into
+    /// the driver store.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, when the package is not signed so
+    /// Windows takes it, or where there are no such drivers.
+    fn add_driver(&self, inf: &Path) -> Result<DriverAdded, String> {
+        let _ = inf;
+        Err("drivers are Windows-only".to_owned())
+    }
+
+    /// takes the package Windows calls `published`, like `oem12.inf`, out
+    /// of the driver store. gone already is fine.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights.
+    fn remove_driver(&self, published: &str) -> Result<(), String> {
+        let _ = published;
+        Err("drivers are Windows-only".to_owned())
+    }
+
+    /// the instance id of a present device with hardware id `id`.
+    ///
+    /// # Errors
+    ///
+    /// when devices cannot be listed here.
+    fn device(&self, id: &str) -> Result<Option<String>, String> {
+        let _ = id;
+        Err("devices are Windows-only".to_owned())
+    }
+
+    /// makes a software device with hardware id `id` and installs the
+    /// driver at `inf` on it; returns its instance id. one that cannot get
+    /// the driver is not left behind.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, or when the driver does not install.
+    fn create_device(&self, id: &str, inf: &Path) -> Result<String, String> {
+        let _ = (id, inf);
+        Err("devices are Windows-only".to_owned())
+    }
+
+    /// installs the driver at `inf` on the present devices with hardware
+    /// id `id`.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights, or when the driver does not install.
+    fn update_devices(&self, id: &str, inf: &Path) -> Result<(), String> {
+        let _ = (id, inf);
+        Err("devices are Windows-only".to_owned())
+    }
+
+    /// removes the device `instance`. gone already is fine.
+    ///
+    /// # Errors
+    ///
+    /// without administrator rights.
+    fn remove_device(&self, instance: &str) -> Result<(), String> {
+        let _ = instance;
+        Err("devices are Windows-only".to_owned())
+    }
+
     /// stops the service `name` if it runs; keeps its setup.
     ///
     /// # Errors
@@ -455,6 +521,15 @@ pub struct Firewall {
     pub protocol: Option<crate::manifest::Protocol>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ports: String,
+}
+
+/// a driver package in the driver store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverAdded {
+    /// the name Windows gave it there, like `oem12.inf`.
+    pub published: String,
+    /// false when the same package was in the store already.
+    pub new: bool,
 }
 
 /// held while this process is the only setup or uninstaller working on

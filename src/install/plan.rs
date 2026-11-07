@@ -213,6 +213,7 @@ impl InstallPlan {
         }
         steps.resources(resolved, scope, icon.as_ref(), manifest, &mut diagnostics);
         steps.firewall(manifest, resolved, scope, scope_open, &mut diagnostics);
+        steps.drivers(resolved, scope, scope_open, &mut diagnostics);
         steps.changes(resolved, scope, scope_open, &mut diagnostics);
         let entrypoint = manifest.application.entrypoint.as_ref().and_then(|id| {
             resolved
@@ -482,6 +483,7 @@ impl InstallPlan {
                     scope: Scope::Machine,
                     ..
                 } => out.push(format!("Windows service {id}")),
+                Operation::InstallDriver { inf, .. } => out.push(format!("driver {inf}")),
                 _ => {}
             }
         }
@@ -698,6 +700,90 @@ impl Steps {
                 ports: rule.ports.clone(),
             };
             self.push(op, rule.component.clone());
+        }
+    }
+
+    /// a driver per `driver` line whose component is installed. a driver
+    /// is for the whole machine, so it needs an install for everyone.
+    fn drivers(
+        &mut self,
+        resolved: &Resolved,
+        scope: Scope,
+        scope_open: bool,
+        diagnostics: &mut Diagnostics,
+    ) {
+        let mut seen = BTreeSet::new();
+        let mut devices = BTreeSet::new();
+        for driver in &resolved.drivers {
+            if !resolved.components.contains(driver.component.as_deref()) {
+                continue;
+            }
+            if scope == Scope::User || scope_open {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::TARGET_CAPABILITY,
+                        "a driver is for the whole machine and needs an install for everyone",
+                    )
+                    .at(driver.at.clone())
+                    .help("use `scope machine`"),
+                );
+                continue;
+            }
+            if driver.inf.root != crate::manifest::Root::App {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_VALUE,
+                        format!("driver: `{}` is outside the install folder", driver.inf),
+                    )
+                    .at(driver.at.clone())
+                    .help("put the driver package under `{app}`, like `copy drivers/x -> {app}/drivers/x`"),
+                );
+                continue;
+            }
+            // copied folders are single files by now.
+            let placed = self.operations.iter().any(
+                |op| matches!(op, Operation::InstallFile { target, .. } if *target == driver.inf),
+            );
+            if !placed {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_REFERENCE,
+                        format!("driver: nothing in this package installs `{}`", driver.inf),
+                    )
+                    .at(driver.at.clone())
+                    .help("copy the driver package's folder there, like `copy drivers/x -> {app}/drivers/x`"),
+                );
+                continue;
+            }
+            if !seen.insert(driver.inf.clone()) {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_DUPLICATE,
+                        format!("driver `{}` twice", driver.inf),
+                    )
+                    .at(driver.at.clone()),
+                );
+                continue;
+            }
+            if let Some(id) = driver
+                .devices
+                .iter()
+                .find(|id| !devices.insert(id.to_ascii_lowercase()))
+            {
+                diagnostics.push(
+                    Diagnostic::error(
+                        diagnostic::MANIFEST_DUPLICATE,
+                        format!("two drivers make device `{id}`"),
+                    )
+                    .at(driver.at.clone()),
+                );
+                continue;
+            }
+            let op = Operation::InstallDriver {
+                inf: driver.inf.clone(),
+                devices: driver.devices.clone(),
+            };
+            self.push(op, driver.component.clone());
         }
     }
 
@@ -1179,7 +1265,8 @@ fn inherit_owners(operations: &[Operation], owners: &mut [Option<String>]) {
             let path = match op {
                 Operation::CreateShortcut { target: path, .. }
                 | Operation::InstallService { command: path, .. }
-                | Operation::AllowThroughFirewall { program: path, .. } => path,
+                | Operation::AllowThroughFirewall { program: path, .. }
+                | Operation::InstallDriver { inf: path, .. } => path,
                 Operation::Run { command, .. } => match &command.program {
                     Program::Installed { path } => path,
                     Program::System { .. } => return None,
@@ -1353,6 +1440,43 @@ mod tests {
             .0
             .unwrap();
         InstallPlan::build(&m, &r, target, Scope::User, dir)
+    }
+
+    #[test]
+    fn drivers_need_an_install_for_everyone_and_a_file_in_place() {
+        let dir = payload_dir("driver");
+        fs::create_dir_all(dir.join("drv")).unwrap();
+        fs::write(dir.join("drv/x.inf"), b"[Version]").unwrap();
+        let build = |src: &str, scope: Scope| {
+            let m = Manifest::parse("Kagofile", src).0.unwrap();
+            let target: Target = "windows-x86_64".parse().unwrap();
+            let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
+                .0
+                .unwrap();
+            InstallPlan::build(&m, &r, target, scope, dir.as_path())
+        };
+        let aurea = AUREA.replace("  scope choose\n", "  scope machine\n");
+        let src =
+            format!("{aurea}copy drv -> {{app}}/drv\ndriver {{app}}/drv/x.inf\n  device Root\\X\n");
+        let (p, d) = build(&src, Scope::Machine);
+        assert!(!d.has_errors(), "{d:?}");
+        let p = p.unwrap();
+        assert!(p.operations.iter().any(|op| matches!(
+            op,
+            Operation::InstallDriver { devices, .. } if devices == &[r"Root\X"]
+        )));
+        assert!(p.admin_reasons().iter().any(|r| r.starts_with("driver ")));
+
+        let (p, d) = build(&src, Scope::User);
+        assert!(p.is_none() && d.has_errors(), "{d:?}");
+
+        let missing = format!("{aurea}driver {{app}}/drv/x.inf\n");
+        let (p, d) = build(&missing, Scope::Machine);
+        assert!(p.is_none(), "{d:?}");
+        assert!(
+            d.0.iter()
+                .any(|x| x.message.contains("nothing in this package installs"))
+        );
     }
 
     #[test]

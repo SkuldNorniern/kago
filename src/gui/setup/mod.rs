@@ -268,6 +268,7 @@ pub enum Step {
     Service(String),
     Prerequisite(String),
     Firewall(String),
+    Driver(String),
 }
 
 impl Step {
@@ -286,6 +287,7 @@ impl Step {
             Self::Service(s) => Self::Service(change(&s)),
             Self::Prerequisite(s) => Self::Prerequisite(change(&s)),
             Self::Firewall(s) => Self::Firewall(change(&s)),
+            Self::Driver(s) => Self::Driver(change(&s)),
         }
     }
 
@@ -302,6 +304,7 @@ impl Step {
             Self::Service(s) => (Line::Service, s),
             Self::Prerequisite(s) => (Line::Prerequisite, s),
             Self::Firewall(s) => (Line::Firewall, s),
+            Self::Driver(s) => (Line::Driver, s),
         };
         lang.fill(line, &[("item", item)])
     }

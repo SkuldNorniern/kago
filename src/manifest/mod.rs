@@ -3,6 +3,7 @@
 mod brand;
 mod change;
 mod check;
+mod driver;
 mod firewall;
 mod input;
 mod kagofile;
@@ -22,6 +23,7 @@ use std::path::Path;
 pub use brand::{Brand, parse_color};
 pub use change::{Change, Edit, Place, Value};
 pub use check::{Check, Detect};
+pub use driver::{Driver, check_hardware_id};
 pub use firewall::{FirewallRule, Protocol, check_ports};
 pub use input::{Field, FieldKind, InputPage, Problem};
 pub(crate) use path::valid_segment;
@@ -85,6 +87,9 @@ pub struct Manifest {
     pub prerequisites: Vec<Prerequisite>,
     /// programs Windows Firewall lets accept connections.
     pub firewall: Vec<FirewallRule>,
+    /// driver packages put into the driver store, with the devices they
+    /// drive.
+    pub drivers: Vec<Driver>,
     /// values set in other programs' settings, the registry or the
     /// environment.
     pub changes: Vec<Change>,
@@ -167,6 +172,7 @@ impl Manifest {
             m.sign = lowered.sign;
             m.prerequisites = lowered.prerequisites;
             m.firewall = lowered.firewall;
+            m.drivers = lowered.drivers;
             m.changes = lowered.changes;
             m.expects = lowered.expects;
             m.runs = lowered.runs;
@@ -505,6 +511,28 @@ page other \"Other\"
         ] {
             let (m, codes) = check(&with(good));
             assert!(codes.is_empty() && m.is_some(), "{good}: {codes:?}");
+        }
+    }
+
+    #[test]
+    fn drivers_take_an_installed_inf_and_hardware_ids() {
+        let (m, codes) = check(&with(
+            "driver {app}/drv/x.inf\n  device Root\\X\n  device Root\\Y\n",
+        ));
+        assert!(codes.is_empty(), "{codes:?}");
+        let drivers = m.unwrap().drivers;
+        assert_eq!(drivers[0].inf.to_string(), "{app}/drv/x.inf");
+        assert_eq!(drivers[0].devices, [r"Root\X", r"Root\Y"]);
+        for bad in [
+            "driver drv/x.inf\n",
+            "driver {app}/drv/x.sys\n",
+            "driver {app}/drv/x.inf\n  device \"a b\"\n",
+            "driver {app}/drv/x.inf\n  device A\n  device A\n",
+            "driver {app}/drv/x.inf\n  hardware A\n",
+            "driver\n",
+        ] {
+            let (m, codes) = check(&with(bad));
+            assert!(m.is_none() && !codes.is_empty(), "{bad}");
         }
     }
 

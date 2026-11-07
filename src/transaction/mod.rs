@@ -441,10 +441,12 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
         | Resource::FirewallRule { .. }
         | Resource::Service { .. }
         | Resource::Changed { .. } => 3,
-        Resource::SettingsFile { .. } => 4,
-        Resource::File { .. } if is_uninstaller(r) => 6,
-        Resource::File { .. } => 5,
-        Resource::Directory { path } => 7 + usize::MAX / 2 - path.segments().count(),
+        // devices go before the driver on them, while its files are there.
+        Resource::Device { .. } | Resource::SettingsFile { .. } => 4,
+        Resource::Driver { .. } => 5,
+        Resource::File { .. } if is_uninstaller(r) => 7,
+        Resource::File { .. } => 6,
+        Resource::Directory { path } => 8 + usize::MAX / 2 - path.segments().count(),
         Resource::Registration { .. } => usize::MAX,
     };
     let mut ordered: Vec<&Resource> = resources.iter().collect();
@@ -478,6 +480,8 @@ fn remove_resources(receipt: &Receipt, resources: &[Resource], platform: &dyn Pl
             Resource::LoginItem { name } => platform.set_login_item(name, None),
             Resource::FirewallRule { name, group } => platform.set_firewall_rule(name, group, None),
             Resource::Service { name } => platform.set_service(name, None),
+            Resource::Device { instance, .. } => platform.remove_device(instance),
+            Resource::Driver { published } => platform.remove_driver(published),
             Resource::Changed {
                 slot,
                 edit,

@@ -213,6 +213,8 @@ fn same_place(old: &Resource, previous: &Receipt, new: &Receipt) -> bool {
         | (Resource::PathEntry { entry: a, .. }, Resource::PathEntry { entry: b, .. })
         | (Resource::FirewallRule { name: a, .. }, Resource::FirewallRule { name: b, .. })
         | (Resource::Service { name: a }, Resource::Service { name: b })
+        | (Resource::Driver { published: a }, Resource::Driver { published: b })
+        | (Resource::Device { instance: a, .. }, Resource::Device { instance: b, .. })
         | (Resource::LoginItem { name: a }, Resource::LoginItem { name: b }) => a == b,
         (Resource::Shortcut { path: a }, Resource::Shortcut { path: b })
         | (Resource::SettingsFile { path: a }, Resource::SettingsFile { path: b }) => a == b,
@@ -442,6 +444,7 @@ impl Run<'_> {
                 ..
             } => self.windows_service(op),
             Operation::AllowThroughFirewall { .. } => self.firewall(op),
+            Operation::InstallDriver { inf, devices } => self.driver(inf, devices),
             Operation::Change { place, edit, value } => self.change(place, *edit, value),
         }
     }
@@ -711,6 +714,62 @@ impl Run<'_> {
             group,
         });
         Ok(())
+    }
+
+    /// a driver package into the driver store, then a device per hardware
+    /// id with the driver on it. a package or device that was there before
+    /// stays someone else's, unless an earlier version of this package
+    /// made it.
+    fn driver(&mut self, inf: &SemanticPath, devices: &[String]) -> Result<(), Error> {
+        let inf = self.resolve(inf)?;
+        let added = self.platform.add_driver(&inf).map_err(Error::Other)?;
+        if added.new {
+            self.step(Undo::RemoveDriver {
+                published: added.published.clone(),
+            })?;
+        }
+        let published = added.published;
+        let ours = added.new
+            || self.had(|r| matches!(r, Resource::Driver { published: p } if *p == published));
+        if ours {
+            self.resources.push(Resource::Driver { published });
+        }
+        for id in devices {
+            let instance = if let Some(instance) = self.platform.device(id).map_err(Error::Other)? {
+                self.platform
+                    .update_devices(id, &inf)
+                    .map_err(Error::Other)?;
+                let ours = self
+                    .had(|r| matches!(r, Resource::Device { instance: i, .. } if *i == instance));
+                if !ours {
+                    continue;
+                }
+                instance
+            } else {
+                // the undo needs the instance id, which only a made device
+                // has: make it, then write the undo at once.
+                let instance = self
+                    .platform
+                    .create_device(id, &inf)
+                    .map_err(Error::Other)?;
+                self.step(Undo::RemoveDevice {
+                    instance: instance.clone(),
+                })?;
+                instance
+            };
+            self.resources.push(Resource::Device {
+                instance,
+                hardware_id: id.clone(),
+            });
+        }
+        Ok(())
+    }
+
+    /// whether the receipt of the version installed before holds a
+    /// resource like that.
+    fn had(&self, wanted: impl Fn(&Resource) -> bool) -> bool {
+        self.previous
+            .is_some_and(|p| p.resources.iter().any(wanted))
     }
 
     /// an `install` program runs now; failing rolls the install back, and

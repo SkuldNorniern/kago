@@ -89,6 +89,15 @@ pub enum Operation {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         ports: String,
     },
+    /// puts the driver package whose `.inf` the install placed at `inf`
+    /// into the driver store, makes a device for each hardware id in
+    /// `devices` and installs the driver on it. needs an install for
+    /// everyone.
+    InstallDriver {
+        inf: SemanticPath,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        devices: Vec<String>,
+    },
 }
 
 impl Operation {
@@ -104,6 +113,7 @@ impl Operation {
             Self::Run { .. } => "run",
             Self::InstallService { .. } => "install-service",
             Self::AllowThroughFirewall { .. } => "allow-through-firewall",
+            Self::InstallDriver { .. } => "install-driver",
             Self::Change { .. } => "change",
         }
     }
@@ -151,6 +161,13 @@ impl fmt::Display for Operation {
                     (None, _) => String::new(),
                 };
                 write!(f, "firewall  {name} -> {program} ({networks}{only})")
+            }
+            Self::InstallDriver { inf, devices } => {
+                write!(f, "driver    {inf}")?;
+                if !devices.is_empty() {
+                    write!(f, " (devices {})", devices.join(", "))?;
+                }
+                Ok(())
             }
         }
     }

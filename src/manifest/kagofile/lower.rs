@@ -17,9 +17,9 @@ use crate::manifest::schema::{
 };
 use crate::manifest::source::{Source, SourceKind, Unpack};
 use crate::manifest::{
-    Brand, BuildStep, Change, Check, Command, Detect, Edit, Expect, Field, FieldKind, FirewallRule,
-    InputPage, Place, Prerequisite, Run, RunAt, Setting, Sign, SignKey, TIMESTAMP, Value,
-    parse_color,
+    Brand, BuildStep, Change, Check, Command, Detect, Driver, Edit, Expect, Field, FieldKind,
+    FirewallRule, InputPage, Place, Prerequisite, Run, RunAt, Setting, Sign, SignKey, TIMESTAMP,
+    Value, parse_color,
 };
 use crate::package::{Arch, Artifact, Libc, Os};
 
@@ -43,6 +43,7 @@ const STATEMENTS: &[&str] = &[
     "prerequisite",
     "update",
     "firewall",
+    "driver",
     "json",
     "registry",
     "env",
@@ -66,6 +67,7 @@ pub struct Lowered {
     pub sign: Option<Sign>,
     pub prerequisites: Vec<Prerequisite>,
     pub firewall: Vec<FirewallRule>,
+    pub drivers: Vec<Driver>,
     pub changes: Vec<Change>,
     pub expects: Vec<Expect>,
     pub runs: Vec<Run>,
@@ -119,6 +121,7 @@ pub fn lower(
         prerequisites: Vec::new(),
         update: None,
         firewall: Vec::new(),
+        drivers: Vec::new(),
         changes: Vec::new(),
         checks: BTreeMap::new(),
         library_checks: BTreeSet::new(),
@@ -202,6 +205,7 @@ struct Lower<'a> {
     prerequisites: Vec<Prerequisite>,
     update: Option<RawUpdate>,
     firewall: Vec<FirewallRule>,
+    drivers: Vec<Driver>,
     changes: Vec<Change>,
     /// `check` definitions by id.
     checks: BTreeMap<String, Detect>,
@@ -309,6 +313,7 @@ impl Lower<'_> {
             ),
             "service" => self.service(node, scope),
             "firewall" => self.firewall_rule(node, scope),
+            "driver" => self.driver(node, scope),
             "json" | "registry" | "env" => self.change(node, scope),
             "component" if scope.component.is_none() => self.component(node, scope),
             "when" => {
@@ -1117,6 +1122,69 @@ impl Lower<'_> {
             public,
             protocol,
             ports,
+            component: scope.component.as_ref().map(|c| c.get_ref().clone()),
+            when,
+            at: Location::at(self.file, self.source, node.at()),
+        });
+    }
+
+    /// `driver {app}/path/x.inf`, with `device <hardware id>` lines under
+    /// it for the software devices to make.
+    fn driver(&mut self, node: &Node, scope: &Scope) {
+        let usage = "expected `driver {app}/<folder>/<name>.inf`, with `device <hardware id>` lines under it";
+        let [inf] = node.args() else {
+            return self.syntax(node.at(), usage);
+        };
+        let path = match inf.text.parse::<crate::manifest::SemanticPath>() {
+            Ok(path) => path,
+            Err(e) => {
+                return self.error(
+                    diagnostic::MANIFEST_VALUE,
+                    inf.at,
+                    format!("{e}; the driver is a file the install puts in place, like `{{app}}/drivers/x.inf`"),
+                );
+            }
+        };
+        let is_inf = path
+            .segments()
+            .last()
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".inf"));
+        if !is_inf {
+            return self.error(
+                diagnostic::MANIFEST_VALUE,
+                inf.at,
+                format!("`{}` is not an `.inf`; `driver` takes the driver package's setup information file", inf.text),
+            );
+        }
+        let mut devices = Vec::new();
+        for child in &node.children {
+            self.no_children(child);
+            match (child.keyword(), child.args()) {
+                ("device", [id]) => match crate::manifest::check_hardware_id(&id.text) {
+                    Ok(()) if devices.contains(&id.text) => self.error(
+                        diagnostic::MANIFEST_DUPLICATE,
+                        id.at,
+                        format!("device `{}` twice", id.text),
+                    ),
+                    Ok(()) => devices.push(id.text.clone()),
+                    Err(e) => self.error(diagnostic::MANIFEST_VALUE, id.at, e),
+                },
+                _ => self.syntax(
+                    child.at(),
+                    r"expected `device <hardware id>`, like `device Root\MyDevice`",
+                ),
+            }
+        }
+        let when = self.when(scope, &[]);
+        let when = crate::manifest::selector::selector(
+            when.as_ref(),
+            self.file,
+            self.source,
+            &mut self.diagnostics,
+        );
+        self.drivers.push(Driver {
+            inf: path,
+            devices,
             component: scope.component.as_ref().map(|c| c.get_ref().clone()),
             when,
             at: Location::at(self.file, self.source, node.at()),
@@ -2017,6 +2085,7 @@ impl Lower<'_> {
             sign: self.sign,
             prerequisites: self.prerequisites,
             firewall: self.firewall,
+            drivers: self.drivers,
             changes: self.changes,
             expects: self.expects,
             runs: self.runs,

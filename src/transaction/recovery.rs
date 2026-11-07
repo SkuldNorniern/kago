@@ -78,6 +78,8 @@ fn take_back(undo: &Undo, platform: &dyn Platform) -> Result<(), String> {
             group,
             previous,
         } => platform.set_firewall_rule(name, group, previous.as_ref()),
+        Undo::RemoveDriver { published } => platform.remove_driver(published),
+        Undo::RemoveDevice { instance } => platform.remove_device(instance),
         Undo::RestoreLoginItem { name, previous } => {
             platform.set_login_item(name, previous.as_deref())
         }

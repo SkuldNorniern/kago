@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Location};
 use crate::manifest::{
-    Change, Command, Context, Expect, File, FirewallRule, Manifest, PathKind, PathSource,
+    Change, Command, Context, Driver, Expect, File, FirewallRule, Manifest, PathKind, PathSource,
     Requirement, ResourceScope, Run, Selector, SemanticPath, Service, Shortcut,
 };
 use crate::package::Os;
@@ -75,6 +75,8 @@ pub struct Resolved {
     pub changes: Vec<Change>,
     /// firewall rules for this target, `when` applied.
     pub firewall: Vec<FirewallRule>,
+    /// driver packages for this target, `when` applied.
+    pub drivers: Vec<Driver>,
     pub components: Selection,
 }
 
@@ -159,6 +161,12 @@ pub fn resolve(
         .filter(|f| r.active(f.component.as_deref(), &f.when))
         .cloned()
         .collect();
+    let drivers = manifest
+        .drivers
+        .iter()
+        .filter(|d| r.active(d.component.as_deref(), &d.when))
+        .cloned()
+        .collect();
     if let Some(entry) = &manifest.application.entrypoint {
         r.lookup("`application.entrypoint`", entry, None);
     }
@@ -173,6 +181,7 @@ pub fn resolve(
         runs,
         changes,
         firewall,
+        drivers,
         components,
     };
     ((!diagnostics.has_errors()).then_some(resolved), diagnostics)

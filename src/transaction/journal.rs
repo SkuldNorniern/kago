@@ -63,6 +63,14 @@ pub enum Undo {
         group: String,
         previous: Option<crate::platform::Firewall>,
     },
+    /// takes a driver package the install added out of the driver store.
+    RemoveDriver {
+        published: String,
+    },
+    /// removes a device the install made.
+    RemoveDevice {
+        instance: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

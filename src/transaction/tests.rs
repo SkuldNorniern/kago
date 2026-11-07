@@ -27,6 +27,10 @@ struct Fake {
     /// registry values and environment variables; JSON goes to real files
     /// under `base`.
     values: RefCell<BTreeMap<String, crate::manifest::Value>>,
+    /// driver store: published name to the `.inf` text it holds.
+    drivers: RefCell<BTreeMap<String, String>>,
+    /// devices: instance id to hardware id.
+    devices: RefCell<BTreeMap<String, String>>,
 }
 
 impl Fake {
@@ -43,6 +47,8 @@ impl Fake {
             services: RefCell::new(BTreeMap::new()),
             service_calls: RefCell::new(Vec::new()),
             values: RefCell::new(BTreeMap::new()),
+            drivers: RefCell::new(BTreeMap::new()),
+            devices: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -185,6 +191,53 @@ impl Platform for Fake {
         Ok(())
     }
 
+    fn add_driver(&self, inf: &Path) -> Result<crate::platform::DriverAdded, String> {
+        let text = fs::read_to_string(inf).map_err(|e| e.to_string())?;
+        let mut store = self.drivers.borrow_mut();
+        if let Some((published, _)) = store.iter().find(|(_, t)| **t == text) {
+            return Ok(crate::platform::DriverAdded {
+                published: published.clone(),
+                new: false,
+            });
+        }
+        let published = format!("oem{}.inf", store.len() + 10);
+        store.insert(published.clone(), text);
+        Ok(crate::platform::DriverAdded {
+            published,
+            new: true,
+        })
+    }
+
+    fn remove_driver(&self, published: &str) -> Result<(), String> {
+        self.drivers.borrow_mut().remove(published);
+        Ok(())
+    }
+
+    fn device(&self, id: &str) -> Result<Option<String>, String> {
+        Ok(self
+            .devices
+            .borrow()
+            .iter()
+            .find(|(_, h)| h.eq_ignore_ascii_case(id))
+            .map(|(i, _)| i.clone()))
+    }
+
+    fn create_device(&self, id: &str, _: &Path) -> Result<String, String> {
+        let mut devices = self.devices.borrow_mut();
+        let instance = format!("ROOT\\DEV\\{:04}", devices.len());
+        devices.insert(instance.clone(), id.to_owned());
+        Ok(instance)
+    }
+
+    fn update_devices(&self, _: &str, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn remove_device(&self, instance: &str) -> Result<(), String> {
+        self.devices.borrow_mut().remove(instance);
+        Ok(())
+    }
+
     /// a folder named `Shared` stands for one like the user's Documents.
     fn shared_folder(&self, dir: &Path) -> bool {
         dir.file_name().is_some_and(|n| n == "Shared")
@@ -264,9 +317,8 @@ impl World {
         let r = resolve(&m, &Context::target(target), Selection::defaults(&m))
             .0
             .unwrap();
-        InstallPlan::build(&m, &r, target, scope, self.dir.as_path())
-            .0
-            .unwrap()
+        let (plan, d) = InstallPlan::build(&m, &r, target, scope, self.dir.as_path());
+        plan.unwrap_or_else(|| panic!("{d:?}"))
     }
 
     fn app(&self) -> PathBuf {
@@ -431,6 +483,84 @@ fn firewall_rules_come_and_go_with_installs_for_everyone() {
     plan.scope = Scope::User;
     install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
     assert!(w.fake.firewall.borrow().is_empty());
+}
+
+const DRIVER: &str = "copy payload/drv -> {app}/drv\ndriver {app}/drv/x.inf\n  device Root\\X\n";
+
+#[test]
+fn drivers_and_their_devices_come_and_go() {
+    let w = World::new("win-driver");
+    fs::create_dir_all(w.dir.join("payload/drv")).unwrap();
+    fs::write(w.dir.join("payload/drv/x.inf"), b"[Version]").unwrap();
+    fs::write(w.dir.join("payload/drv/x.sys"), b"sys").unwrap();
+    let plan = w.plan_in(&format!("{MANIFEST}{DRIVER}"), Scope::Machine);
+    let receipt = install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    assert_eq!(w.fake.drivers.borrow().len(), 1);
+    assert_eq!(
+        w.fake.devices.borrow().values().collect::<Vec<_>>(),
+        [r"Root\X"]
+    );
+    assert!(
+        receipt
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::Driver { .. }))
+    );
+
+    // a repair finds both in place and keeps owning them.
+    let again = install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    assert_eq!(w.fake.devices.borrow().len(), 1);
+    assert!(
+        again
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::Device { .. }))
+    );
+    assert!(
+        again
+            .resources
+            .iter()
+            .any(|r| matches!(r, Resource::Driver { .. }))
+    );
+
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.drivers.borrow().is_empty());
+    assert!(w.fake.devices.borrow().is_empty());
+}
+
+#[test]
+fn a_driver_someone_else_added_stays() {
+    let w = World::new("driver-theirs");
+    fs::create_dir_all(w.dir.join("payload/drv")).unwrap();
+    fs::write(w.dir.join("payload/drv/x.inf"), b"[Version]").unwrap();
+    w.fake
+        .drivers
+        .borrow_mut()
+        .insert("oem3.inf".to_owned(), "[Version]".to_owned());
+    w.fake
+        .devices
+        .borrow_mut()
+        .insert(r"ROOT\X\0000".to_owned(), r"Root\X".to_owned());
+    let plan = w.plan_in(&format!("{MANIFEST}{DRIVER}"), Scope::Machine);
+    install(&plan, &w.fake, &w.store, &w.dir.join("kago.exe")).unwrap();
+    uninstall(&World::id(), &w.fake, &w.store).unwrap();
+    assert!(w.fake.drivers.borrow().contains_key("oem3.inf"));
+    assert_eq!(w.fake.devices.borrow().len(), 1);
+}
+
+#[test]
+fn a_failed_install_takes_its_driver_out() {
+    let w = World::new("driver-fail");
+    let fake = Fake {
+        fail_register: true,
+        ..Fake::new(w.dir.join("machine"))
+    };
+    fs::create_dir_all(w.dir.join("payload/drv")).unwrap();
+    fs::write(w.dir.join("payload/drv/x.inf"), b"[Version]").unwrap();
+    let plan = w.plan_in(&format!("{MANIFEST}{DRIVER}"), Scope::Machine);
+    assert!(install(&plan, &fake, &w.store, &w.dir.join("kago.exe")).is_err());
+    assert!(fake.drivers.borrow().is_empty(), "rolled back");
+    assert!(fake.devices.borrow().is_empty(), "rolled back");
 }
 
 #[test]
@@ -709,7 +839,7 @@ fn every_operation_is_observed_in_order() {
 
 /// the library's `steamvr`, with SteamVR's list in the sandbox instead of
 /// `%LOCALAPPDATA%`.
-const DRIVER_ACTION: &str = "action driver dir to={app}/steamvr/$dir.name
+const DRIVER_ACTION: &str = "action vr-driver dir to={app}/steamvr/$dir.name
   expect $dir/driver.vrdrivermanifest \"no driver manifest\"
   copy $dir -> $to
   json {config}/openvrpaths.vrpath
@@ -739,7 +869,7 @@ fn an_action_adds_a_driver_keeps_it_on_upgrade_and_takes_it_out() {
             ["external_drivers"]
             .clone()
     };
-    let manifest = format!("{MANIFEST}{DRIVER_ACTION}driver payload/driver/aira\n");
+    let manifest = format!("{MANIFEST}{DRIVER_ACTION}vr-driver payload/driver/aira\n");
     let driver = w
         .dir
         .join("machine")
@@ -777,7 +907,7 @@ fn a_missing_expected_file_is_refused_at_build() {
     fs::write(w.dir.join("payload/notadriver/x.dll"), b"dll").unwrap();
     let m = Manifest::parse(
         "Kagofile",
-        &format!("{MANIFEST}{DRIVER_ACTION}driver payload/notadriver\n"),
+        &format!("{MANIFEST}{DRIVER_ACTION}vr-driver payload/notadriver\n"),
     )
     .0
     .unwrap();

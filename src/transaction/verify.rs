@@ -64,6 +64,8 @@ pub fn verify(receipt: &Receipt) -> Verified {
             | Resource::UninstallHook { .. }
             | Resource::LoginItem { .. }
             | Resource::FirewallRule { .. }
+            | Resource::Driver { .. }
+            | Resource::Device { .. }
             | Resource::Service { .. }
             | Resource::Changed { .. }
             | Resource::SettingsFile { .. }

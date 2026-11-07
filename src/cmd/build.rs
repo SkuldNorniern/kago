@@ -214,16 +214,26 @@ fn presentation(loaded: &Loaded, target: Target) -> Result<Setup, String> {
 }
 
 /// signs unsigned `.exe` and `.dll` files of the package, as copies under
-/// `scratch`.
+/// `scratch`. files in a driver package's folder stay as they are: its
+/// catalog holds their hashes, and Microsoft signs the driver, not us.
 fn sign_programs(
     signer: &Signer,
     plan: &mut kago::install::InstallPlan,
     scratch: &Path,
 ) -> Result<(), String> {
     let name = plan.name.clone();
+    let drivers: Vec<_> = plan
+        .operations
+        .iter()
+        .filter_map(|op| match op {
+            kago::install::Operation::InstallDriver { inf, .. } => Some(inf.parent()),
+            _ => None,
+        })
+        .collect();
     for (i, op) in plan.operations.iter_mut().enumerate() {
         let kago::install::Operation::InstallFile {
             source,
+            target,
             size,
             sha256,
             ..
@@ -231,6 +241,21 @@ fn sign_programs(
         else {
             continue;
         };
+        let in_driver = drivers.iter().any(|dir| {
+            let mut at = target.parent();
+            loop {
+                if at == *dir {
+                    break true;
+                }
+                if at.relative().is_empty() {
+                    break false;
+                }
+                at = at.parent();
+            }
+        });
+        if in_driver {
+            continue;
+        }
         let program = source
             .extension()
             .and_then(|e| e.to_str())
